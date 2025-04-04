@@ -84,7 +84,7 @@ async function runToolUseChat(initialPrompt: string) {
         : provider === Provider.Google
         ? 'gemini-1.5-flash-latest' // Or gemini-1.5-pro-latest
         : provider === Provider.Groq
-        ? 'llama3-70b-8192' // Larger Groq models might be better
+        ? 'llama-3.3-70b-versatile' // or llama-3.3 from Groq
         : provider === Provider.OpenAI
         ? 'gpt-4o-mini' // Or gpt-4o
         : undefined)

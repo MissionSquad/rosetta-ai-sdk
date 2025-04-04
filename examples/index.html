@@ -1,0 +1,1400 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RosettaAI SDK - Backend API Examples</title>
+  <!-- Simple Styling -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+  <!-- Prism.js Syntax Highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css">
+  <style>
+    body {
+      padding: 2rem;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin-bottom: 1rem;
+    }
+
+    h2 {
+      margin-top: 2.5rem;
+      border-bottom: 1px solid var(--muted-border-color);
+      padding-bottom: 0.5rem;
+    }
+
+    h3 {
+      margin-top: 2rem;
+    }
+
+    pre {
+      background-color: #272822;
+      /* Okaidia background */
+      padding: 1em;
+      border-radius: 0.3em;
+      overflow-x: auto;
+      position: relative;
+      /* For copy button */
+    }
+
+    code[class*="language-"] {
+      font-size: 0.9em;
+    }
+
+    /* Style for the provider dropdown */
+    .provider-selector {
+      margin-bottom: 1rem;
+      max-width: 250px;
+    }
+
+    .code-block {
+      display: none;
+      margin-top: 1rem;
+    }
+
+    .code-block.active {
+      display: block;
+    }
+
+    .unsupported-notice {
+      font-style: italic;
+      color: var(--muted-color);
+      margin-top: 1rem;
+      background-color: var(--card-background-color);
+      border-left: 4px solid var(--muted-border-color);
+      padding: 1rem;
+      border-radius: 4px;
+    }
+
+    table {
+      width: 100%;
+    }
+
+    th {
+      text-align: center !important;
+    }
+
+    td {
+      text-align: center;
+    }
+
+    td:first-child {
+      text-align: left;
+    }
+
+    .note {
+      background-color: var(--card-background-color);
+      border-left: 4px solid var(--primary);
+      padding: 1rem;
+      margin: 1rem 0;
+      border-radius: 4px;
+    }
+
+    .warning {
+      background-color: var(--card-background-color);
+      border-left: 4px solid var(--warning);
+      padding: 1rem;
+      margin: 1rem 0;
+      border-radius: 4px;
+    }
+
+    .important-note {
+      background-color: var(--card-background-color);
+      border-left: 4px solid var(--danger);
+      padding: 1rem;
+      margin: 1.5rem 0;
+      border-radius: 4px;
+    }
+
+    .important-note strong {
+      color: var(--danger);
+    }
+
+    footer {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--muted-border-color);
+      color: var(--muted-color);
+      font-size: 0.9em;
+    }
+
+    /* Example Interaction Area */
+    .example-interaction {
+      border: 1px solid var(--muted-border-color);
+      padding: 1.5rem;
+      margin-top: 1rem;
+      border-radius: 4px;
+      background-color: var(--card-background-color);
+    }
+
+    .example-interaction textarea {
+      min-height: 100px;
+      margin-bottom: 1rem;
+    }
+
+    .example-interaction button {
+      margin-right: 0.5rem;
+    }
+
+    .example-output {
+      margin-top: 1rem;
+      background-color: var(--code-background-color);
+      border: 1px solid var(--code-border-color);
+      padding: 1rem;
+      border-radius: 4px;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      /* Wrap long lines */
+      word-wrap: break-word;
+      /* Break long words */
+      font-family: var(--font-monospace);
+      font-size: 0.9em;
+    }
+
+    .example-output.error {
+      color: var(--danger);
+      border-color: var(--danger);
+    }
+
+    .example-output.streaming {
+      min-height: 100px;
+      /* Ensure space for streaming content */
+    }
+
+    /* Copy Button */
+    .copy-button {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: var(--code-background-color);
+      color: var(--primary);
+      border: 1px solid var(--primary);
+      padding: 5px 10px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 0.8em;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+    }
+
+    .copy-button:hover {
+      opacity: 1;
+    }
+
+    .copy-button.copied {
+      color: var(--success);
+      border-color: var(--success);
+    }
+
+    /* Loading Indicator */
+    .loader {
+      display: none;
+      /* Hidden by default */
+      margin-left: 10px;
+      border: 4px solid var(--muted-border-color);
+      border-top: 4px solid var(--primary);
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* File input styling */
+    input[type="file"] {
+      margin-top: 0.5rem;
+    }
+
+    /* Audio player styling */
+    audio {
+      margin-top: 1rem;
+      width: 100%;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>RosettaAI SDK - Backend API Examples</h1>
+    <p>Interact with the RosettaAI SDK via a simple backend API server.</p>
+    <nav>
+      <!-- TODO: Replace placeholders -->
+      <a href="#placeholder-github-link" target="_blank" rel="noopener">GitHub</a> |
+      <a href="#placeholder-npm-link" target="_blank" rel="noopener">npm</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="setup">
+      <h2>Setup</h2>
+      <p>This page interacts with a backend API server (`server/server.ts`) that uses the RosettaAI SDK. To run these
+        examples:</p>
+      <ol>
+        <li><strong>Clone & Install:</strong> Clone the SDK repository and run `npm install`.</li>
+        <li><strong>Configure Backend:</strong>
+          <ul>
+            <li>Copy `examples/.env.example` to `examples/.env`. (Note: Server now loads from `examples/.env`)</li>
+            <li>Fill in the required API keys in `examples/.env` for the providers you want to test.</li>
+          </ul>
+        </li>
+        <li><strong>Run Backend Server:</strong> Open a terminal in the project root and run:
+          <pre><code class="language-bash">npm run dev:server</code></pre>
+          This will start the backend server (usually on port 3001).
+        </li>
+        <li><strong>Open This Page:</strong> Access this `index.html` file in your browser via the server at
+          `http://localhost:3001/` (or your configured host).</li>
+        <li><strong>Interact:</strong> Use the forms below to send requests to your running backend server.</li>
+      </ol>
+      <div class="note">
+        <strong>Note:</strong> The backend server handles the secure storage and usage of API keys. This frontend page
+        only sends requests to your local backend API.
+      </div>
+    </section>
+
+    <section id="overview">
+      <h2>Overview & Features</h2>
+      <p><strong>RosettaAI</strong> simplifies working with various Large Language Models (LLMs) like OpenAI (including
+        Azure), Anthropic, Google Generative AI, and Groq. It offers a consistent TypeScript interface for common AI
+        tasks, allowing you to switch providers with minimal code changes. Built for Node.js v20+ and TypeScript v5.5+,
+        it prioritizes type safety, robustness, and modern development practices.</p>
+
+      <h3>Supported Features Matrix</h3>
+      <div class="overflow-auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>OpenAI (Azure)</th>
+              <th>Anthropic</th>
+              <th>Google</th>
+              <th>Groq</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Chat (Generate)</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td>Chat (Stream)</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td>Image Input</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>⚠️</td>
+              <td>Groq support varies by model</td>
+            </tr>
+            <tr>
+              <td>Tool Use</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>Backend handles initial call</td>
+            </tr>
+            <tr>
+              <td>Embeddings</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>✅</td>
+              <td>✅</td>
+              <td>Anthropic has no public embedding API</td>
+            </tr>
+            <tr>
+              <td>JSON Mode</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>⚠️</td>
+              <td>⚠️</td>
+              <td>OpenAI/Azure best; others via prompt</td>
+            </tr>
+            <tr>
+              <td>Grounding/Citations</td>
+              <td>❌</td>
+              <td>❌</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>Via Google Search tool</td>
+            </tr>
+            <tr>
+              <td>Thinking Steps</td>
+              <td>❌</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>❌</td>
+              <td>Anthropic specific</td>
+            </tr>
+            <tr>
+              <td>TTS</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>❌</td>
+              <td>❌</td>
+              <td>Via OpenAI/Azure Audio API</td>
+            </tr>
+            <tr>
+              <td>STT</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>⚠️</td>
+              <td>✅</td>
+              <td>Google requires separate Speech client</td>
+            </tr>
+            <tr>
+              <td>STT (Translate)</td>
+              <td>✅</td>
+              <td>❌</td>
+              <td>❌</td>
+              <td>✅</td>
+              <td>To English</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="6">✅ = Supported | ⚠️ = Partial/Limited/Via Prompting | ❌ = Not Supported</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+
+    <section id="examples">
+      <h2>Interactive Examples</h2>
+      <p>Select a feature, choose a configured provider, fill in the parameters, and click "Run" to send the request to
+        your backend API.</p>
+
+      <!-- Configured Providers Display -->
+      <article>
+        <h3>Available Providers</h3>
+        <p>Your backend server has successfully configured the following providers:</p>
+        <div id="configured-providers" class="example-output">Loading...</div>
+      </article>
+
+      <!-- Example: Basic Chat -->
+      <article id="example-generate">
+        <h3>Basic Chat (`/api/generate`)</h3>
+        <div class="example-interaction">
+          <label for="provider-generate">Provider:</label>
+          <select id="provider-generate" name="provider"></select>
+          <label for="model-generate">Model (optional, uses backend default):</label>
+          <input type="text" id="model-generate" name="model" placeholder="e.g., gpt-4o-mini">
+          <label for="system-prompt-generate">System Prompt:</label>
+          <textarea id="system-prompt-generate" name="systemPrompt">You are a helpful assistant.</textarea>
+          <label for="user-prompt-generate">User Prompt:</label>
+          <textarea id="user-prompt-generate" name="userPrompt">What is the capital of France?</textarea>
+          <label for="max-tokens-generate">Max Tokens:</label>
+          <input type="number" id="max-tokens-generate" name="maxTokens" value="100">
+          <button id="run-generate">Run Generate</button>
+          <div class="loader" id="loader-generate"></div>
+          <h4>Output:</h4>
+          <div class="example-output" id="output-generate"></div>
+        </div>
+        <h4>API Request Snippet (using axios):</h4>
+        <pre><code class="language-javascript" id="code-generate">// Frontend JS using axios
+const provider = document.getElementById('provider-generate').value;
+const model = document.getElementById('model-generate').value || undefined;
+const systemPrompt = document.getElementById('system-prompt-generate').value;
+const userPrompt = document.getElementById('user-prompt-generate').value;
+const maxTokens = parseInt(document.getElementById('max-tokens-generate').value);
+
+const messages = [
+  { role: 'system', content: systemPrompt },
+  { role: 'user', content: userPrompt }
+];
+
+axios.post('/api/generate', {
+  provider,
+  model,
+  messages,
+  maxTokens
+})
+.then(response => {
+  console.log(response.data);
+  // Display response.data in the output area
+})
+.catch(error => {
+  console.error(error.response?.data || error.message);
+  // Display error in the output area
+});</code><button class="copy-button" data-code-id="code-generate">Copy</button></pre>
+      </article>
+
+      <!-- Example: Streaming Chat -->
+      <article id="example-stream">
+        <h3>Streaming Chat (`/api/stream` via SSE)</h3>
+        <div class="example-interaction">
+          <label for="provider-stream">Provider:</label>
+          <select id="provider-stream" name="provider"></select>
+          <label for="model-stream">Model (optional, uses backend default):</label>
+          <input type="text" id="model-stream" name="model" placeholder="e.g., llama3-8b-8192">
+          <label for="user-prompt-stream">User Prompt:</label>
+          <textarea id="user-prompt-stream"
+            name="userPrompt">Write a short story about a robot learning to paint.</textarea>
+          <label for="max-tokens-stream">Max Tokens:</label>
+          <input type="number" id="max-tokens-stream" name="maxTokens" value="150">
+          <button id="run-stream">Run Stream</button>
+          <button id="stop-stream" disabled>Stop Stream</button>
+          <div class="loader" id="loader-stream"></div>
+          <h4>Output Stream:</h4>
+          <div class="example-output streaming" id="output-stream"></div>
+        </div>
+        <h4>API Interaction Snippet (using EventSource):</h4>
+        <pre><code class="language-javascript" id="code-stream">// Frontend JS using EventSource (after initiating with POST)
+// NOTE: Native EventSource doesn't support POST.
+// This snippet shows handling events *after* connection is established.
+// A real implementation needs fetch() or a library to handle POST initiation.
+
+let eventSource = null; // Assume this is created after a POST request
+
+function startStreaming(params) {
+  // 1. Make a POST request to /api/stream with params (using fetch or axios)
+  //    This request tells the server to start the process.
+  //    The server keeps the connection open and starts sending SSE.
+  //    (Implementation details omitted for brevity - requires handling fetch response stream)
+
+  // --- Simplified EventSource Example (Assumes GET or separate initiation) ---
+  // const queryString = new URLSearchParams(params).toString(); // Needs careful encoding
+  // eventSource = new EventSource(`/api/stream?${queryString}`); // If using GET
+
+  // --- Placeholder for POST initiation + EventSource/fetch stream handling ---
+  console.log("Initiating stream with POST (implementation details complex)...");
+  // Assume eventSource is connected after successful POST initiation
+
+  if (eventSource) {
+      eventSource.onopen = () => {
+        console.log('SSE Connection Opened');
+        // Update UI, enable stop button
+      };
+
+      eventSource.addEventListener('message', (event) => {
+        const chunk = JSON.parse(event.data);
+        // Process different chunk types (content_delta, tool_call_*, etc.)
+        console.log('SSE Chunk:', chunk);
+        // Append chunk.data.delta to output area, handle other types
+      });
+
+       eventSource.addEventListener('error', (event) => {
+        console.error('SSE Error:', event);
+        // Display error, close connection
+        eventSource.close();
+      });
+
+       eventSource.addEventListener('end', (event) => {
+        console.log('SSE Stream Ended by Server');
+        eventSource.close();
+        // Update UI
+      });
+  }
+}
+
+function stopStreaming() {
+  if (eventSource) {
+    eventSource.close();
+    console.log('SSE Connection Closed by Client');
+    // Update UI
+  }
+}</code><button class="copy-button" data-code-id="code-stream">Copy</button></pre>
+      </article>
+
+      <!-- Example: Image Input -->
+      <article id="example-image-input">
+        <h3>Image Input (`/api/generate-with-image`)</h3>
+        <div class="example-interaction">
+          <label for="provider-image">Provider:</label>
+          <select id="provider-image" name="provider"></select>
+          <label for="model-image">Model (optional, uses backend default):</label>
+          <input type="text" id="model-image" name="model" placeholder="e.g., gpt-4o-mini">
+          <label for="prompt-image">Text Prompt:</label>
+          <textarea id="prompt-image" name="textPrompt">Describe this image.</textarea>
+          <label for="file-image">Image File:</label>
+          <input type="file" id="file-image" name="image" accept="image/png, image/jpeg, image/gif, image/webp">
+          <label for="max-tokens-image">Max Tokens:</label>
+          <input type="number" id="max-tokens-image" name="maxTokens" value="150">
+          <button id="run-image">Run Image Input</button>
+          <div class="loader" id="loader-image"></div>
+          <h4>Output:</h4>
+          <div class="example-output" id="output-image"></div>
+        </div>
+        <h4>API Request Snippet (using axios & FormData):</h4>
+        <pre><code class="language-javascript" id="code-image">// Frontend JS using axios
+const provider = document.getElementById('provider-image').value;
+const model = document.getElementById('model-image').value || undefined;
+const textPrompt = document.getElementById('prompt-image').value;
+const imageFile = document.getElementById('file-image').files[0];
+const maxTokens = parseInt(document.getElementById('max-tokens-image').value);
+
+if (!imageFile) {
+  alert('Please select an image file.');
+  return;
+}
+
+const formData = new FormData();
+formData.append('provider', provider);
+if (model) formData.append('model', model);
+formData.append('textPrompt', textPrompt);
+formData.append('maxTokens', maxTokens.toString());
+formData.append('image', imageFile, imageFile.name); // Add file with filename
+
+axios.post('/api/generate-with-image', formData, {
+  headers: {
+    'Content-Type': 'multipart/form-data' // Important for file uploads
+  }
+})
+.then(response => {
+  console.log(response.data);
+  // Display response.data (GenerateResult)
+})
+.catch(error => {
+  console.error(error.response?.data || error.message);
+  // Display error
+});</code><button class="copy-button" data-code-id="code-image">Copy</button></pre>
+      </article>
+
+      <!-- Example: Embeddings -->
+      <article id="example-embed">
+        <h3>Embeddings (`/api/embed`)</h3>
+        <div class="example-interaction">
+          <label for="provider-embed">Provider:</label>
+          <select id="provider-embed" name="provider"></select>
+          <label for="model-embed">Model (optional, uses backend default):</label>
+          <input type="text" id="model-embed" name="model" placeholder="e.g., text-embedding-3-small">
+          <label for="input-embed">Input Text (one per line for batch):</label>
+          <textarea id="input-embed"
+            name="input">RosettaAI simplifies LLM interactions.\nTypeScript adds static typing.</textarea>
+          <button id="run-embed">Run Embed</button>
+          <div class="loader" id="loader-embed"></div>
+          <h4>Output:</h4>
+          <div class="example-output" id="output-embed"></div>
+        </div>
+        <h4>API Request Snippet (using axios):</h4>
+        <pre><code class="language-javascript" id="code-embed">// Frontend JS using axios
+const provider = document.getElementById('provider-embed').value;
+const model = document.getElementById('model-embed').value || undefined;
+const inputText = document.getElementById('input-embed').value;
+// Split by newline for potential batching
+const input = inputText.includes('\n') ? inputText.split('\n').filter(t => t.trim()) : inputText;
+
+
+axios.post('/api/embed', {
+  provider,
+  model,
+  input
+})
+.then(response => {
+  console.log(response.data);
+  // Display response.data (embeddings, usage)
+})
+.catch(error => {
+  console.error(error.response?.data || error.message);
+  // Display error
+});</code><button class="copy-button" data-code-id="code-embed">Copy</button></pre>
+      </article>
+
+      <!-- Example: TTS -->
+      <article id="example-tts">
+        <h3>Text-to-Speech (`/api/tts`)</h3>
+        <div class="example-interaction">
+          <label for="provider-tts">Provider:</label>
+          <select id="provider-tts" name="provider" disabled>
+            <option value="openai" selected>OpenAI / Azure</option>
+            <!-- Add other providers if supported by backend -->
+          </select>
+          <label for="model-tts">Model (optional, uses backend default):</label>
+          <input type="text" id="model-tts" name="model" placeholder="e.g., tts-1">
+          <label for="input-tts">Input Text:</label>
+          <textarea id="input-tts" name="input">Hello from the RosettaAI SDK!</textarea>
+          <label for="voice-tts">Voice:</label>
+          <select id="voice-tts" name="voice">
+            <option value="alloy" selected>Alloy</option>
+            <option value="echo">Echo</option>
+            <option value="fable">Fable</option>
+            <option value="onyx">Onyx</option>
+            <option value="nova">Nova</option>
+            <option value="shimmer">Shimmer</option>
+          </select>
+          <label for="format-tts">Response Format:</label>
+          <select id="format-tts" name="responseFormat">
+            <option value="mp3" selected>MP3</option>
+            <option value="opus">Opus</option>
+            <option value="aac">AAC</option>
+            <option value="flac">FLAC</option>
+          </select>
+          <button id="run-tts">Run TTS</button>
+          <div class="loader" id="loader-tts"></div>
+          <h4>Output:</h4>
+          <div id="output-tts">
+            <audio id="audio-player-tts" controls></audio>
+            <div class="example-output error" id="error-output-tts" style="display: none;"></div>
+          </div>
+        </div>
+        <h4>API Request Snippet (using axios):</h4>
+        <pre><code class="language-javascript" id="code-tts">// Frontend JS using axios
+const provider = document.getElementById('provider-tts').value; // Should be 'openai'
+const model = document.getElementById('model-tts').value || undefined;
+const input = document.getElementById('input-tts').value;
+const voice = document.getElementById('voice-tts').value;
+const responseFormat = document.getElementById('format-tts').value;
+
+axios.post('/api/tts', {
+  provider,
+  model,
+  input,
+  voice,
+  responseFormat
+}, {
+  responseType: 'blob' // Important: expect binary data
+})
+.then(response => {
+  const audioBlob = response.data;
+  const audioUrl = URL.createObjectURL(audioBlob);
+  const audioPlayer = document.getElementById('audio-player-tts');
+  audioPlayer.src = audioUrl;
+  audioPlayer.play();
+  // Display success message
+})
+.catch(error => {
+  console.error(error.response?.data || error.message);
+   // Display error (need to handle potential blob error response)
+   const reader = new FileReader();
+   reader.onload = () => {
+     try {
+       const errorJson = JSON.parse(reader.result);
+       // Display errorJson.error
+     } catch {
+       // Display generic error
+     }
+   };
+   reader.onerror = () => { // Display generic error };
+   if (error.response?.data instanceof Blob) {
+        reader.readAsText(error.response.data);
+   } else {
+        // Display error.message or generic error
+   }
+});</code><button class="copy-button" data-code-id="code-tts">Copy</button></pre>
+      </article>
+
+      <!-- Example: STT -->
+      <article id="example-stt">
+        <h3>Speech-to-Text (`/api/transcribe`)</h3>
+        <div class="example-interaction">
+          <label for="provider-stt">Provider:</label>
+          <select id="provider-stt" name="provider"></select>
+          <label for="model-stt">Model (optional, uses backend default):</label>
+          <input type="text" id="model-stt" name="model" placeholder="e.g., whisper-1">
+          <label for="audio-stt">Audio File:</label>
+          <input type="file" id="audio-stt" name="audio" accept="audio/*">
+          <label for="language-stt">Language (optional hint, ISO-639-1):</label>
+          <input type="text" id="language-stt" name="language" placeholder="e.g., en">
+          <button id="run-stt">Run Transcription</button>
+          <div class="loader" id="loader-stt"></div>
+          <h4>Output:</h4>
+          <div class="example-output" id="output-stt"></div>
+        </div>
+        <h4>API Request Snippet (using axios & FormData):</h4>
+        <pre><code class="language-javascript" id="code-stt">// Frontend JS using axios
+const provider = document.getElementById('provider-stt').value;
+const model = document.getElementById('model-stt').value || undefined;
+const language = document.getElementById('language-stt').value || undefined;
+const audioFile = document.getElementById('audio-stt').files[0];
+
+if (!audioFile) {
+  alert('Please select an audio file.');
+  return;
+}
+
+const formData = new FormData();
+formData.append('provider', provider);
+if (model) formData.append('model', model);
+if (language) formData.append('language', language);
+formData.append('audio', audioFile, audioFile.name); // Add file with filename
+
+axios.post('/api/transcribe', formData, {
+  headers: {
+    'Content-Type': 'multipart/form-data'
+  }
+})
+.then(response => {
+  console.log(response.data);
+  // Display response.data.text and other fields
+})
+.catch(error => {
+  console.error(error.response?.data || error.message);
+  // Display error
+});</code><button class="copy-button" data-code-id="code-stt">Copy</button></pre>
+      </article>
+
+      <!-- Example: Translate -->
+      <article id="example-translate">
+        <h3>Audio Translation (`/api/translate`)</h3>
+        <div class="example-interaction">
+          <label for="provider-translate">Provider:</label>
+          <select id="provider-translate" name="provider"></select>
+          <label for="model-translate">Model (optional, uses backend default):</label>
+          <input type="text" id="model-translate" name="model" placeholder="e.g., whisper-1">
+          <label for="audio-translate">Audio File:</label>
+          <input type="file" id="audio-translate" name="audio" accept="audio/*">
+          <button id="run-translate">Run Translation</button>
+          <div class="loader" id="loader-translate"></div>
+          <h4>Output:</h4>
+          <div class="example-output" id="output-translate"></div>
+        </div>
+        <h4>API Request Snippet (using axios & FormData):</h4>
+        <pre><code class="language-javascript" id="code-translate">// Frontend JS using axios
+const provider = document.getElementById('provider-translate').value;
+const model = document.getElementById('model-translate').value || undefined;
+const audioFile = document.getElementById('audio-translate').files[0];
+
+if (!audioFile) {
+  alert('Please select an audio file.');
+  return;
+}
+
+const formData = new FormData();
+formData.append('provider', provider);
+if (model) formData.append('model', model);
+formData.append('audio', audioFile, audioFile.name);
+
+axios.post('/api/translate', formData, {
+  headers: {
+    'Content-Type': 'multipart/form-data'
+  }
+})
+.then(response => {
+  console.log(response.data);
+  // Display response.data.text
+})
+.catch(error => {
+  console.error(error.response?.data || error.message);
+  // Display error
+});</code><button class="copy-button" data-code-id="code-translate">Copy</button></pre>
+      </article>
+
+    </section>
+
+  </main>
+
+  <footer>
+    <small>RosettaAI SDK | Licensed under MIT</small>
+  </footer>
+
+  <!-- Axios -->
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <!-- Prism.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+  <!-- Custom JS for Examples -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+
+      // --- Configuration ---
+      const API_BASE_URL = ''; // Use relative path for same origin
+      let configuredProviders = [];
+      let streamEventSource = null; // For managing SSE connection
+
+      // --- Helper Functions ---
+      function showLoader(loaderId) {
+        const loader = document.getElementById(loaderId);
+        if (loader) {
+          loader.style.display = 'inline-block';
+        }
+      }
+
+      function hideLoader(loaderId) {
+        const loader = document.getElementById(loaderId);
+        if (loader) {
+          loader.style.display = 'none';
+        }
+      }
+
+      function displayOutput(outputId, data, isError = false) {
+        const outputElement = document.getElementById(outputId);
+        // --- FIX: Add null check ---
+        if (!outputElement) {
+          console.error(`displayOutput: Element with ID '${outputId}' not found.`);
+          return;
+        }
+        outputElement.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        outputElement.classList.toggle('error', isError);
+        outputElement.style.display = 'block'; // Ensure visible
+
+        // Reset audio player if it's not the TTS output
+        if (outputId !== 'output-tts') {
+          const audioPlayer = document.getElementById('audio-player-tts');
+          // if (audioPlayer) audioPlayer.src = '';
+          const errorOutputTts = document.getElementById('error-output-tts');
+          if (errorOutputTts) errorOutputTts.style.display = 'none';
+        }
+      }
+
+      function displayTtsError(message) {
+        const errorOutputElement = document.getElementById('error-output-tts');
+        const audioPlayer = document.getElementById('audio-player-tts');
+        // --- FIX: Add null checks ---
+        if (!errorOutputElement) {
+          console.error("displayTtsError: Element with ID 'error-output-tts' not found.");
+          // Optionally display error elsewhere or alert user
+          // alert(`TTS Error: ${message}`);
+          return; // Exit if error element is missing
+        }
+        errorOutputElement.textContent = message;
+        errorOutputElement.style.display = 'block';
+
+        if (!audioPlayer) {
+          console.error("displayTtsError: Element with ID 'audio-player-tts' not found.");
+        } else {
+          // audioPlayer.src = ''; // Clear player on error
+        }
+      }
+
+
+      function appendStreamOutput(outputId, text) {
+        const outputElement = document.getElementById(outputId);
+        // --- FIX: Add null check ---
+        if (!outputElement) {
+          console.error(`appendStreamOutput: Element with ID '${outputId}' not found.`);
+          return;
+        }
+        outputElement.textContent += text;
+        outputElement.scrollTop = outputElement.scrollHeight; // Scroll to bottom
+        outputElement.classList.remove('error');
+        outputElement.style.display = 'block';
+      }
+
+      function clearOutput(outputId) {
+        const outputElement = document.getElementById(outputId);
+        // --- FIX: Add null check ---
+        if (!outputElement) {
+          console.error(`clearOutput: Element with ID '${outputId}' not found.`);
+          return;
+        }
+
+        outputElement.classList.remove('error');
+
+        // Reset audio player if clearing TTS output
+        if (outputId === 'output-tts') {
+          const audioPlayer = document.getElementById('audio-player-tts');
+          const errorOutputTts = document.getElementById('error-output-tts');
+
+          if (!audioPlayer) {
+            console.error("clearOutput: Element with ID 'audio-player-tts' not found.");
+          } else {
+
+          }
+
+          // --- FIX: Add null check ---
+          if (!errorOutputTts) {
+            console.error("clearOutput: Element with ID 'error-output-tts' not found.");
+          } else {
+            errorOutputTts.style.display = 'none';
+
+          }
+        }
+      }
+
+
+      function populateProviderDropdowns(selectIds) {
+        const imageProviders = ['openai', 'anthropic', 'google']; // Providers supporting image input
+        const embedProviders = ['openai', 'google', 'groq']; // Providers supporting embeddings
+        const sttProviders = ['openai', 'groq']; // Providers supporting STT/Translate
+
+        selectIds.forEach(id => {
+          const select = document.getElementById(id);
+          if (!select) {
+            console.warn(`populateProviderDropdowns: Select element with ID '${id}' not found.`);
+            return;
+          }
+          // Clear existing options except for placeholders if any
+          select.innerHTML = '';
+
+          let providersToShow = configuredProviders;
+
+          // Special filtering based on dropdown ID
+          if (id === 'provider-image') {
+            providersToShow = configuredProviders.filter(p => imageProviders.includes(p));
+          } else if (id === 'provider-embed') {
+            providersToShow = configuredProviders.filter(p => embedProviders.includes(p));
+          } else if (id === 'provider-stt' || id === 'provider-translate') {
+            providersToShow = configuredProviders.filter(p => sttProviders.includes(p));
+          } else if (id === 'provider-tts') {
+            // TTS is handled separately below
+            providersToShow = [];
+          }
+
+          // Add options based on filtered providers
+          providersToShow.forEach(provider => {
+            const option = document.createElement('option');
+            option.value = provider;
+            option.textContent = provider.charAt(0).toUpperCase() + provider.slice(1);
+            select.appendChild(option);
+          });
+
+          // Special handling for TTS (only OpenAI for now)
+          if (id === 'provider-tts') {
+            select.innerHTML = '<option value="openai" selected>OpenAI / Azure</option>';
+            select.disabled = !configuredProviders.includes('openai');
+          }
+
+          // Disable dropdown if no providers are available for it
+          if (providersToShow.length === 0 && id !== 'provider-tts') {
+            select.disabled = true;
+            const option = document.createElement('option');
+            option.textContent = 'No supported providers configured';
+            select.appendChild(option);
+          } else {
+            select.disabled = false;
+          }
+        });
+      }
+
+      // --- Fetch Configured Providers ---
+      async function fetchConfig() {
+        const outputElement = document.getElementById('configured-providers');
+        // --- FIX: Add null check ---
+        if (!outputElement) {
+          console.error("fetchConfig: Element with ID 'configured-providers' not found.");
+          return;
+        }
+        try {
+          const response = await axios.get(`${API_BASE_URL}/api/config`);
+          configuredProviders = response.data;
+          if (configuredProviders.length === 0) {
+            outputElement.textContent = 'No providers configured on the backend. Please check examples/.env and restart the server.';
+            outputElement.classList.add('error');
+          } else {
+            outputElement.textContent = configuredProviders.join(', ');
+            outputElement.classList.remove('error');
+            populateProviderDropdowns([
+              'provider-generate',
+              'provider-stream',
+              'provider-image', // Add new dropdown ID
+              'provider-embed',
+              'provider-tts', // Will be handled specially
+              'provider-stt',
+              'provider-translate'
+            ]);
+          }
+        } catch (error) {
+          console.error('Failed to fetch config:', error);
+          outputElement.textContent = `Error fetching configuration: ${error.response?.data?.error || error.message}`;
+          outputElement.classList.add('error');
+        }
+      }
+
+      // --- Event Listeners ---
+      // document.addEventListener('DOMContentLoaded', () => {
+        fetchConfig(); // Fetch config on load
+
+        // Generate Button
+        document.getElementById('run-generate')?.addEventListener('click', async () => {
+          const loaderId = 'loader-generate';
+          const outputId = 'output-generate';
+          clearOutput(outputId);
+          showLoader(loaderId);
+          try {
+            // Use optional chaining ?. for potentially null elements
+            const provider = document.getElementById('provider-generate')?.value;
+            const model = document.getElementById('model-generate')?.value || undefined;
+            const systemPrompt = document.getElementById('system-prompt-generate')?.value;
+            const userPrompt = document.getElementById('user-prompt-generate')?.value;
+            const maxTokens = parseInt(document.getElementById('max-tokens-generate')?.value);
+
+            const messages = [];
+            if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+            if (userPrompt) messages.push({ role: 'user', content: userPrompt });
+
+            if (!provider || messages.length === 0) {
+              throw new Error("Provider and at least one prompt are required.");
+            }
+
+            const response = await axios.post(`${API_BASE_URL}/api/generate`, {
+              provider, model, messages, maxTokens
+            });
+            displayOutput(outputId, response.data);
+          } catch (error) {
+            displayOutput(outputId, error.response?.data || { error: error.message }, true);
+          } finally {
+            hideLoader(loaderId);
+          }
+        });
+
+        // Image Input Button
+        document.getElementById('run-image')?.addEventListener('click', async () => {
+          const loaderId = 'loader-image';
+          const outputId = 'output-image';
+          clearOutput(outputId);
+          showLoader(loaderId);
+          try {
+            const provider = document.getElementById('provider-image')?.value;
+            const model = document.getElementById('model-image')?.value || undefined;
+            const textPrompt = document.getElementById('prompt-image')?.value;
+            const imageFile = document.getElementById('file-image')?.files?.[0];
+            const maxTokens = parseInt(document.getElementById('max-tokens-image')?.value);
+
+            if (!provider) throw new Error("Provider is required.");
+            if (!textPrompt) throw new Error("Text prompt is required.");
+            if (!imageFile) throw new Error('Please select an image file.');
+
+            const formData = new FormData();
+            formData.append('provider', provider);
+            if (model) formData.append('model', model);
+            formData.append('textPrompt', textPrompt);
+            formData.append('maxTokens', maxTokens.toString());
+            formData.append('image', imageFile, imageFile.name);
+
+            const response = await axios.post(`${API_BASE_URL}/api/generate-with-image`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            displayOutput(outputId, response.data);
+          } catch (error) {
+            displayOutput(outputId, error.response?.data || { error: error.message }, true);
+          } finally {
+            hideLoader(loaderId);
+          }
+        });
+
+
+        // Embed Button
+        document.getElementById('run-embed')?.addEventListener('click', async () => {
+          const loaderId = 'loader-embed';
+          const outputId = 'output-embed';
+          clearOutput(outputId);
+          showLoader(loaderId);
+          try {
+            const provider = document.getElementById('provider-embed')?.value;
+            const model = document.getElementById('model-embed')?.value || undefined;
+            const inputText = document.getElementById('input-embed')?.value;
+            const input = inputText.includes('\n') ? inputText.split('\n').filter(t => t.trim()) : inputText;
+
+            if (!provider || !input || (Array.isArray(input) && input.length === 0)) {
+              throw new Error("Provider and Input Text are required.");
+            }
+
+            const response = await axios.post(`${API_BASE_URL}/api/embed`, {
+              provider, model, input
+            });
+            displayOutput(outputId, response.data);
+          } catch (error) {
+            displayOutput(outputId, error.response?.data || { error: error.message }, true);
+          } finally {
+            hideLoader(loaderId);
+          }
+        });
+
+        // TTS Button
+        document.getElementById('run-tts')?.addEventListener('click', async () => {
+          const loaderId = 'loader-tts';
+          const outputId = 'output-tts'; // Container ID
+          const errorOutputId = 'error-output-tts';
+          const audioPlayer = document.getElementById('audio-player-tts');
+
+          clearOutput(outputId); // Clears player src and hides error div
+          showLoader(loaderId);
+          try {
+            const provider = document.getElementById('provider-tts')?.value; // Should be openai
+            const model = document.getElementById('model-tts')?.value || undefined;
+            const input = document.getElementById('input-tts')?.value;
+            const voice = document.getElementById('voice-tts')?.value;
+            const responseFormat = document.getElementById('format-tts')?.value;
+
+            if (!input || !voice) {
+              throw new Error("Input Text and Voice are required.");
+            }
+
+            const response = await axios.post(`${API_BASE_URL}/api/tts`, {
+              provider, model, input, voice, responseFormat
+            }, { responseType: 'blob' });
+
+            const audioBlob = response.data;
+            const audioUrl = URL.createObjectURL(audioBlob);
+            if (audioPlayer) {
+              audioPlayer.src = audioUrl;
+              // No need to call play() automatically, let user control
+            } else {
+              console.error("Audio player element not found.");
+            }
+            const errorOutputElement = document.getElementById(errorOutputId);
+            if (errorOutputElement) errorOutputElement.style.display = 'none'; // Hide error div on success
+
+          } catch (error) {
+            console.error("TTS Error Raw:", error);
+            // Attempt to parse error from blob if possible
+            if (error.response?.data instanceof Blob && error.response.data.type === 'application/json') {
+              const reader = new FileReader();
+              reader.onload = () => {
+                try {
+                  const errorJson = JSON.parse(reader.result);
+                  displayTtsError(`Error: ${errorJson.error || 'Unknown TTS error'}`);
+                } catch {
+                  displayTtsError('Failed to parse TTS error response.');
+                }
+              };
+              reader.onerror = () => { displayTtsError('Failed to read TTS error response.'); };
+              reader.readAsText(error.response.data);
+            } else {
+              displayTtsError(error.response?.data?.error || error.message || 'Unknown TTS error');
+            }
+          } finally {
+            hideLoader(loaderId);
+          }
+        });
+
+        // STT Button
+        document.getElementById('run-stt')?.addEventListener('click', async () => {
+          const loaderId = 'loader-stt';
+          const outputId = 'output-stt';
+          clearOutput(outputId);
+          showLoader(loaderId);
+          try {
+            const provider = document.getElementById('provider-stt')?.value;
+            const model = document.getElementById('model-stt')?.value || undefined;
+            const language = document.getElementById('language-stt')?.value || undefined;
+            const audioFile = document.getElementById('audio-stt')?.files?.[0];
+
+            if (!provider) throw new Error("Provider is required.");
+            if (!audioFile) throw new Error('Please select an audio file.');
+
+            const formData = new FormData();
+            formData.append('provider', provider);
+            if (model) formData.append('model', model);
+            if (language) formData.append('language', language);
+            formData.append('audio', audioFile, audioFile.name);
+
+            const response = await axios.post(`${API_BASE_URL}/api/transcribe`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            displayOutput(outputId, response.data);
+          } catch (error) {
+            displayOutput(outputId, error.response?.data || { error: error.message }, true);
+          } finally {
+            hideLoader(loaderId);
+          }
+        });
+
+        // Translate Button
+        document.getElementById('run-translate')?.addEventListener('click', async () => {
+          const loaderId = 'loader-translate';
+          const outputId = 'output-translate';
+          clearOutput(outputId);
+          showLoader(loaderId);
+          try {
+            const provider = document.getElementById('provider-translate')?.value;
+            const model = document.getElementById('model-translate')?.value || undefined;
+            const audioFile = document.getElementById('audio-translate')?.files?.[0];
+
+            if (!provider) throw new Error("Provider is required.");
+            if (!audioFile) throw new Error('Please select an audio file.');
+
+            const formData = new FormData();
+            formData.append('provider', provider);
+            if (model) formData.append('model', model);
+            formData.append('audio', audioFile, audioFile.name);
+
+            const response = await axios.post(`${API_BASE_URL}/api/translate`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            displayOutput(outputId, response.data);
+          } catch (error) {
+            displayOutput(outputId, error.response?.data || { error: error.message }, true);
+          } finally {
+            hideLoader(loaderId);
+          }
+        });
+
+        // --- Streaming Logic ---
+        const runStreamButton = document.getElementById('run-stream');
+        const stopStreamButton = document.getElementById('stop-stream');
+        const streamOutput = document.getElementById('output-stream');
+        const streamLoader = document.getElementById('loader-stream');
+
+        runStreamButton?.addEventListener('click', async () => {
+          if (streamEventSource) {
+            streamEventSource.close(); // Close previous connection if any
+          }
+          clearOutput('output-stream');
+          showLoader('loader-stream');
+          if (runStreamButton) runStreamButton.disabled = true;
+          if (stopStreamButton) stopStreamButton.disabled = false;
+
+          try {
+            const provider = document.getElementById('provider-stream')?.value;
+            const model = document.getElementById('model-stream')?.value || undefined;
+            const userPrompt = document.getElementById('user-prompt-stream')?.value;
+            const maxTokens = parseInt(document.getElementById('max-tokens-stream')?.value);
+
+            const messages = [];
+            // Add system prompt if needed, e.g., from another field
+            if (userPrompt) messages.push({ role: 'user', content: userPrompt });
+
+            if (!provider || messages.length === 0) {
+              throw new Error("Provider and User Prompt are required for streaming.");
+            }
+
+            // --- Using fetch to handle POST for SSE initiation ---
+            const response = await fetch(`${API_BASE_URL}/api/stream`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider, model, messages, maxTokens })
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+              throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+            }
+
+            if (!response.body) {
+              throw new Error("Response body is null.");
+            }
+
+            // Manually read the SSE stream
+            const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+            let buffer = '';
+
+            hideLoader('loader-stream'); // Hide loader once stream starts
+
+            // Assign reader to a global-like scope so stop button can access it
+            // This is a simplified approach; robust handling might use a class or closure
+            window.currentStreamReader = reader;
+
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) {
+                console.log('Stream finished.');
+                appendStreamOutput('output-stream', '\n--- Stream Complete ---');
+                break;
+              }
+
+              buffer += value;
+              let boundary = buffer.indexOf('\n\n');
+
+              while (boundary !== -1) {
+                const message = buffer.substring(0, boundary);
+                buffer = buffer.substring(boundary + 2);
+
+                let eventType = 'message'; // Default event type
+                let eventData = '';
+
+                message.split('\n').forEach(line => {
+                  if (line.startsWith('event:')) {
+                    eventType = line.substring(6).trim();
+                  } else if (line.startsWith('data:')) {
+                    eventData += line.substring(5).trim(); // Accumulate data lines if multi-line
+                  }
+                });
+
+                if (eventData) {
+                  try {
+                    const parsedData = JSON.parse(eventData);
+                    if (eventType === 'message') {
+                      const chunk = parsedData; // Already parsed StreamChunk
+                      // Process chunk based on type
+                      if (chunk.type === 'content_delta') {
+                        appendStreamOutput('output-stream', chunk.data.delta);
+                      } else if (chunk.type === 'message_stop') {
+                        appendStreamOutput('output-stream', `\n--- Stream Stopped (Reason: ${chunk.data.finishReason}) ---`);
+                      } else if (chunk.type === 'final_usage') {
+                        appendStreamOutput('output-stream', `\nFinal Usage: ${JSON.stringify(chunk.data.usage)}`);
+                      } else if (chunk.type === 'final_result') {
+                        appendStreamOutput('output-stream', `\n--- Final Result Received ---`);
+                      }
+                      // Add handling for other chunk types (tool_call, thinking, etc.)
+                      else {
+                        appendStreamOutput('output-stream', `\n[${chunk.type}]`);
+                      }
+                    } else if (eventType === 'error') {
+                      console.error('SSE Error Event:', parsedData);
+                      displayOutput('output-stream', `Stream Error: ${parsedData?.error?.message || eventData}`, true);
+                      reader.cancel('Error received'); // Stop reading on error
+                      break; // Exit inner while loop
+                    } else if (eventType === 'end') {
+                      appendStreamOutput('output-stream', `\n--- Stream End Signal Received ---`);
+                      reader.cancel('End event received');
+                      break;
+                    }
+                  } catch (e) {
+                    console.error('Failed to parse SSE data:', e, 'Data:', eventData);
+                  }
+                }
+                boundary = buffer.indexOf('\n\n');
+              } // end while boundary
+              if (window.currentStreamReader !== reader) break; // Check if reader was cancelled by stop button
+            } // end while true
+
+          } catch (error) {
+            console.error("Streaming Error:", error);
+            displayOutput('output-stream', error.message || 'Failed to start stream.', true);
+          } finally {
+            hideLoader('loader-stream');
+            if (runStreamButton) runStreamButton.disabled = false;
+            if (stopStreamButton) stopStreamButton.disabled = true;
+            window.currentStreamReader = null; // Clear reader reference
+          }
+        });
+
+        stopStreamButton?.addEventListener('click', () => {
+          if (window.currentStreamReader) {
+            console.log('Stopping stream by client request...');
+            window.currentStreamReader.cancel('Stopped by user');
+            window.currentStreamReader = null;
+            appendStreamOutput('output-stream', '\n--- Stream Stopped by User ---');
+            if (runStreamButton) runStreamButton.disabled = false;
+            if (stopStreamButton) stopStreamButton.disabled = true;
+            hideLoader('loader-stream');
+          }
+        });
+
+
+        // --- Copy Button Logic ---
+        document.querySelectorAll('.copy-button').forEach(button => {
+          button.addEventListener('click', () => {
+            const codeId = button.dataset.codeId;
+            const codeElement = document.getElementById(codeId);
+            if (codeElement) {
+              navigator.clipboard.writeText(codeElement.textContent || '')
+                .then(() => {
+                  button.textContent = 'Copied!';
+                  button.classList.add('copied');
+                  setTimeout(() => {
+                    button.textContent = 'Copy';
+                    button.classList.remove('copied');
+                  }, 1500);
+                })
+                .catch(err => {
+                  console.error('Failed to copy text: ', err);
+                  button.textContent = 'Error';
+                });
+            }
+          });
+        });
+
+      // }); // End DOMContentLoaded
+    })
+
+  </script>
+</body>
+
+</html>
