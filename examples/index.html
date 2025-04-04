@@ -140,19 +140,23 @@
     }
 
     .example-output {
-      margin-top: 1rem;
+      margin-bottom: 15px; /* Slightly reduced margin */
       background-color: var(--code-background-color);
       border: 1px solid var(--code-border-color);
-      padding: 1rem;
+      padding: 10px;
       border-radius: 4px;
-      max-height: 400px;
-      overflow-y: auto;
+      min-height: 50px;   /* NEW: Set a small minimum height */
+      max-height: 300px;  /* REDUCED: Limit maximum height */
+      overflow-y: auto;   /* IMPORTANT: Add scrollbar when content exceeds max-height */
       white-space: pre-wrap;
-      /* Wrap long lines */
       word-wrap: break-word;
-      /* Break long words */
       font-family: var(--font-monospace);
       font-size: 0.9em;
+      display: none;
+    }
+
+    #output-tool-use.example-output {
+      white-space: unset;
     }
 
     .example-output.error {
@@ -160,10 +164,76 @@
       border-color: var(--danger);
     }
 
-    .example-output.streaming {
-      min-height: 100px;
-      /* Ensure space for streaming content */
+    /* --- Styles for Compact Tool Use Output --- */
+
+    /* General container for each message in the transcript */
+    .message-item {
+      margin-bottom: 0.75em; /* Space between messages */
+      padding: 0.5em 0.8em;  /* Padding inside message bubble */
+      border-left-width: 3px;
+      border-left-style: solid;
+      /* border-left-color is set inline */
+      background-color: var(--card-background-color); /* Optional: subtle background */
+      border-radius: 3px;
     }
+
+    /* Style the 'TOOL:' heading */
+    .tool-message strong {
+      color: var(--warning); /* Match border color */
+    }
+
+    /* Style the "Result for ID: ..." line */
+    .tool-message .tool-result-id {
+      font-size: 0.85em;       /* Smaller font */
+      color: var(--muted-color); /* Less prominent color */
+      margin-top: 0.1em;       /* Minimal space below role heading */
+      margin-bottom: 0.3em;    /* Minimal space above the code block */
+    }
+
+    /* Style the <pre> block specifically for tool result content */
+    .tool-message pre.tool-result-content {
+      margin-top: 0;         /* Remove default top margin */
+      margin-bottom: 0.2em;  /* Small space below code block */
+      padding: 0.4em 0.6em;  /* Reduced padding inside code block */
+      font-size: 0.85em;     /* Slightly smaller font for JSON */
+      background-color: var(--code-background-color); /* Consistent code bg */
+      border: 1px solid var(--code-border-color);     /* Consistent code border */
+      border-radius: 3px;
+      /* overflow-x: auto; is inherited or default on pre */
+    }
+
+    /* Optional: Style the Tool Calls details */
+    .tool-calls-details {
+        margin-top: 0.5em;
+    }
+    .tool-calls-details summary {
+        font-size: 0.9em;
+        cursor: pointer;
+        color: var(--secondary);
+    }
+    .tool-calls-details ul {
+        margin-top: 0.3em;
+        margin-bottom: 0.2em;
+        padding-left: 20px; /* Indent list */
+        font-size: 0.9em;
+    }
+    .tool-calls-details li {
+        margin-bottom: 0.5em;
+    }
+    .tool-calls-details li pre { /* Style code block inside tool calls */
+        margin-top: 0.2em;
+        margin-bottom: 0;
+        padding: 0.3em 0.5em;
+        font-size: 0.9em; /* Slightly smaller args */
+    }
+
+    /* --- End Compact Tool Use Output Styles --- */
+
+
+    /* Ensure space for streaming content */
+    /* .example-output.streaming {
+      min-height: 60px;
+    } */
 
     /* Copy Button */
     .copy-button {
@@ -423,10 +493,9 @@ const systemPrompt = document.getElementById('system-prompt-generate').value;
 const userPrompt = document.getElementById('user-prompt-generate').value;
 const maxTokens = parseInt(document.getElementById('max-tokens-generate').value);
 
-const messages = [
-  { role: 'system', content: systemPrompt },
-  { role: 'user', content: userPrompt }
-];
+const messages = [];
+if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+if (userPrompt) messages.push({ role: 'user', content: userPrompt });
 
 axios.post('/api/generate', {
   provider,
@@ -463,62 +532,148 @@ axios.post('/api/generate', {
           <h4>Output Stream:</h4>
           <div class="example-output streaming" id="output-stream"></div>
         </div>
-        <h4>API Interaction Snippet (using EventSource):</h4>
-        <pre><code class="language-javascript" id="code-stream">// Frontend JS using EventSource (after initiating with POST)
-// NOTE: Native EventSource doesn't support POST.
-// This snippet shows handling events *after* connection is established.
-// A real implementation needs fetch() or a library to handle POST initiation.
+        <h4>API Interaction Snippet (using fetch):</h4>
+        <pre><code class="language-javascript" id="code-stream">// Frontend JS using fetch() for SSE POST initiation
+let streamReader = null; // To hold the reader for cancellation
 
-let eventSource = null; // Assume this is created after a POST request
+async function startStreaming(params) {
+  const outputElement = document.getElementById('output-stream');
+  outputElement.textContent = ''; // Clear previous output
+  outputElement.classList.remove('error');
 
-function startStreaming(params) {
-  // 1. Make a POST request to /api/stream with params (using fetch or axios)
-  //    This request tells the server to start the process.
-  //    The server keeps the connection open and starts sending SSE.
-  //    (Implementation details omitted for brevity - requires handling fetch response stream)
+  try {
+    const response = await fetch('/api/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
 
-  // --- Simplified EventSource Example (Assumes GET or separate initiation) ---
-  // const queryString = new URLSearchParams(params).toString(); // Needs careful encoding
-  // eventSource = new EventSource(`/api/stream?${queryString}`); // If using GET
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
 
-  // --- Placeholder for POST initiation + EventSource/fetch stream handling ---
-  console.log("Initiating stream with POST (implementation details complex)...");
-  // Assume eventSource is connected after successful POST initiation
+    if (!response.body) {
+      throw new Error("Response body is null.");
+    }
 
-  if (eventSource) {
-      eventSource.onopen = () => {
-        console.log('SSE Connection Opened');
-        // Update UI, enable stop button
-      };
+    streamReader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = '';
 
-      eventSource.addEventListener('message', (event) => {
-        const chunk = JSON.parse(event.data);
-        // Process different chunk types (content_delta, tool_call_*, etc.)
-        console.log('SSE Chunk:', chunk);
-        // Append chunk.data.delta to output area, handle other types
-      });
+    // Hide loader, enable stop button (UI updates)
+    document.getElementById('loader-stream').style.display = 'none';
+    document.getElementById('stop-stream').disabled = false;
 
-       eventSource.addEventListener('error', (event) => {
-        console.error('SSE Error:', event);
-        // Display error, close connection
-        eventSource.close();
-      });
+    while (true) {
+      const { value, done } = await streamReader.read();
+      if (done) {
+        console.log('Stream finished.');
+        appendStreamOutput('output-stream', '\n--- Stream Complete ---');
+        break;
+      }
 
-       eventSource.addEventListener('end', (event) => {
-        console.log('SSE Stream Ended by Server');
-        eventSource.close();
-        // Update UI
-      });
+      buffer += value;
+      let boundary = buffer.indexOf('\n\n');
+
+      while (boundary !== -1) {
+        const message = buffer.substring(0, boundary);
+        buffer = buffer.substring(boundary + 2);
+
+        let eventType = 'message';
+        let eventData = '';
+
+        message.split('\n').forEach(line => {
+          if (line.startsWith('event:')) eventType = line.substring(6).trim();
+          else if (line.startsWith('data:')) eventData += line.substring(5).trim();
+        });
+
+        if (eventData) {
+          try {
+            const parsedData = JSON.parse(eventData);
+            if (eventType === 'message') {
+              const chunk = parsedData;
+              if (chunk.type === 'content_delta') appendStreamOutput('output-stream', chunk.data.delta);
+              else if (chunk.type === 'message_stop') appendStreamOutput('output-stream', `\n--- Stream Stopped (Reason: ${chunk.data.finishReason}) ---`);
+              else if (chunk.type === 'final_usage') appendStreamOutput('output-stream', `\nFinal Usage: ${JSON.stringify(chunk.data.usage)}`);
+              else appendStreamOutput('output-stream', `\n[${chunk.type}]`); // Handle other types
+            } else if (eventType === 'error') {
+              throw new Error(`Stream Error: ${parsedData?.error?.message || eventData}`);
+            } else if (eventType === 'end') {
+              appendStreamOutput('output-stream', `\n--- Stream End Signal ---`);
+              if (streamReader) streamReader.cancel('End event received');
+              break; // Exit inner loop
+            }
+          } catch (e) {
+            console.error('Failed to parse SSE data:', e, 'Data:', eventData);
+          }
+        }
+        if (!streamReader) break; // Check if cancelled by stop button
+        boundary = buffer.indexOf('\n\n');
+      } // end while boundary
+      if (!streamReader) break; // Check if cancelled by stop button
+    } // end while true
+
+  } catch (error) {
+    console.error("Streaming Error:", error);
+    displayOutput('output-stream', error.message || 'Failed to start stream.', true);
+  } finally {
+    // Final UI cleanup
+    document.getElementById('loader-stream').style.display = 'none';
+    document.getElementById('run-stream').disabled = false;
+    document.getElementById('stop-stream').disabled = true;
+    streamReader = null;
   }
 }
 
 function stopStreaming() {
-  if (eventSource) {
-    eventSource.close();
-    console.log('SSE Connection Closed by Client');
-    // Update UI
+  if (streamReader) {
+    console.log('Stopping stream by client request...');
+    streamReader.cancel('Stopped by user');
+    streamReader = null;
+    appendStreamOutput('output-stream', '\n--- Stream Stopped by User ---');
+    // Ensure UI is reset
+    document.getElementById('run-stream').disabled = false;
+    document.getElementById('stop-stream').disabled = true;
+    document.getElementById('loader-stream').style.display = 'none';
   }
 }</code><button class="copy-button" data-code-id="code-stream">Copy</button></pre>
+      </article>
+
+      <!-- Example: Tool Use -->
+      <article id="example-tool-use">
+        <h3>Tool Use (`/api/tool-use`)</h3>
+        <div class="example-interaction">
+          <label for="provider-tool-use">Provider:</label>
+          <select id="provider-tool-use" name="provider"></select>
+          <label for="model-tool-use">Model (optional, uses backend default):</label>
+          <input type="text" id="model-tool-use" name="model" placeholder="e.g., gpt-4o-mini">
+          <label for="prompt-tool-use">Initial User Prompt:</label>
+          <textarea id="prompt-tool-use" name="initialPrompt">What's the weather in San Francisco?</textarea>
+          <button id="run-tool-use">Run Tool Use</button>
+          <div class="loader" id="loader-tool-use"></div>
+          <h4>Output (Conversation Transcript):</h4>
+          <div class="example-output" id="output-tool-use"></div>
+        </div>
+        <h4>API Request Snippet (using axios):</h4>
+        <pre><code class="language-javascript" id="code-tool-use">// Frontend JS using axios
+const provider = document.getElementById('provider-tool-use').value;
+const model = document.getElementById('model-tool-use').value || undefined;
+const initialPrompt = document.getElementById('prompt-tool-use').value;
+
+axios.post('/api/tool-use', {
+  provider,
+  model,
+  initialPrompt
+})
+.then(response => {
+  console.log(response.data);
+  // Display response.data.history (array of messages)
+  // Format the history nicely in the output area
+})
+.catch(error => {
+  console.error(error.response?.data || error.message);
+  // Display error
+});</code><button class="copy-button" data-code-id="code-tool-use">Copy</button></pre>
       </article>
 
       <!-- Example: Image Input -->
@@ -674,8 +829,9 @@ axios.post('/api/tts', {
   const audioUrl = URL.createObjectURL(audioBlob);
   const audioPlayer = document.getElementById('audio-player-tts');
   audioPlayer.src = audioUrl;
-  audioPlayer.play();
-  // Display success message
+  // audioPlayer.play(); // Let user control playback
+  // Hide error message on success
+  document.getElementById('error-output-tts').style.display = 'none';
 })
 .catch(error => {
   console.error(error.response?.data || error.message);
@@ -684,16 +840,16 @@ axios.post('/api/tts', {
    reader.onload = () => {
      try {
        const errorJson = JSON.parse(reader.result);
-       // Display errorJson.error
+       displayTtsError(`Error: ${errorJson.error || 'Unknown TTS error'}`);
      } catch {
-       // Display generic error
+       displayTtsError('Failed to parse TTS error response.');
      }
    };
-   reader.onerror = () => { // Display generic error };
-   if (error.response?.data instanceof Blob) {
+   reader.onerror = () => { displayTtsError('Failed to read TTS error response.'); };
+   if (error.response?.data instanceof Blob && error.response.data.type === 'application/json') {
         reader.readAsText(error.response.data);
    } else {
-        // Display error.message or generic error
+        displayTtsError(error.response?.data?.error || error.message || 'Unknown TTS error');
    }
 });</code><button class="copy-button" data-code-id="code-tts">Copy</button></pre>
       </article>
@@ -814,7 +970,7 @@ axios.post('/api/translate', formData, {
       // --- Configuration ---
       const API_BASE_URL = ''; // Use relative path for same origin
       let configuredProviders = [];
-      let streamEventSource = null; // For managing SSE connection
+      let streamReader = null; // For managing SSE fetch reader
 
       // --- Helper Functions ---
       function showLoader(loaderId) {
@@ -833,48 +989,107 @@ axios.post('/api/translate', formData, {
 
       function displayOutput(outputId, data, isError = false) {
         const outputElement = document.getElementById(outputId);
-        // --- FIX: Add null check ---
         if (!outputElement) {
           console.error(`displayOutput: Element with ID '${outputId}' not found.`);
           return;
         }
-        outputElement.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        // Special handling for tool use history array
+        if (outputId === 'output-tool-use' && Array.isArray(data)) {
+          outputElement.innerHTML = data.map(msg => formatMessage(msg)).join('');
+        } else {
+          outputElement.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        }
         outputElement.classList.toggle('error', isError);
         outputElement.style.display = 'block'; // Ensure visible
 
         // Reset audio player if it's not the TTS output
         if (outputId !== 'output-tts') {
-          const audioPlayer = document.getElementById('audio-player-tts');
-          // if (audioPlayer) audioPlayer.src = '';
+          // const audioPlayer = document.getElementById('audio-player-tts');
           const errorOutputTts = document.getElementById('error-output-tts');
           if (errorOutputTts) errorOutputTts.style.display = 'none';
         }
       }
 
+      // Helper to format messages for tool use output
+      function formatMessage(msg) {
+        let contentHtml = '';
+
+        // Determine content type and add specific class to <pre> for tool results
+        if (typeof msg.content === 'string') {
+          // Add 'tool-result-content' class ONLY to the <pre> of a TOOL message's content
+          const preClass = msg.role === 'tool' ? ' class="tool-result-content"' : '';
+          contentHtml = `<pre${preClass}><code>${escapeHtml(msg.content)}</code></pre>`;
+        } else if (Array.isArray(msg.content)) {
+          // Handle multimodal content if needed in the future (keep default styling for now)
+          contentHtml = `<pre><code>${escapeHtml(JSON.stringify(msg.content, null, 2))}</code></pre>`;
+        } else if (msg.content === null && msg.role !== 'tool') { // Allow null content for tool role without display
+          contentHtml = '<i>[No text content]</i>';
+        }
+
+        let toolCallsHtml = '';
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          toolCallsHtml = '<details class="tool-calls-details"><summary>Tool Calls Requested:</summary><ul>'; // Added class
+          msg.toolCalls.forEach(call => {
+            toolCallsHtml += `<li><b>ID:</b> ${escapeHtml(call.id)}<br/><b>Function:</b> ${escapeHtml(call.function.name)}<br/><b>Args:</b> <pre><code>${escapeHtml(call.function.arguments)}</code></pre></li>`;
+          });
+          toolCallsHtml += '</ul></details>';
+        }
+
+        let toolResultHtml = '';
+        if (msg.role === 'tool' && msg.toolCallId) {
+          // Added class 'tool-result-id' for specific styling
+          toolResultHtml = `<div class="tool-result-id">Result for ID: ${escapeHtml(msg.toolCallId)}</div>`;
+        }
+
+        // Determine message type for main container class and border color
+        const roleClass = msg.role.toLowerCase(); // e.g., 'user', 'assistant', 'tool'
+        let borderColorVar;
+        switch (msg.role) {
+          case 'user': borderColorVar = 'primary'; break;
+          case 'assistant': borderColorVar = 'secondary'; break;
+          case 'tool': borderColorVar = 'warning'; break; // Use 'warning' color for tool border
+          default: borderColorVar = 'muted-border-color';
+        }
+
+        // Apply role class and general 'message-item' class to the main div
+        return `<div class="message-item ${roleClass}-message" style="border-left-color: var(--${borderColorVar});">
+                <strong>${msg.role.toUpperCase()}:</strong>
+                ${toolResultHtml}
+                ${contentHtml}
+                ${toolCallsHtml}
+            </div>`;
+      }
+
+      function escapeHtml(unsafe) {
+        if (unsafe === null || typeof unsafe === 'undefined') return '';
+        return String(unsafe)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+
       function displayTtsError(message) {
         const errorOutputElement = document.getElementById('error-output-tts');
         const audioPlayer = document.getElementById('audio-player-tts');
-        // --- FIX: Add null checks ---
         if (!errorOutputElement) {
           console.error("displayTtsError: Element with ID 'error-output-tts' not found.");
-          // Optionally display error elsewhere or alert user
-          // alert(`TTS Error: ${message}`);
-          return; // Exit if error element is missing
+          return;
         }
         errorOutputElement.textContent = message;
         errorOutputElement.style.display = 'block';
 
         if (!audioPlayer) {
           console.error("displayTtsError: Element with ID 'audio-player-tts' not found.");
-        } else {
-          // audioPlayer.src = ''; // Clear player on error
         }
+        // Do not clear audioPlayer.src here
       }
 
 
       function appendStreamOutput(outputId, text) {
         const outputElement = document.getElementById(outputId);
-        // --- FIX: Add null check ---
         if (!outputElement) {
           console.error(`appendStreamOutput: Element with ID '${outputId}' not found.`);
           return;
@@ -887,31 +1102,30 @@ axios.post('/api/translate', formData, {
 
       function clearOutput(outputId) {
         const outputElement = document.getElementById(outputId);
-        // --- FIX: Add null check ---
         if (!outputElement) {
           console.error(`clearOutput: Element with ID '${outputId}' not found.`);
           return;
         }
-
+        // outputElement.textContent = ''; // Clear text content
         outputElement.classList.remove('error');
 
-        // Reset audio player if clearing TTS output
+        // Reset audio player state *without* removing the element or setting src=''
         if (outputId === 'output-tts') {
           const audioPlayer = document.getElementById('audio-player-tts');
           const errorOutputTts = document.getElementById('error-output-tts');
 
-          if (!audioPlayer) {
-            console.error("clearOutput: Element with ID 'audio-player-tts' not found.");
+          if (audioPlayer) {
+            // audioPlayer.pause(); // Optional: stop playback if clearing
+            // Do NOT set audioPlayer.src = '';
           } else {
-
+            console.error("clearOutput: Element with ID 'audio-player-tts' not found.");
           }
 
-          // --- FIX: Add null check ---
-          if (!errorOutputTts) {
-            console.error("clearOutput: Element with ID 'error-output-tts' not found.");
-          } else {
+          if (errorOutputTts) {
             errorOutputTts.style.display = 'none';
-
+            // Do NOT set errorOutputTts.textContent = ''; here, let displayOutput handle it
+          } else {
+            console.error("clearOutput: Element with ID 'error-output-tts' not found.");
           }
         }
       }
@@ -921,6 +1135,7 @@ axios.post('/api/translate', formData, {
         const imageProviders = ['openai', 'anthropic', 'google']; // Providers supporting image input
         const embedProviders = ['openai', 'google']; // Providers supporting embeddings. no groq because they don't currently have any embedding models hosted.
         const sttProviders = ['openai', 'groq']; // Providers supporting STT/Translate
+        const toolUseProviders = ['openai', 'anthropic', 'google', 'groq']; // Providers supporting tool use
 
         selectIds.forEach(id => {
           const select = document.getElementById(id);
@@ -940,6 +1155,8 @@ axios.post('/api/translate', formData, {
             providersToShow = configuredProviders.filter(p => embedProviders.includes(p));
           } else if (id === 'provider-stt' || id === 'provider-translate') {
             providersToShow = configuredProviders.filter(p => sttProviders.includes(p));
+          } else if (id === 'provider-tool-use') { // Add filtering for tool use
+            providersToShow = configuredProviders.filter(p => toolUseProviders.includes(p));
           } else if (id === 'provider-tts') {
             // TTS is handled separately below
             providersToShow = [];
@@ -974,7 +1191,6 @@ axios.post('/api/translate', formData, {
       // --- Fetch Configured Providers ---
       async function fetchConfig() {
         const outputElement = document.getElementById('configured-providers');
-        // --- FIX: Add null check ---
         if (!outputElement) {
           console.error("fetchConfig: Element with ID 'configured-providers' not found.");
           return;
@@ -991,9 +1207,10 @@ axios.post('/api/translate', formData, {
             populateProviderDropdowns([
               'provider-generate',
               'provider-stream',
-              'provider-image', // Add new dropdown ID
+              'provider-tool-use', // Add new dropdown ID
+              'provider-image',
               'provider-embed',
-              'provider-tts', // Will be handled specially
+              'provider-tts',
               'provider-stt',
               'provider-translate'
             ]);
@@ -1006,393 +1223,416 @@ axios.post('/api/translate', formData, {
       }
 
       // --- Event Listeners ---
-      // document.addEventListener('DOMContentLoaded', () => {
-        fetchConfig(); // Fetch config on load
+      fetchConfig(); // Fetch config on load
 
-        // Generate Button
-        document.getElementById('run-generate')?.addEventListener('click', async () => {
-          const loaderId = 'loader-generate';
-          const outputId = 'output-generate';
-          clearOutput(outputId);
-          showLoader(loaderId);
-          try {
-            // Use optional chaining ?. for potentially null elements
-            const provider = document.getElementById('provider-generate')?.value;
-            const model = document.getElementById('model-generate')?.value || undefined;
-            const systemPrompt = document.getElementById('system-prompt-generate')?.value;
-            const userPrompt = document.getElementById('user-prompt-generate')?.value;
-            const maxTokens = parseInt(document.getElementById('max-tokens-generate')?.value);
+      // Generate Button
+      document.getElementById('run-generate')?.addEventListener('click', async () => {
+        const loaderId = 'loader-generate';
+        const outputId = 'output-generate';
+        clearOutput(outputId);
+        showLoader(loaderId);
+        try {
+          const provider = document.getElementById('provider-generate')?.value;
+          const model = document.getElementById('model-generate')?.value || undefined;
+          const systemPrompt = document.getElementById('system-prompt-generate')?.value;
+          const userPrompt = document.getElementById('user-prompt-generate')?.value;
+          const maxTokens = parseInt(document.getElementById('max-tokens-generate')?.value);
 
-            const messages = [];
-            if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
-            if (userPrompt) messages.push({ role: 'user', content: userPrompt });
+          const messages = [];
+          if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+          if (userPrompt) messages.push({ role: 'user', content: userPrompt });
 
-            if (!provider || messages.length === 0) {
-              throw new Error("Provider and at least one prompt are required.");
-            }
-
-            const response = await axios.post(`${API_BASE_URL}/api/generate`, {
-              provider, model, messages, maxTokens
-            });
-            displayOutput(outputId, response.data);
-          } catch (error) {
-            displayOutput(outputId, error.response?.data || { error: error.message }, true);
-          } finally {
-            hideLoader(loaderId);
+          if (!provider || messages.length === 0) {
+            throw new Error("Provider and at least one prompt are required.");
           }
-        });
 
-        // Image Input Button
-        document.getElementById('run-image')?.addEventListener('click', async () => {
-          const loaderId = 'loader-image';
-          const outputId = 'output-image';
-          clearOutput(outputId);
-          showLoader(loaderId);
-          try {
-            const provider = document.getElementById('provider-image')?.value;
-            const model = document.getElementById('model-image')?.value || undefined;
-            const textPrompt = document.getElementById('prompt-image')?.value;
-            const imageFile = document.getElementById('file-image')?.files?.[0];
-            const maxTokens = parseInt(document.getElementById('max-tokens-image')?.value);
-
-            if (!provider) throw new Error("Provider is required.");
-            if (!textPrompt) throw new Error("Text prompt is required.");
-            if (!imageFile) throw new Error('Please select an image file.');
-
-            const formData = new FormData();
-            formData.append('provider', provider);
-            if (model) formData.append('model', model);
-            formData.append('textPrompt', textPrompt);
-            formData.append('maxTokens', maxTokens.toString());
-            formData.append('image', imageFile, imageFile.name);
-
-            const response = await axios.post(`${API_BASE_URL}/api/generate-with-image`, formData, {
-              headers: { 'Content-Type': 'multipart/form-data' }
-            });
-            displayOutput(outputId, response.data);
-          } catch (error) {
-            displayOutput(outputId, error.response?.data || { error: error.message }, true);
-          } finally {
-            hideLoader(loaderId);
-          }
-        });
-
-
-        // Embed Button
-        document.getElementById('run-embed')?.addEventListener('click', async () => {
-          const loaderId = 'loader-embed';
-          const outputId = 'output-embed';
-          clearOutput(outputId);
-          showLoader(loaderId);
-          try {
-            const provider = document.getElementById('provider-embed')?.value;
-            const model = document.getElementById('model-embed')?.value || undefined;
-            const inputText = document.getElementById('input-embed')?.value;
-            const input = inputText.includes('\n') ? inputText.split('\n').filter(t => t.trim()) : inputText;
-
-            if (!provider || !input || (Array.isArray(input) && input.length === 0)) {
-              throw new Error("Provider and Input Text are required.");
-            }
-
-            const response = await axios.post(`${API_BASE_URL}/api/embed`, {
-              provider, model, input
-            });
-            displayOutput(outputId, response.data);
-          } catch (error) {
-            displayOutput(outputId, error.response?.data || { error: error.message }, true);
-          } finally {
-            hideLoader(loaderId);
-          }
-        });
-
-        // TTS Button
-        document.getElementById('run-tts')?.addEventListener('click', async () => {
-          const loaderId = 'loader-tts';
-          const outputId = 'output-tts'; // Container ID
-          const errorOutputId = 'error-output-tts';
-          const audioPlayer = document.getElementById('audio-player-tts');
-
-          clearOutput(outputId); // Clears player src and hides error div
-          showLoader(loaderId);
-          try {
-            const provider = document.getElementById('provider-tts')?.value; // Should be openai
-            const model = document.getElementById('model-tts')?.value || undefined;
-            const input = document.getElementById('input-tts')?.value;
-            const voice = document.getElementById('voice-tts')?.value;
-            const responseFormat = document.getElementById('format-tts')?.value;
-
-            if (!input || !voice) {
-              throw new Error("Input Text and Voice are required.");
-            }
-
-            const response = await axios.post(`${API_BASE_URL}/api/tts`, {
-              provider, model, input, voice, responseFormat
-            }, { responseType: 'blob' });
-
-            const audioBlob = response.data;
-            const audioUrl = URL.createObjectURL(audioBlob);
-            if (audioPlayer) {
-              audioPlayer.src = audioUrl;
-              // No need to call play() automatically, let user control
-            } else {
-              console.error("Audio player element not found.");
-            }
-            const errorOutputElement = document.getElementById(errorOutputId);
-            if (errorOutputElement) errorOutputElement.style.display = 'none'; // Hide error div on success
-
-          } catch (error) {
-            console.error("TTS Error Raw:", error);
-            // Attempt to parse error from blob if possible
-            if (error.response?.data instanceof Blob && error.response.data.type === 'application/json') {
-              const reader = new FileReader();
-              reader.onload = () => {
-                try {
-                  const errorJson = JSON.parse(reader.result);
-                  displayTtsError(`Error: ${errorJson.error || 'Unknown TTS error'}`);
-                } catch {
-                  displayTtsError('Failed to parse TTS error response.');
-                }
-              };
-              reader.onerror = () => { displayTtsError('Failed to read TTS error response.'); };
-              reader.readAsText(error.response.data);
-            } else {
-              displayTtsError(error.response?.data?.error || error.message || 'Unknown TTS error');
-            }
-          } finally {
-            hideLoader(loaderId);
-          }
-        });
-
-        // STT Button
-        document.getElementById('run-stt')?.addEventListener('click', async () => {
-          const loaderId = 'loader-stt';
-          const outputId = 'output-stt';
-          clearOutput(outputId);
-          showLoader(loaderId);
-          try {
-            const provider = document.getElementById('provider-stt')?.value;
-            const model = document.getElementById('model-stt')?.value || undefined;
-            const language = document.getElementById('language-stt')?.value || undefined;
-            const audioFile = document.getElementById('audio-stt')?.files?.[0];
-
-            if (!provider) throw new Error("Provider is required.");
-            if (!audioFile) throw new Error('Please select an audio file.');
-
-            const formData = new FormData();
-            formData.append('provider', provider);
-            if (model) formData.append('model', model);
-            if (language) formData.append('language', language);
-            formData.append('audio', audioFile, audioFile.name);
-
-            const response = await axios.post(`${API_BASE_URL}/api/transcribe`, formData, {
-              headers: { 'Content-Type': 'multipart/form-data' }
-            });
-            displayOutput(outputId, response.data);
-          } catch (error) {
-            displayOutput(outputId, error.response?.data || { error: error.message }, true);
-          } finally {
-            hideLoader(loaderId);
-          }
-        });
-
-        // Translate Button
-        document.getElementById('run-translate')?.addEventListener('click', async () => {
-          const loaderId = 'loader-translate';
-          const outputId = 'output-translate';
-          clearOutput(outputId);
-          showLoader(loaderId);
-          try {
-            const provider = document.getElementById('provider-translate')?.value;
-            const model = document.getElementById('model-translate')?.value || undefined;
-            const audioFile = document.getElementById('audio-translate')?.files?.[0];
-
-            if (!provider) throw new Error("Provider is required.");
-            if (!audioFile) throw new Error('Please select an audio file.');
-
-            const formData = new FormData();
-            formData.append('provider', provider);
-            if (model) formData.append('model', model);
-            formData.append('audio', audioFile, audioFile.name);
-
-            const response = await axios.post(`${API_BASE_URL}/api/translate`, formData, {
-              headers: { 'Content-Type': 'multipart/form-data' }
-            });
-            displayOutput(outputId, response.data);
-          } catch (error) {
-            displayOutput(outputId, error.response?.data || { error: error.message }, true);
-          } finally {
-            hideLoader(loaderId);
-          }
-        });
-
-        // --- Streaming Logic ---
-        const runStreamButton = document.getElementById('run-stream');
-        const stopStreamButton = document.getElementById('stop-stream');
-        const streamOutput = document.getElementById('output-stream');
-        const streamLoader = document.getElementById('loader-stream');
-
-        runStreamButton?.addEventListener('click', async () => {
-          if (streamEventSource) {
-            streamEventSource.close(); // Close previous connection if any
-          }
-          clearOutput('output-stream');
-          showLoader('loader-stream');
-          if (runStreamButton) runStreamButton.disabled = true;
-          if (stopStreamButton) stopStreamButton.disabled = false;
-
-          try {
-            const provider = document.getElementById('provider-stream')?.value;
-            const model = document.getElementById('model-stream')?.value || undefined;
-            const userPrompt = document.getElementById('user-prompt-stream')?.value;
-            const maxTokens = parseInt(document.getElementById('max-tokens-stream')?.value);
-
-            const messages = [];
-            // Add system prompt if needed, e.g., from another field
-            if (userPrompt) messages.push({ role: 'user', content: userPrompt });
-
-            if (!provider || messages.length === 0) {
-              throw new Error("Provider and User Prompt are required for streaming.");
-            }
-
-            // --- Using fetch to handle POST for SSE initiation ---
-            const response = await fetch(`${API_BASE_URL}/api/stream`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ provider, model, messages, maxTokens })
-            });
-
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
-              throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-            }
-
-            if (!response.body) {
-              throw new Error("Response body is null.");
-            }
-
-            // Manually read the SSE stream
-            const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-            let buffer = '';
-
-            hideLoader('loader-stream'); // Hide loader once stream starts
-
-            // Assign reader to a global-like scope so stop button can access it
-            // This is a simplified approach; robust handling might use a class or closure
-            window.currentStreamReader = reader;
-
-            while (true) {
-              const { value, done } = await reader.read();
-              if (done) {
-                console.log('Stream finished.');
-                appendStreamOutput('output-stream', '\n--- Stream Complete ---');
-                break;
-              }
-
-              buffer += value;
-              let boundary = buffer.indexOf('\n\n');
-
-              while (boundary !== -1) {
-                const message = buffer.substring(0, boundary);
-                buffer = buffer.substring(boundary + 2);
-
-                let eventType = 'message'; // Default event type
-                let eventData = '';
-
-                message.split('\n').forEach(line => {
-                  if (line.startsWith('event:')) {
-                    eventType = line.substring(6).trim();
-                  } else if (line.startsWith('data:')) {
-                    eventData += line.substring(5).trim(); // Accumulate data lines if multi-line
-                  }
-                });
-
-                if (eventData) {
-                  try {
-                    const parsedData = JSON.parse(eventData);
-                    if (eventType === 'message') {
-                      const chunk = parsedData; // Already parsed StreamChunk
-                      // Process chunk based on type
-                      if (chunk.type === 'content_delta') {
-                        appendStreamOutput('output-stream', chunk.data.delta);
-                      } else if (chunk.type === 'message_stop') {
-                        appendStreamOutput('output-stream', `\n--- Stream Stopped (Reason: ${chunk.data.finishReason}) ---`);
-                      } else if (chunk.type === 'final_usage') {
-                        appendStreamOutput('output-stream', `\nFinal Usage: ${JSON.stringify(chunk.data.usage)}`);
-                      } else if (chunk.type === 'final_result') {
-                        appendStreamOutput('output-stream', `\n--- Final Result Received ---`);
-                      }
-                      // Add handling for other chunk types (tool_call, thinking, etc.)
-                      else {
-                        appendStreamOutput('output-stream', `\n[${chunk.type}]`);
-                      }
-                    } else if (eventType === 'error') {
-                      console.error('SSE Error Event:', parsedData);
-                      displayOutput('output-stream', `Stream Error: ${parsedData?.error?.message || eventData}`, true);
-                      reader.cancel('Error received'); // Stop reading on error
-                      break; // Exit inner while loop
-                    } else if (eventType === 'end') {
-                      appendStreamOutput('output-stream', `\n--- Stream End Signal Received ---`);
-                      reader.cancel('End event received');
-                      break;
-                    }
-                  } catch (e) {
-                    console.error('Failed to parse SSE data:', e, 'Data:', eventData);
-                  }
-                }
-                boundary = buffer.indexOf('\n\n');
-              } // end while boundary
-              if (window.currentStreamReader !== reader) break; // Check if reader was cancelled by stop button
-            } // end while true
-
-          } catch (error) {
-            console.error("Streaming Error:", error);
-            displayOutput('output-stream', error.message || 'Failed to start stream.', true);
-          } finally {
-            hideLoader('loader-stream');
-            if (runStreamButton) runStreamButton.disabled = false;
-            if (stopStreamButton) stopStreamButton.disabled = true;
-            window.currentStreamReader = null; // Clear reader reference
-          }
-        });
-
-        stopStreamButton?.addEventListener('click', () => {
-          if (window.currentStreamReader) {
-            console.log('Stopping stream by client request...');
-            window.currentStreamReader.cancel('Stopped by user');
-            window.currentStreamReader = null;
-            appendStreamOutput('output-stream', '\n--- Stream Stopped by User ---');
-            if (runStreamButton) runStreamButton.disabled = false;
-            if (stopStreamButton) stopStreamButton.disabled = true;
-            hideLoader('loader-stream');
-          }
-        });
-
-
-        // --- Copy Button Logic ---
-        document.querySelectorAll('.copy-button').forEach(button => {
-          button.addEventListener('click', () => {
-            const codeId = button.dataset.codeId;
-            const codeElement = document.getElementById(codeId);
-            if (codeElement) {
-              navigator.clipboard.writeText(codeElement.textContent || '')
-                .then(() => {
-                  button.textContent = 'Copied!';
-                  button.classList.add('copied');
-                  setTimeout(() => {
-                    button.textContent = 'Copy';
-                    button.classList.remove('copied');
-                  }, 1500);
-                })
-                .catch(err => {
-                  console.error('Failed to copy text: ', err);
-                  button.textContent = 'Error';
-                });
-            }
+          const response = await axios.post(`${API_BASE_URL}/api/generate`, {
+            provider, model, messages, maxTokens
           });
-        });
+          displayOutput(outputId, response.data);
+        } catch (error) {
+          displayOutput(outputId, error.response?.data || { error: error.message }, true);
+        } finally {
+          hideLoader(loaderId);
+        }
+      });
 
-      // }); // End DOMContentLoaded
-    })
+      // Tool Use Button
+      document.getElementById('run-tool-use')?.addEventListener('click', async () => {
+        const loaderId = 'loader-tool-use';
+        const outputId = 'output-tool-use';
+        clearOutput(outputId);
+        showLoader(loaderId);
+        try {
+          const provider = document.getElementById('provider-tool-use')?.value;
+          const model = document.getElementById('model-tool-use')?.value || undefined;
+          const initialPrompt = document.getElementById('prompt-tool-use')?.value;
+
+          if (!provider || !initialPrompt) {
+            throw new Error("Provider and Initial Prompt are required for Tool Use.");
+          }
+
+          const response = await axios.post(`${API_BASE_URL}/api/tool-use`, {
+            provider, model, initialPrompt
+          });
+          // response.data should contain the history array
+          displayOutput(outputId, response.data.history);
+        } catch (error) {
+          displayOutput(outputId, error.response?.data || { error: error.message }, true);
+        } finally {
+          hideLoader(loaderId);
+        }
+      });
+
+      // Image Input Button
+      document.getElementById('run-image')?.addEventListener('click', async () => {
+        const loaderId = 'loader-image';
+        const outputId = 'output-image';
+        clearOutput(outputId);
+        showLoader(loaderId);
+        try {
+          const provider = document.getElementById('provider-image')?.value;
+          const model = document.getElementById('model-image')?.value || undefined;
+          const textPrompt = document.getElementById('prompt-image')?.value;
+          const imageFile = document.getElementById('file-image')?.files?.[0];
+          const maxTokens = parseInt(document.getElementById('max-tokens-image')?.value);
+
+          if (!provider) throw new Error("Provider is required.");
+          if (!textPrompt) throw new Error("Text prompt is required.");
+          if (!imageFile) throw new Error('Please select an image file.');
+
+          const formData = new FormData();
+          formData.append('provider', provider);
+          if (model) formData.append('model', model);
+          formData.append('textPrompt', textPrompt);
+          formData.append('maxTokens', maxTokens.toString());
+          formData.append('image', imageFile, imageFile.name);
+
+          const response = await axios.post(`${API_BASE_URL}/api/generate-with-image`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+          displayOutput(outputId, response.data);
+        } catch (error) {
+          displayOutput(outputId, error.response?.data || { error: error.message }, true);
+        } finally {
+          hideLoader(loaderId);
+        }
+      });
+
+
+      // Embed Button
+      document.getElementById('run-embed')?.addEventListener('click', async () => {
+        const loaderId = 'loader-embed';
+        const outputId = 'output-embed';
+        clearOutput(outputId);
+        showLoader(loaderId);
+        try {
+          const provider = document.getElementById('provider-embed')?.value;
+          const model = document.getElementById('model-embed')?.value || undefined;
+          const inputText = document.getElementById('input-embed')?.value;
+          const input = inputText.includes('\n') ? inputText.split('\n').filter(t => t.trim()) : inputText;
+
+          if (!provider || !input || (Array.isArray(input) && input.length === 0)) {
+            throw new Error("Provider and Input Text are required.");
+          }
+
+          const response = await axios.post(`${API_BASE_URL}/api/embed`, {
+            provider, model, input
+          });
+          displayOutput(outputId, response.data);
+        } catch (error) {
+          displayOutput(outputId, error.response?.data || { error: error.message }, true);
+        } finally {
+          hideLoader(loaderId);
+        }
+      });
+
+      // TTS Button
+      document.getElementById('run-tts')?.addEventListener('click', async () => {
+        const loaderId = 'loader-tts';
+        const outputId = 'output-tts'; // Container ID
+        const errorOutputId = 'error-output-tts';
+        const audioPlayer = document.getElementById('audio-player-tts');
+
+        clearOutput(outputId); // Clears player src and hides error div
+        showLoader(loaderId);
+        try {
+          const provider = document.getElementById('provider-tts')?.value; // Should be openai
+          const model = document.getElementById('model-tts')?.value || undefined;
+          const input = document.getElementById('input-tts')?.value;
+          const voice = document.getElementById('voice-tts')?.value;
+          const responseFormat = document.getElementById('format-tts')?.value;
+
+          if (!input || !voice) {
+            throw new Error("Input Text and Voice are required.");
+          }
+
+          const response = await axios.post(`${API_BASE_URL}/api/tts`, {
+            provider, model, input, voice, responseFormat
+          }, { responseType: 'blob' });
+
+          const audioBlob = response.data;
+          const audioUrl = URL.createObjectURL(audioBlob);
+          if (audioPlayer) {
+            audioPlayer.src = audioUrl;
+            // No need to call play() automatically, let user control
+          } else {
+            console.error("Audio player element not found.");
+          }
+          const errorOutputElement = document.getElementById(errorOutputId);
+          if (errorOutputElement) errorOutputElement.style.display = 'none'; // Hide error div on success
+
+        } catch (error) {
+          console.error("TTS Error Raw:", error);
+          // Attempt to parse error from blob if possible
+          if (error.response?.data instanceof Blob && error.response.data.type === 'application/json') {
+            const reader = new FileReader();
+            reader.onload = () => {
+              try {
+                const errorJson = JSON.parse(reader.result);
+                displayTtsError(`Error: ${errorJson.error || 'Unknown TTS error'}`);
+              } catch {
+                displayTtsError('Failed to parse TTS error response.');
+              }
+            };
+            reader.onerror = () => { displayTtsError('Failed to read TTS error response.'); };
+            reader.readAsText(error.response.data);
+          } else {
+            displayTtsError(error.response?.data?.error || error.message || 'Unknown TTS error');
+          }
+        } finally {
+          hideLoader(loaderId);
+        }
+      });
+
+      // STT Button
+      document.getElementById('run-stt')?.addEventListener('click', async () => {
+        const loaderId = 'loader-stt';
+        const outputId = 'output-stt';
+        clearOutput(outputId);
+        showLoader(loaderId);
+        try {
+          const provider = document.getElementById('provider-stt')?.value;
+          const model = document.getElementById('model-stt')?.value || undefined;
+          const language = document.getElementById('language-stt')?.value || undefined;
+          const audioFile = document.getElementById('audio-stt')?.files?.[0];
+
+          if (!provider) throw new Error("Provider is required.");
+          if (!audioFile) throw new Error('Please select an audio file.');
+
+          const formData = new FormData();
+          formData.append('provider', provider);
+          if (model) formData.append('model', model);
+          if (language) formData.append('language', language);
+          formData.append('audio', audioFile, audioFile.name);
+
+          const response = await axios.post(`${API_BASE_URL}/api/transcribe`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+          displayOutput(outputId, response.data);
+        } catch (error) {
+          displayOutput(outputId, error.response?.data || { error: error.message }, true);
+        } finally {
+          hideLoader(loaderId);
+        }
+      });
+
+      // Translate Button
+      document.getElementById('run-translate')?.addEventListener('click', async () => {
+        const loaderId = 'loader-translate';
+        const outputId = 'output-translate';
+        clearOutput(outputId);
+        showLoader(loaderId);
+        try {
+          const provider = document.getElementById('provider-translate')?.value;
+          const model = document.getElementById('model-translate')?.value || undefined;
+          const audioFile = document.getElementById('audio-translate')?.files?.[0];
+
+          if (!provider) throw new Error("Provider is required.");
+          if (!audioFile) throw new Error('Please select an audio file.');
+
+          const formData = new FormData();
+          formData.append('provider', provider);
+          if (model) formData.append('model', model);
+          formData.append('audio', audioFile, audioFile.name);
+
+          const response = await axios.post(`${API_BASE_URL}/api/translate`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+          displayOutput(outputId, response.data);
+        } catch (error) {
+          displayOutput(outputId, error.response?.data || { error: error.message }, true);
+        } finally {
+          hideLoader(loaderId);
+        }
+      });
+
+      // --- Streaming Logic ---
+      const runStreamButton = document.getElementById('run-stream');
+      const stopStreamButton = document.getElementById('stop-stream');
+      const streamOutput = document.getElementById('output-stream');
+      const streamLoader = document.getElementById('loader-stream');
+
+      runStreamButton?.addEventListener('click', async () => {
+        if (streamReader) {
+          streamReader.cancel('Starting new stream'); // Cancel previous reader if any
+          streamReader = null;
+        }
+        clearOutput('output-stream');
+        showLoader('loader-stream');
+        if (runStreamButton) runStreamButton.disabled = true;
+        if (stopStreamButton) stopStreamButton.disabled = false;
+
+        try {
+          const provider = document.getElementById('provider-stream')?.value;
+          const model = document.getElementById('model-stream')?.value || undefined;
+          const userPrompt = document.getElementById('user-prompt-stream')?.value;
+          const maxTokens = parseInt(document.getElementById('max-tokens-stream')?.value);
+
+          const messages = [];
+          if (userPrompt) messages.push({ role: 'user', content: userPrompt });
+
+          if (!provider || messages.length === 0) {
+            throw new Error("Provider and User Prompt are required for streaming.");
+          }
+
+          // --- Using fetch to handle POST for SSE initiation ---
+          const response = await fetch(`${API_BASE_URL}/api/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider, model, messages, maxTokens })
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+          }
+
+          if (!response.body) {
+            throw new Error("Response body is null.");
+          }
+
+          // Manually read the SSE stream
+          streamReader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+          let buffer = '';
+
+          hideLoader('loader-stream'); // Hide loader once stream starts
+
+          while (true) {
+            const { value, done } = await streamReader.read();
+            if (done) {
+              console.log('Stream finished.');
+              appendStreamOutput('output-stream', '\n--- Stream Complete ---');
+              break;
+            }
+
+            buffer += value;
+            let boundary = buffer.indexOf('\n\n');
+
+            while (boundary !== -1) {
+              const message = buffer.substring(0, boundary);
+              buffer = buffer.substring(boundary + 2);
+
+              let eventType = 'message'; // Default event type
+              let eventData = '';
+
+              message.split('\n').forEach(line => {
+                if (line.startsWith('event:')) {
+                  eventType = line.substring(6).trim();
+                } else if (line.startsWith('data:')) {
+                  eventData += line.substring(5).trim(); // Accumulate data lines if multi-line
+                }
+              });
+
+              if (eventData) {
+                try {
+                  const parsedData = JSON.parse(eventData);
+                  if (eventType === 'message') {
+                    const chunk = parsedData; // Already parsed StreamChunk
+                    // Process chunk based on type
+                    if (chunk.type === 'content_delta') {
+                      appendStreamOutput('output-stream', chunk.data.delta);
+                    } else if (chunk.type === 'message_stop') {
+                      appendStreamOutput('output-stream', `\n--- Stream Stopped (Reason: ${chunk.data.finishReason}) ---`);
+                    } else if (chunk.type === 'final_usage') {
+                      appendStreamOutput('output-stream', `\nFinal Usage: ${JSON.stringify(chunk.data.usage)}`);
+                    } else if (chunk.type === 'final_result') {
+                      appendStreamOutput('output-stream', `\n--- Final Result Received ---`);
+                    }
+                    // Add handling for other chunk types (tool_call, thinking, etc.)
+                    else {
+                      appendStreamOutput('output-stream', `\n[${chunk.type}]`);
+                    }
+                  } else if (eventType === 'error') {
+                    console.error('SSE Error Event:', parsedData);
+                    displayOutput('output-stream', `Stream Error: ${parsedData?.error?.message || eventData}`, true);
+                    if (streamReader) streamReader.cancel('Error received'); // Stop reading on error
+                    streamReader = null;
+                    break; // Exit inner while loop
+                  } else if (eventType === 'end') {
+                    appendStreamOutput('output-stream', `\n--- Stream End Signal Received ---`);
+                    if (streamReader) streamReader.cancel('End event received');
+                    streamReader = null;
+                    break;
+                  }
+                } catch (e) {
+                  console.error('Failed to parse SSE data:', e, 'Data:', eventData);
+                }
+              }
+              if (!streamReader) break; // Check if reader was cancelled by stop button
+              boundary = buffer.indexOf('\n\n');
+            } // end while boundary
+            if (!streamReader) break; // Check if reader was cancelled by stop button
+          } // end while true
+
+        } catch (error) {
+          console.error("Streaming Error:", error);
+          displayOutput('output-stream', error.message || 'Failed to start stream.', true);
+        } finally {
+          hideLoader('loader-stream');
+          if (runStreamButton) runStreamButton.disabled = false;
+          if (stopStreamButton) stopStreamButton.disabled = true;
+          streamReader = null; // Clear reader reference
+        }
+      });
+
+      stopStreamButton?.addEventListener('click', () => {
+        if (streamReader) {
+          console.log('Stopping stream by client request...');
+          streamReader.cancel('Stopped by user');
+          streamReader = null;
+          appendStreamOutput('output-stream', '\n--- Stream Stopped by User ---');
+          if (runStreamButton) runStreamButton.disabled = false;
+          if (stopStreamButton) stopStreamButton.disabled = true;
+          hideLoader('loader-stream');
+        }
+      });
+
+
+      // --- Copy Button Logic ---
+      document.querySelectorAll('.copy-button').forEach(button => {
+        button.addEventListener('click', () => {
+          const codeId = button.dataset.codeId;
+          const codeElement = document.getElementById(codeId);
+          if (codeElement) {
+            navigator.clipboard.writeText(codeElement.textContent || '')
+              .then(() => {
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+                setTimeout(() => {
+                  button.textContent = 'Copy';
+                  button.classList.remove('copied');
+                }, 1500);
+              })
+              .catch(err => {
+                console.error('Failed to copy text: ', err);
+                button.textContent = 'Error';
+              });
+          }
+        });
+      });
+
+    }) // End DOMContentLoaded
 
   </script>
 </body>

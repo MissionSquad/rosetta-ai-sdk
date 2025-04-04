@@ -61,6 +61,51 @@ try {
   process.exit(1) // Exit if SDK fails to initialize
 }
 
+// --- Tool Definition & Implementation (for Tool Use Example) ---
+const getWeatherTool: RosettaTool = {
+  type: 'function',
+  function: {
+    name: 'getCurrentWeather',
+    description: 'Get the current weather conditions for a specific location.',
+    parameters: {
+      type: 'object',
+      properties: {
+        location: {
+          type: 'string',
+          description: 'The city and state/country, e.g., San Francisco, CA or London, UK'
+        },
+        unit: {
+          type: 'string',
+          enum: ['celsius', 'fahrenheit'],
+          description: 'The temperature unit to use.'
+        }
+      },
+      required: ['location'] // Location is required
+    }
+  }
+}
+
+// Simple async function simulating an API call for weather
+async function getCurrentWeather(location: string, unit: string = 'fahrenheit'): Promise<string> {
+  console.log(`[TOOL EXECUTION] Fetching weather for ${location} in ${unit}...`)
+  // Simulate network delay
+  await new Promise(resolve => setTimeout(resolve, 300))
+
+  // Simulate different responses based on location
+  if (location.toLowerCase().includes('tokyo')) {
+    const temperature = unit === 'celsius' ? 15 : 59
+    return JSON.stringify({ location, temperature, unit, condition: 'Cloudy with a chance of rain.' })
+  }
+  if (location.toLowerCase().includes('bogota')) {
+    // Simulate an error case
+    console.error(`[TOOL EXECUTION] Error: API unavailable for Bogota.`)
+    throw new Error(`Weather API service is currently unavailable for Bogota.`)
+  }
+  // Default response
+  const temperature = unit === 'celsius' ? 22 : 72
+  return JSON.stringify({ location, temperature, unit, condition: 'Sunny and pleasant.' })
+}
+
 // --- API Routes ---
 
 // GET /api/config
@@ -83,6 +128,92 @@ app.post('/api/generate', async (req: Request, res: Response, next: NextFunction
     }
     const result = await rosetta.generate(params)
     res.json(result)
+  } catch (error) {
+    next(error) // Pass error to the error handling middleware
+  }
+})
+
+// POST /api/tool-use
+app.post('/api/tool-use', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { provider, model, initialPrompt } = req.body
+    if (!provider || !initialPrompt) {
+      return res.status(400).json({ error: 'Missing required parameters: provider, initialPrompt' })
+    }
+
+    const history: RosettaMessage[] = [{ role: 'user', content: initialPrompt }]
+    const maxIterations = 5 // Prevent infinite loops
+
+    for (let i = 0; i < maxIterations; i++) {
+      console.log(`[Tool Use API - Iteration ${i + 1}] Sending request...`)
+      const response = await rosetta.generate({
+        provider,
+        model: model || undefined, // Use provided model or let SDK handle default
+        messages: history,
+        tools: [getWeatherTool], // Use the hardcoded tool
+        toolChoice: 'auto'
+      })
+
+      // Add assistant's response (content and potential tool calls) to the history
+      history.push({
+        role: 'assistant',
+        content: response.content,
+        toolCalls: response.toolCalls
+      })
+
+      // Check if the model requested tool calls
+      if (response.toolCalls && response.toolCalls.length > 0) {
+        console.log(`[Tool Use API] Tool calls requested: ${response.toolCalls.length}`)
+        const toolResultMessages: RosettaMessage[] = []
+
+        // Execute each requested tool call
+        await Promise.all(
+          response.toolCalls.map(async call => {
+            if (call.type === 'function' && call.function.name === 'getCurrentWeather') {
+              let toolResultContent: string
+              try {
+                const args = JSON.parse(call.function.arguments)
+                toolResultContent = await getCurrentWeather(args.location, args.unit)
+                console.log(`[Tool Use API] -> Tool Result OK for call ${call.id}`)
+              } catch (e) {
+                const errorMessage = e instanceof Error ? e.message : String(e)
+                console.error(`[Tool Use API] -> Tool Error for call ${call.id}:`, errorMessage)
+                toolResultContent = JSON.stringify({ error: errorMessage })
+              }
+              toolResultMessages.push({
+                role: 'tool',
+                toolCallId: call.id,
+                content: toolResultContent
+              })
+            } else {
+              const toolName = call.function?.name ?? 'unknown tool'
+              console.warn(`[Tool Use API] Model called unknown/unsupported tool: ${toolName}`)
+              toolResultMessages.push({
+                role: 'tool',
+                toolCallId: call.id,
+                content: JSON.stringify({ error: `Tool '${toolName}' is not implemented.` })
+              })
+            }
+          })
+        )
+        // Add all tool results to the message history for the next turn
+        history.push(...toolResultMessages)
+      } else {
+        // If no tool calls, the conversation is likely finished
+        console.log('[Tool Use API] Conversation finished.')
+        break // Exit the loop
+      }
+
+      // Safety break if max iterations are reached
+      if (i === maxIterations - 1) {
+        console.warn('[Tool Use API] Maximum conversation iterations reached.')
+        // Add a final message indicating the limit was reached? Optional.
+        history.push({ role: 'system', content: '[System Note: Max iterations reached]' })
+      }
+    } // End of loop
+
+    // Return the full conversation history
+    res.json({ history })
   } catch (error) {
     next(error) // Pass error to the error handling middleware
   }
