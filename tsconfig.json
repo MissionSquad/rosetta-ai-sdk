@@ -1,0 +1,47 @@
+{
+"compilerOptions": {
+ /* Base Options */
+ "esModuleInterop": true, // CRITICAL for CJS/ESM interop
+ "skipLibCheck": true, // Speeds up compilation
+ "target": "ES2022", // Align with Node.js v20 features
+ "allowJs": false, // Enforce TypeScript
+ "resolveJsonModule": true, // Allow importing JSON
+ "moduleDetection": "force", // Treat files as modules
+ "isolatedModules": true, // Ensure files can be transpiled independently
+
+ /* Strictness */
+ "strict": true, // MANDATORY: Enable all strict type-checking options
+ "noUncheckedIndexedAccess": true, // Prevent errors from index signatures
+ "noImplicitOverride": true, // Ensure override keyword is used
+ "noImplicitAny": true,
+ "strictNullChecks": true,
+ "strictFunctionTypes": true,
+ "strictBindCallApply": true,
+ "strictPropertyInitialization": false, // Allow initialization in constructor logic
+ "noImplicitThis": true,
+ "useUnknownInCatchVariables": true,
+ "alwaysStrict": true,
+
+
+ /* Module System */
+ "module": "NodeNext", // Use modern Node.js module resolution
+ "moduleResolution": "NodeNext", // Aligns with 'module'
+
+ /* Output */
+ "outDir": "./dist", // Where compiled JS goes
+ "rootDir": "./src", // Source file root
+ "declaration": true, // CRITICAL for SDKs: Generate .d.ts files
+ "declarationMap": true, // Maps declaration files back to source (good for DX)
+ "sourceMap": true, // Generate source maps for debugging
+
+ /* Linting */
+ "noUnusedLocals": true,
+ "noUnusedParameters": true,
+ "noFallthroughCasesInSwitch": true,
+ "forceConsistentCasingInFileNames": true,
+ "noImplicitReturns": true, // Report error when not all code paths in function return a value.
+ "pretty": true // Pretty error messages
+},
+"include": ["src/**/*"], // Compile files in src
+"exclude": ["node_modules", "dist", "tests", "examples", "**/*.spec.ts"] // Exclude non-source files and tests
+}
