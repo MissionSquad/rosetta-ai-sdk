@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+examples/node_modules
 
 # Build Artifacts
 dist/
@@ -9,6 +10,7 @@ coverage/
 # Environment Variables
 .env
 .env.*
+examples/.env
 !.env.example
 
 # OS generated files
@@ -17,3 +19,6 @@ Thumbs.db
 
 # Test Artifacts
 junit.xml
+
+tmp/
+examples/tmp/

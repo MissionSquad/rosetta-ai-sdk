@@ -19,7 +19,10 @@ import {
   ConfigurationError,
   ProviderAPIError,
   UnsupportedFeatureError,
-  MappingError
+  MappingError,
+  RosettaImageData, // Import image type
+  ImageMimeType, // Import image mime type
+  RosettaContentPart // Import content part type
 } from '../src' // Adjust path based on your compiled output structure if needed
 
 // Load environment variables from examples/.env
@@ -84,6 +87,65 @@ app.post('/api/generate', async (req: Request, res: Response, next: NextFunction
     next(error) // Pass error to the error handling middleware
   }
 })
+
+// POST /api/generate-with-image
+// Use multer middleware for the 'image' field
+app.post(
+  '/api/generate-with-image',
+  upload.single('image'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      // Extract text fields from req.body
+      const { provider, model, textPrompt, maxTokens } = req.body
+
+      // Validate required fields
+      if (!provider || !textPrompt) {
+        return res.status(400).json({ error: 'Missing required parameters: provider, textPrompt' })
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "Missing 'image' file in request." })
+      }
+
+      // Prepare image data
+      const imageBuffer = req.file.buffer
+      const base64Data = imageBuffer.toString('base64')
+      const mimeType = req.file.mimetype as ImageMimeType // Basic assertion
+
+      // Validate MIME type if necessary (optional)
+      const allowedMimeTypes: ImageMimeType[] = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+      if (!allowedMimeTypes.includes(mimeType)) {
+        return res.status(400).json({ error: `Unsupported image MIME type: ${mimeType}` })
+      }
+
+      const imageData: RosettaImageData = { mimeType, base64Data }
+
+      // Construct the multimodal message
+      const messages: RosettaMessage[] = [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: textPrompt },
+            { type: 'image', image: imageData }
+          ] as RosettaContentPart[] // Explicitly type as array
+        }
+      ]
+
+      // Prepare GenerateParams
+      const params: GenerateParams = {
+        provider: provider as Provider, // Assert provider type
+        model: model || undefined, // Use provided model or let SDK use default
+        messages: messages,
+        maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined // Parse maxTokens if provided
+      }
+
+      // Call RosettaAI generate
+      const result = await rosetta.generate(params)
+      res.json(result)
+    } catch (error) {
+      next(error) // Pass error to the error handling middleware
+    }
+  }
+)
 
 // POST /api/stream
 app.post('/api/stream', async (req: Request, res: Response, next: NextFunction) => {
@@ -319,7 +381,7 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 
 // --- Static File Serving ---
 // FIX: Serve static files from the correct 'examples' directory relative to project root
-const examplesPath = path.join(process.cwd())
+const examplesPath = path.join(process.cwd(), '') // Correct path to examples dir
 console.log(`Serving static files from: ${examplesPath}`)
 app.use(express.static(examplesPath))
 

@@ -228,7 +228,7 @@
 </head>
 
 <body>
-  <header>
+  <header style="margin: 0; padding: 0;">
     <h1>RosettaAI SDK - Backend API Examples</h1>
     <p>Interact with the RosettaAI SDK via a simple backend API server.</p>
     <nav>
@@ -238,7 +238,7 @@
     </nav>
   </header>
 
-  <main>
+  <main style="padding-top: 20px;">
     <section id="setup">
       <h2>Setup</h2>
       <p>This page interacts with a backend API server (`server/server.ts`) that uses the RosettaAI SDK. To run these
@@ -323,8 +323,8 @@
               <td>✅</td>
               <td>❌</td>
               <td>✅</td>
-              <td>✅</td>
-              <td>Anthropic has no public embedding API</td>
+              <td>⚠️</td>
+              <td>Anthropic: no embedding API; Groq: no models</td>
             </tr>
             <tr>
               <td>JSON Mode</td>
@@ -919,7 +919,7 @@ axios.post('/api/translate', formData, {
 
       function populateProviderDropdowns(selectIds) {
         const imageProviders = ['openai', 'anthropic', 'google']; // Providers supporting image input
-        const embedProviders = ['openai', 'google', 'groq']; // Providers supporting embeddings
+        const embedProviders = ['openai', 'google']; // Providers supporting embeddings. no groq because they don't currently have any embedding models hosted.
         const sttProviders = ['openai', 'groq']; // Providers supporting STT/Translate
 
         selectIds.forEach(id => {
