@@ -79,14 +79,14 @@ async function runToolUseChat(initialPrompt: string) {
     // Get default model or fallback
     const model =
       rosetta.config.defaultModels?.[provider] ??
-      (provider === Provider.Anthropic
+      (provider === Provider.Google
+        ? 'gemini-1.5-flash-latest' // gemini-1.5-pro-latest
+        : provider === Provider.Anthropic
         ? 'claude-3-sonnet-20240229' // Sonnet or Opus recommended for tools
-        : provider === Provider.Google
-        ? 'gemini-1.5-flash-latest' // Or gemini-1.5-pro-latest
         : provider === Provider.Groq
-        ? 'llama-3.3-70b-versatile' // or llama-3.3 from Groq
+        ? 'llama-3.3-70b-versatile' // llama-3.3 from Groq
         : provider === Provider.OpenAI
-        ? 'gpt-4o-mini' // Or gpt-4o
+        ? 'gpt-4o-mini' // gpt-4o
         : undefined)
 
     if (!model) {

@@ -50,14 +50,15 @@
       max-width: 250px;
     }
 
-    .code-block {
+    /* This might be unused now with <details> */
+    /* .code-block {
       display: none;
       margin-top: 1rem;
     }
 
     .code-block.active {
       display: block;
-    }
+    } */
 
     .unsupported-notice {
       font-style: italic;
@@ -140,14 +141,18 @@
     }
 
     .example-output {
-      margin-bottom: 15px; /* Slightly reduced margin */
+      margin-bottom: 15px;
+      /* Slightly reduced margin */
       background-color: var(--code-background-color);
       border: 1px solid var(--code-border-color);
       padding: 10px;
       border-radius: 4px;
-      min-height: 50px;   /* NEW: Set a small minimum height */
-      max-height: 300px;  /* REDUCED: Limit maximum height */
-      overflow-y: auto;   /* IMPORTANT: Add scrollbar when content exceeds max-height */
+      min-height: 50px;
+      /* NEW: Set a small minimum height */
+      max-height: 300px;
+      /* REDUCED: Limit maximum height */
+      overflow-y: auto;
+      /* IMPORTANT: Add scrollbar when content exceeds max-height */
       white-space: pre-wrap;
       word-wrap: break-word;
       font-family: var(--font-monospace);
@@ -157,6 +162,7 @@
 
     #output-tool-use.example-output {
       white-space: unset;
+      /* Allow wrapping in tool use */
     }
 
     .example-output.error {
@@ -165,75 +171,67 @@
     }
 
     /* --- Styles for Compact Tool Use Output --- */
-
-    /* General container for each message in the transcript */
     .message-item {
-      margin-bottom: 0.75em; /* Space between messages */
-      padding: 0.5em 0.8em;  /* Padding inside message bubble */
+      margin-bottom: 0.75em;
+      padding: 0.5em 0.8em;
       border-left-width: 3px;
       border-left-style: solid;
-      /* border-left-color is set inline */
-      background-color: var(--card-background-color); /* Optional: subtle background */
+      background-color: var(--card-background-color);
       border-radius: 3px;
     }
 
-    /* Style the 'TOOL:' heading */
     .tool-message strong {
-      color: var(--warning); /* Match border color */
+      color: var(--warning);
     }
 
-    /* Style the "Result for ID: ..." line */
     .tool-message .tool-result-id {
-      font-size: 0.85em;       /* Smaller font */
-      color: var(--muted-color); /* Less prominent color */
-      margin-top: 0.1em;       /* Minimal space below role heading */
-      margin-bottom: 0.3em;    /* Minimal space above the code block */
+      font-size: 0.85em;
+      color: var(--muted-color);
+      margin-top: 0.1em;
+      margin-bottom: 0.3em;
     }
 
-    /* Style the <pre> block specifically for tool result content */
     .tool-message pre.tool-result-content {
-      margin-top: 0;         /* Remove default top margin */
-      margin-bottom: 0.2em;  /* Small space below code block */
-      padding: 0.4em 0.6em;  /* Reduced padding inside code block */
-      font-size: 0.85em;     /* Slightly smaller font for JSON */
-      background-color: var(--code-background-color); /* Consistent code bg */
-      border: 1px solid var(--code-border-color);     /* Consistent code border */
+      margin-top: 0 !important;
+      margin-block-start: 0 !important;
+      margin-bottom: 0.2em;
+      padding: 0.4em 0.6em;
+      font-size: 0.85em;
+      background-color: var(--code-background-color);
+      border: 1px solid var(--code-border-color);
       border-radius: 3px;
-      /* overflow-x: auto; is inherited or default on pre */
     }
 
-    /* Optional: Style the Tool Calls details */
     .tool-calls-details {
-        margin-top: 0.5em;
+      margin-top: 0.5em;
     }
+
     .tool-calls-details summary {
-        font-size: 0.9em;
-        cursor: pointer;
-        color: var(--secondary);
+      font-size: 0.9em;
+      cursor: pointer;
+      color: var(--secondary);
     }
+
     .tool-calls-details ul {
-        margin-top: 0.3em;
-        margin-bottom: 0.2em;
-        padding-left: 20px; /* Indent list */
-        font-size: 0.9em;
+      margin-top: 0.3em;
+      margin-bottom: 0.2em;
+      padding-left: 20px;
+      font-size: 0.9em;
     }
+
     .tool-calls-details li {
-        margin-bottom: 0.5em;
+      margin-bottom: 0.5em;
     }
-    .tool-calls-details li pre { /* Style code block inside tool calls */
-        margin-top: 0.2em;
-        margin-bottom: 0;
-        padding: 0.3em 0.5em;
-        font-size: 0.9em; /* Slightly smaller args */
+
+    .tool-calls-details li pre {
+      margin-top: 0.2em;
+      margin-bottom: 0;
+      padding: 0.3em 0.5em;
+      font-size: 0.9em;
     }
 
     /* --- End Compact Tool Use Output Styles --- */
 
-
-    /* Ensure space for streaming content */
-    /* .example-output.streaming {
-      min-height: 60px;
-    } */
 
     /* Copy Button */
     .copy-button {
@@ -263,7 +261,6 @@
     /* Loading Indicator */
     .loader {
       display: none;
-      /* Hidden by default */
       margin-left: 10px;
       border: 4px solid var(--muted-border-color);
       border-top: 4px solid var(--primary);
@@ -294,6 +291,64 @@
       margin-top: 1rem;
       width: 100%;
     }
+
+    /* --- START: Styling for Collapsible Code Snippets --- */
+    .code-snippet-details {
+      margin-top: 0.5rem;
+      /* Space above the details block */
+    }
+
+    .code-snippet-summary {
+      padding: 0.5em 0.8em;
+      /* Padding around the summary text */
+      cursor: pointer;
+      font-weight: 500;
+      display: inline-block;
+      /* Allow padding and prevent full width */
+      background-color: var(--contrast-150);
+      /* Subtle background */
+      border: 1px solid var(--muted-border-color);
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
+      /* Space below summary when closed */
+      list-style: revert;
+      /* Ensure default marker is shown */
+      outline-offset: 2px;
+      /* Improve focus visibility */
+    }
+
+    .code-snippet-details[open]>.code-snippet-summary {
+      margin-bottom: 0;
+      /* Remove space below summary when open */
+    }
+
+    /* Adjust the <pre> block when inside details */
+    .code-snippet-details>pre {
+      margin-top: 0;
+      /* Reset inherited margin-top */
+      border-radius: 4px;
+      /* Keep existing pre styles */
+      background-color: #272822;
+      /* Okaidia background */
+      padding: 1em;
+      overflow-x: auto;
+      position: relative;
+      /* Keep for copy button */
+    }
+
+    /* Ensure copy button position is relative to the <pre> */
+    .code-snippet-details>pre .copy-button {
+      /* Should still work fine */
+    }
+
+    /* Reduce margin below the H4 heading before the snippet */
+    /* Target H4 that is a sibling AFTER .example-interaction */
+    .example-interaction+h4 {
+      margin-bottom: 0.25rem !important;
+      /* Less space between heading and summary */
+    }
+
+    /* --- END: Styling for Collapsible Code Snippets --- */
   </style>
 </head>
 
@@ -485,8 +540,11 @@
           <h4>Output:</h4>
           <div class="example-output" id="output-generate"></div>
         </div>
+        <!-- Start Collapsible -->
         <h4>API Request Snippet (using axios):</h4>
-        <pre><code class="language-javascript" id="code-generate">// Frontend JS using axios
+        <details class="code-snippet-details">
+          <summary class="code-snippet-summary">Show Code Snippet</summary>
+          <pre><code class="language-javascript" id="code-generate">// Frontend JS using axios
 const provider = document.getElementById('provider-generate').value;
 const model = document.getElementById('model-generate').value || undefined;
 const systemPrompt = document.getElementById('system-prompt-generate').value;
@@ -511,6 +569,8 @@ axios.post('/api/generate', {
   console.error(error.response?.data || error.message);
   // Display error in the output area
 });</code><button class="copy-button" data-code-id="code-generate">Copy</button></pre>
+        </details>
+        <!-- End Collapsible -->
       </article>
 
       <!-- Example: Streaming Chat -->
@@ -532,8 +592,11 @@ axios.post('/api/generate', {
           <h4>Output Stream:</h4>
           <div class="example-output streaming" id="output-stream"></div>
         </div>
+        <!-- Start Collapsible -->
         <h4>API Interaction Snippet (using fetch):</h4>
-        <pre><code class="language-javascript" id="code-stream">// Frontend JS using fetch() for SSE POST initiation
+        <details class="code-snippet-details">
+          <summary class="code-snippet-summary">Show Code Snippet</summary>
+          <pre><code class="language-javascript" id="code-stream">// Frontend JS using fetch() for SSE POST initiation
 let streamReader = null; // To hold the reader for cancellation
 
 async function startStreaming(params) {
@@ -595,6 +658,7 @@ async function startStreaming(params) {
               if (chunk.type === 'content_delta') appendStreamOutput('output-stream', chunk.data.delta);
               else if (chunk.type === 'message_stop') appendStreamOutput('output-stream', `\n--- Stream Stopped (Reason: ${chunk.data.finishReason}) ---`);
               else if (chunk.type === 'final_usage') appendStreamOutput('output-stream', `\nFinal Usage: ${JSON.stringify(chunk.data.usage)}`);
+              else if (chunk.type === 'final_result') appendStreamOutput('output-stream', `\n--- Final Result Received ---`);
               else appendStreamOutput('output-stream', `\n[${chunk.type}]`); // Handle other types
             } else if (eventType === 'error') {
               throw new Error(`Stream Error: ${parsedData?.error?.message || eventData}`);
@@ -637,6 +701,8 @@ function stopStreaming() {
     document.getElementById('loader-stream').style.display = 'none';
   }
 }</code><button class="copy-button" data-code-id="code-stream">Copy</button></pre>
+        </details>
+        <!-- End Collapsible -->
       </article>
 
       <!-- Example: Tool Use -->
@@ -654,8 +720,11 @@ function stopStreaming() {
           <h4>Output (Conversation Transcript):</h4>
           <div class="example-output" id="output-tool-use"></div>
         </div>
+        <!-- Start Collapsible -->
         <h4>API Request Snippet (using axios):</h4>
-        <pre><code class="language-javascript" id="code-tool-use">// Frontend JS using axios
+        <details class="code-snippet-details">
+          <summary class="code-snippet-summary">Show Code Snippet</summary>
+          <pre><code class="language-javascript" id="code-tool-use">// Frontend JS using axios
 const provider = document.getElementById('provider-tool-use').value;
 const model = document.getElementById('model-tool-use').value || undefined;
 const initialPrompt = document.getElementById('prompt-tool-use').value;
@@ -674,6 +743,8 @@ axios.post('/api/tool-use', {
   console.error(error.response?.data || error.message);
   // Display error
 });</code><button class="copy-button" data-code-id="code-tool-use">Copy</button></pre>
+        </details>
+        <!-- End Collapsible -->
       </article>
 
       <!-- Example: Image Input -->
@@ -695,8 +766,11 @@ axios.post('/api/tool-use', {
           <h4>Output:</h4>
           <div class="example-output" id="output-image"></div>
         </div>
+        <!-- Start Collapsible -->
         <h4>API Request Snippet (using axios & FormData):</h4>
-        <pre><code class="language-javascript" id="code-image">// Frontend JS using axios
+        <details class="code-snippet-details">
+          <summary class="code-snippet-summary">Show Code Snippet</summary>
+          <pre><code class="language-javascript" id="code-image">// Frontend JS using axios
 const provider = document.getElementById('provider-image').value;
 const model = document.getElementById('model-image').value || undefined;
 const textPrompt = document.getElementById('prompt-image').value;
@@ -728,6 +802,8 @@ axios.post('/api/generate-with-image', formData, {
   console.error(error.response?.data || error.message);
   // Display error
 });</code><button class="copy-button" data-code-id="code-image">Copy</button></pre>
+        </details>
+        <!-- End Collapsible -->
       </article>
 
       <!-- Example: Embeddings -->
@@ -746,8 +822,11 @@ axios.post('/api/generate-with-image', formData, {
           <h4>Output:</h4>
           <div class="example-output" id="output-embed"></div>
         </div>
+        <!-- Start Collapsible -->
         <h4>API Request Snippet (using axios):</h4>
-        <pre><code class="language-javascript" id="code-embed">// Frontend JS using axios
+        <details class="code-snippet-details">
+          <summary class="code-snippet-summary">Show Code Snippet</summary>
+          <pre><code class="language-javascript" id="code-embed">// Frontend JS using axios
 const provider = document.getElementById('provider-embed').value;
 const model = document.getElementById('model-embed').value || undefined;
 const inputText = document.getElementById('input-embed').value;
@@ -768,6 +847,8 @@ axios.post('/api/embed', {
   console.error(error.response?.data || error.message);
   // Display error
 });</code><button class="copy-button" data-code-id="code-embed">Copy</button></pre>
+        </details>
+        <!-- End Collapsible -->
       </article>
 
       <!-- Example: TTS -->
@@ -807,8 +888,11 @@ axios.post('/api/embed', {
             <div class="example-output error" id="error-output-tts" style="display: none;"></div>
           </div>
         </div>
+        <!-- Start Collapsible -->
         <h4>API Request Snippet (using axios):</h4>
-        <pre><code class="language-javascript" id="code-tts">// Frontend JS using axios
+        <details class="code-snippet-details">
+          <summary class="code-snippet-summary">Show Code Snippet</summary>
+          <pre><code class="language-javascript" id="code-tts">// Frontend JS using axios
 const provider = document.getElementById('provider-tts').value; // Should be 'openai'
 const model = document.getElementById('model-tts').value || undefined;
 const input = document.getElementById('input-tts').value;
@@ -852,6 +936,8 @@ axios.post('/api/tts', {
         displayTtsError(error.response?.data?.error || error.message || 'Unknown TTS error');
    }
 });</code><button class="copy-button" data-code-id="code-tts">Copy</button></pre>
+        </details>
+        <!-- End Collapsible -->
       </article>
 
       <!-- Example: STT -->
@@ -871,8 +957,11 @@ axios.post('/api/tts', {
           <h4>Output:</h4>
           <div class="example-output" id="output-stt"></div>
         </div>
+        <!-- Start Collapsible -->
         <h4>API Request Snippet (using axios & FormData):</h4>
-        <pre><code class="language-javascript" id="code-stt">// Frontend JS using axios
+        <details class="code-snippet-details">
+          <summary class="code-snippet-summary">Show Code Snippet</summary>
+          <pre><code class="language-javascript" id="code-stt">// Frontend JS using axios
 const provider = document.getElementById('provider-stt').value;
 const model = document.getElementById('model-stt').value || undefined;
 const language = document.getElementById('language-stt').value || undefined;
@@ -902,6 +991,8 @@ axios.post('/api/transcribe', formData, {
   console.error(error.response?.data || error.message);
   // Display error
 });</code><button class="copy-button" data-code-id="code-stt">Copy</button></pre>
+        </details>
+        <!-- End Collapsible -->
       </article>
 
       <!-- Example: Translate -->
@@ -919,8 +1010,11 @@ axios.post('/api/transcribe', formData, {
           <h4>Output:</h4>
           <div class="example-output" id="output-translate"></div>
         </div>
+        <!-- Start Collapsible -->
         <h4>API Request Snippet (using axios & FormData):</h4>
-        <pre><code class="language-javascript" id="code-translate">// Frontend JS using axios
+        <details class="code-snippet-details">
+          <summary class="code-snippet-summary">Show Code Snippet</summary>
+          <pre><code class="language-javascript" id="code-translate">// Frontend JS using axios
 const provider = document.getElementById('provider-translate').value;
 const model = document.getElementById('model-translate').value || undefined;
 const audioFile = document.getElementById('audio-translate').files[0];
@@ -948,6 +1042,8 @@ axios.post('/api/translate', formData, {
   console.error(error.response?.data || error.message);
   // Display error
 });</code><button class="copy-button" data-code-id="code-translate">Copy</button></pre>
+        </details>
+        <!-- End Collapsible -->
       </article>
 
     </section>
@@ -1004,7 +1100,6 @@ axios.post('/api/translate', formData, {
 
         // Reset audio player if it's not the TTS output
         if (outputId !== 'output-tts') {
-          // const audioPlayer = document.getElementById('audio-player-tts');
           const errorOutputTts = document.getElementById('error-output-tts');
           if (errorOutputTts) errorOutputTts.style.display = 'none';
         }
@@ -1016,19 +1111,17 @@ axios.post('/api/translate', formData, {
 
         // Determine content type and add specific class to <pre> for tool results
         if (typeof msg.content === 'string') {
-          // Add 'tool-result-content' class ONLY to the <pre> of a TOOL message's content
           const preClass = msg.role === 'tool' ? ' class="tool-result-content"' : '';
           contentHtml = `<pre${preClass}><code>${escapeHtml(msg.content)}</code></pre>`;
         } else if (Array.isArray(msg.content)) {
-          // Handle multimodal content if needed in the future (keep default styling for now)
           contentHtml = `<pre><code>${escapeHtml(JSON.stringify(msg.content, null, 2))}</code></pre>`;
-        } else if (msg.content === null && msg.role !== 'tool') { // Allow null content for tool role without display
+        } else if (msg.content === null && msg.role !== 'tool') {
           contentHtml = '<i>[No text content]</i>';
         }
 
         let toolCallsHtml = '';
         if (msg.toolCalls && msg.toolCalls.length > 0) {
-          toolCallsHtml = '<details class="tool-calls-details"><summary>Tool Calls Requested:</summary><ul>'; // Added class
+          toolCallsHtml = '<details class="tool-calls-details"><summary>Tool Calls Requested:</summary><ul>';
           msg.toolCalls.forEach(call => {
             toolCallsHtml += `<li><b>ID:</b> ${escapeHtml(call.id)}<br/><b>Function:</b> ${escapeHtml(call.function.name)}<br/><b>Args:</b> <pre><code>${escapeHtml(call.function.arguments)}</code></pre></li>`;
           });
@@ -1037,21 +1130,18 @@ axios.post('/api/translate', formData, {
 
         let toolResultHtml = '';
         if (msg.role === 'tool' && msg.toolCallId) {
-          // Added class 'tool-result-id' for specific styling
           toolResultHtml = `<div class="tool-result-id">Result for ID: ${escapeHtml(msg.toolCallId)}</div>`;
         }
 
-        // Determine message type for main container class and border color
-        const roleClass = msg.role.toLowerCase(); // e.g., 'user', 'assistant', 'tool'
+        const roleClass = msg.role.toLowerCase();
         let borderColorVar;
         switch (msg.role) {
           case 'user': borderColorVar = 'primary'; break;
           case 'assistant': borderColorVar = 'secondary'; break;
-          case 'tool': borderColorVar = 'warning'; break; // Use 'warning' color for tool border
+          case 'tool': borderColorVar = 'warning'; break;
           default: borderColorVar = 'muted-border-color';
         }
 
-        // Apply role class and general 'message-item' class to the main div
         return `<div class="message-item ${roleClass}-message" style="border-left-color: var(--${borderColorVar});">
                 <strong>${msg.role.toUpperCase()}:</strong>
                 ${toolResultHtml}
@@ -1063,11 +1153,11 @@ axios.post('/api/translate', formData, {
       function escapeHtml(unsafe) {
         if (unsafe === null || typeof unsafe === 'undefined') return '';
         return String(unsafe)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#039;");
+          .replace(/&/g, "&")
+          .replace(/</g, "<")
+          .replace(/>/g, ">")
+          .replace(/"/g, "\"")
+            .replace(/'/g, "'");
       }
 
 
@@ -1084,7 +1174,6 @@ axios.post('/api/translate', formData, {
         if (!audioPlayer) {
           console.error("displayTtsError: Element with ID 'audio-player-tts' not found.");
         }
-        // Do not clear audioPlayer.src here
       }
 
 
@@ -1106,36 +1195,31 @@ axios.post('/api/translate', formData, {
           console.error(`clearOutput: Element with ID '${outputId}' not found.`);
           return;
         }
-        // outputElement.textContent = ''; // Clear text content
-        outputElement.classList.remove('error');
 
-        // Reset audio player state *without* removing the element or setting src=''
-        if (outputId === 'output-tts') {
-          const audioPlayer = document.getElementById('audio-player-tts');
+        // Clear specific output areas differently
+        if (outputId === 'output-tool-use') {
+          outputElement.innerHTML = ''; // Clear HTML for tool use
+        } else if (outputId === 'output-tts') {
+          // Don't clear the audio player, just hide errors
           const errorOutputTts = document.getElementById('error-output-tts');
-
-          if (audioPlayer) {
-            // audioPlayer.pause(); // Optional: stop playback if clearing
-            // Do NOT set audioPlayer.src = '';
-          } else {
-            console.error("clearOutput: Element with ID 'audio-player-tts' not found.");
-          }
-
           if (errorOutputTts) {
+            errorOutputTts.textContent = '';
             errorOutputTts.style.display = 'none';
-            // Do NOT set errorOutputTts.textContent = ''; here, let displayOutput handle it
-          } else {
-            console.error("clearOutput: Element with ID 'error-output-tts' not found.");
           }
+        } else {
+          outputElement.textContent = ''; // Default clear for text content
         }
+
+        outputElement.classList.remove('error'); // Always remove error class
+        // Don't hide the element, let displayOutput show it when needed
       }
 
 
       function populateProviderDropdowns(selectIds) {
-        const imageProviders = ['openai', 'anthropic', 'google']; // Providers supporting image input
-        const embedProviders = ['openai', 'google']; // Providers supporting embeddings. no groq because they don't currently have any embedding models hosted.
-        const sttProviders = ['openai', 'groq']; // Providers supporting STT/Translate
-        const toolUseProviders = ['openai', 'anthropic', 'google', 'groq']; // Providers supporting tool use
+        const imageProviders = ['openai', 'anthropic', 'google'];
+        const embedProviders = ['openai', 'google'];
+        const sttProviders = ['openai', 'groq'];
+        const toolUseProviders = ['openai', 'anthropic', 'google', 'groq'];
 
         selectIds.forEach(id => {
           const select = document.getElementById(id);
@@ -1143,26 +1227,15 @@ axios.post('/api/translate', formData, {
             console.warn(`populateProviderDropdowns: Select element with ID '${id}' not found.`);
             return;
           }
-          // Clear existing options except for placeholders if any
           select.innerHTML = '';
-
           let providersToShow = configuredProviders;
 
-          // Special filtering based on dropdown ID
-          if (id === 'provider-image') {
-            providersToShow = configuredProviders.filter(p => imageProviders.includes(p));
-          } else if (id === 'provider-embed') {
-            providersToShow = configuredProviders.filter(p => embedProviders.includes(p));
-          } else if (id === 'provider-stt' || id === 'provider-translate') {
-            providersToShow = configuredProviders.filter(p => sttProviders.includes(p));
-          } else if (id === 'provider-tool-use') { // Add filtering for tool use
-            providersToShow = configuredProviders.filter(p => toolUseProviders.includes(p));
-          } else if (id === 'provider-tts') {
-            // TTS is handled separately below
-            providersToShow = [];
-          }
+          if (id === 'provider-image') providersToShow = configuredProviders.filter(p => imageProviders.includes(p));
+          else if (id === 'provider-embed') providersToShow = configuredProviders.filter(p => embedProviders.includes(p));
+          else if (id === 'provider-stt' || id === 'provider-translate') providersToShow = configuredProviders.filter(p => sttProviders.includes(p));
+          else if (id === 'provider-tool-use') providersToShow = configuredProviders.filter(p => toolUseProviders.includes(p));
+          else if (id === 'provider-tts') providersToShow = [];
 
-          // Add options based on filtered providers
           providersToShow.forEach(provider => {
             const option = document.createElement('option');
             option.value = provider;
@@ -1170,20 +1243,18 @@ axios.post('/api/translate', formData, {
             select.appendChild(option);
           });
 
-          // Special handling for TTS (only OpenAI for now)
           if (id === 'provider-tts') {
             select.innerHTML = '<option value="openai" selected>OpenAI / Azure</option>';
             select.disabled = !configuredProviders.includes('openai');
           }
 
-          // Disable dropdown if no providers are available for it
           if (providersToShow.length === 0 && id !== 'provider-tts') {
             select.disabled = true;
             const option = document.createElement('option');
             option.textContent = 'No supported providers configured';
             select.appendChild(option);
           } else {
-            select.disabled = false;
+            select.disabled = false; // Ensure enabled if providers are available
           }
         });
       }
@@ -1191,10 +1262,8 @@ axios.post('/api/translate', formData, {
       // --- Fetch Configured Providers ---
       async function fetchConfig() {
         const outputElement = document.getElementById('configured-providers');
-        if (!outputElement) {
-          console.error("fetchConfig: Element with ID 'configured-providers' not found.");
-          return;
-        }
+        if (!outputElement) return;
+        outputElement.style.display = 'block'; // Show the config output area
         try {
           const response = await axios.get(`${API_BASE_URL}/api/config`);
           configuredProviders = response.data;
@@ -1204,21 +1273,24 @@ axios.post('/api/translate', formData, {
           } else {
             outputElement.textContent = configuredProviders.join(', ');
             outputElement.classList.remove('error');
-            populateProviderDropdowns([
-              'provider-generate',
-              'provider-stream',
-              'provider-tool-use', // Add new dropdown ID
-              'provider-image',
-              'provider-embed',
-              'provider-tts',
-              'provider-stt',
-              'provider-translate'
-            ]);
           }
+          // Populate dropdowns regardless of whether providers were found
+          // (so they show "No supported providers" if needed)
+          populateProviderDropdowns([
+            'provider-generate', 'provider-stream', 'provider-tool-use',
+            'provider-image', 'provider-embed', 'provider-tts',
+            'provider-stt', 'provider-translate'
+          ]);
         } catch (error) {
           console.error('Failed to fetch config:', error);
           outputElement.textContent = `Error fetching configuration: ${error.response?.data?.error || error.message}`;
           outputElement.classList.add('error');
+          // Still attempt to populate dropdowns to show disabled state
+          populateProviderDropdowns([
+            'provider-generate', 'provider-stream', 'provider-tool-use',
+            'provider-image', 'provider-embed', 'provider-tts',
+            'provider-stt', 'provider-translate'
+          ]);
         }
       }
 
@@ -1236,19 +1308,15 @@ axios.post('/api/translate', formData, {
           const model = document.getElementById('model-generate')?.value || undefined;
           const systemPrompt = document.getElementById('system-prompt-generate')?.value;
           const userPrompt = document.getElementById('user-prompt-generate')?.value;
-          const maxTokens = parseInt(document.getElementById('max-tokens-generate')?.value);
+          const maxTokens = parseInt(document.getElementById('max-tokens-generate')?.value) || undefined;
 
           const messages = [];
           if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
           if (userPrompt) messages.push({ role: 'user', content: userPrompt });
 
-          if (!provider || messages.length === 0) {
-            throw new Error("Provider and at least one prompt are required.");
-          }
+          if (!provider || messages.length === 0) throw new Error("Provider and at least one prompt are required.");
 
-          const response = await axios.post(`${API_BASE_URL}/api/generate`, {
-            provider, model, messages, maxTokens
-          });
+          const response = await axios.post(`${API_BASE_URL}/api/generate`, { provider, model, messages, maxTokens });
           displayOutput(outputId, response.data);
         } catch (error) {
           displayOutput(outputId, error.response?.data || { error: error.message }, true);
@@ -1268,15 +1336,10 @@ axios.post('/api/translate', formData, {
           const model = document.getElementById('model-tool-use')?.value || undefined;
           const initialPrompt = document.getElementById('prompt-tool-use')?.value;
 
-          if (!provider || !initialPrompt) {
-            throw new Error("Provider and Initial Prompt are required for Tool Use.");
-          }
+          if (!provider || !initialPrompt) throw new Error("Provider and Initial Prompt are required for Tool Use.");
 
-          const response = await axios.post(`${API_BASE_URL}/api/tool-use`, {
-            provider, model, initialPrompt
-          });
-          // response.data should contain the history array
-          displayOutput(outputId, response.data.history);
+          const response = await axios.post(`${API_BASE_URL}/api/tool-use`, { provider, model, initialPrompt });
+          displayOutput(outputId, response.data.history); // Pass the history array
         } catch (error) {
           displayOutput(outputId, error.response?.data || { error: error.message }, true);
         } finally {
@@ -1295,7 +1358,7 @@ axios.post('/api/translate', formData, {
           const model = document.getElementById('model-image')?.value || undefined;
           const textPrompt = document.getElementById('prompt-image')?.value;
           const imageFile = document.getElementById('file-image')?.files?.[0];
-          const maxTokens = parseInt(document.getElementById('max-tokens-image')?.value);
+          const maxTokens = parseInt(document.getElementById('max-tokens-image')?.value) || undefined;
 
           if (!provider) throw new Error("Provider is required.");
           if (!textPrompt) throw new Error("Text prompt is required.");
@@ -1305,7 +1368,7 @@ axios.post('/api/translate', formData, {
           formData.append('provider', provider);
           if (model) formData.append('model', model);
           formData.append('textPrompt', textPrompt);
-          formData.append('maxTokens', maxTokens.toString());
+          if (maxTokens) formData.append('maxTokens', maxTokens.toString());
           formData.append('image', imageFile, imageFile.name);
 
           const response = await axios.post(`${API_BASE_URL}/api/generate-with-image`, formData, {
@@ -1332,13 +1395,9 @@ axios.post('/api/translate', formData, {
           const inputText = document.getElementById('input-embed')?.value;
           const input = inputText.includes('\n') ? inputText.split('\n').filter(t => t.trim()) : inputText;
 
-          if (!provider || !input || (Array.isArray(input) && input.length === 0)) {
-            throw new Error("Provider and Input Text are required.");
-          }
+          if (!provider || !input || (Array.isArray(input) && input.length === 0)) throw new Error("Provider and Input Text are required.");
 
-          const response = await axios.post(`${API_BASE_URL}/api/embed`, {
-            provider, model, input
-          });
+          const response = await axios.post(`${API_BASE_URL}/api/embed`, { provider, model, input });
           displayOutput(outputId, response.data);
         } catch (error) {
           displayOutput(outputId, error.response?.data || { error: error.message }, true);
@@ -1354,18 +1413,17 @@ axios.post('/api/translate', formData, {
         const errorOutputId = 'error-output-tts';
         const audioPlayer = document.getElementById('audio-player-tts');
 
-        clearOutput(outputId); // Clears player src and hides error div
+        clearOutput(outputId); // Hides error div, doesn't touch player
         showLoader(loaderId);
         try {
-          const provider = document.getElementById('provider-tts')?.value; // Should be openai
+          const provider = document.getElementById('provider-tts')?.value;
           const model = document.getElementById('model-tts')?.value || undefined;
           const input = document.getElementById('input-tts')?.value;
           const voice = document.getElementById('voice-tts')?.value;
           const responseFormat = document.getElementById('format-tts')?.value;
 
-          if (!input || !voice) {
-            throw new Error("Input Text and Voice are required.");
-          }
+          if (!provider) throw new Error("Provider (OpenAI/Azure) is required.");
+          if (!input || !voice) throw new Error("Input Text and Voice are required.");
 
           const response = await axios.post(`${API_BASE_URL}/api/tts`, {
             provider, model, input, voice, responseFormat
@@ -1375,21 +1433,18 @@ axios.post('/api/translate', formData, {
           const audioUrl = URL.createObjectURL(audioBlob);
           if (audioPlayer) {
             audioPlayer.src = audioUrl;
-            // No need to call play() automatically, let user control
           } else {
             console.error("Audio player element not found.");
           }
-          const errorOutputElement = document.getElementById(errorOutputId);
-          if (errorOutputElement) errorOutputElement.style.display = 'none'; // Hide error div on success
+          // Error div is already hidden by clearOutput
 
         } catch (error) {
           console.error("TTS Error Raw:", error);
-          // Attempt to parse error from blob if possible
           if (error.response?.data instanceof Blob && error.response.data.type === 'application/json') {
             const reader = new FileReader();
             reader.onload = () => {
               try {
-                const errorJson = JSON.parse(reader.result);
+                const errorJson = JSON.parse(reader.result); // Added type assertion
                 displayTtsError(`Error: ${errorJson.error || 'Unknown TTS error'}`);
               } catch {
                 displayTtsError('Failed to parse TTS error response.');
@@ -1398,7 +1453,9 @@ axios.post('/api/translate', formData, {
             reader.onerror = () => { displayTtsError('Failed to read TTS error response.'); };
             reader.readAsText(error.response.data);
           } else {
-            displayTtsError(error.response?.data?.error || error.message || 'Unknown TTS error');
+            // Check if error.response.data exists and has an 'error' property
+            const errorMessage = error.response?.data?.error || error.message || 'Unknown TTS error';
+            displayTtsError(errorMessage);
           }
         } finally {
           hideLoader(loaderId);
@@ -1467,19 +1524,22 @@ axios.post('/api/translate', formData, {
         }
       });
 
-      // --- Streaming Logic ---
+      // --- Streaming Logic (simplified fetch handling) ---
       const runStreamButton = document.getElementById('run-stream');
       const stopStreamButton = document.getElementById('stop-stream');
-      const streamOutput = document.getElementById('output-stream');
-      const streamLoader = document.getElementById('loader-stream');
+      // const streamOutput = document.getElementById('output-stream'); // Already got appendStreamOutput helper
+      // const streamLoader = document.getElementById('loader-stream'); // Already got show/hide Loader helpers
 
       runStreamButton?.addEventListener('click', async () => {
+        const loaderId = 'loader-stream';
+        const outputId = 'output-stream';
+
         if (streamReader) {
-          streamReader.cancel('Starting new stream'); // Cancel previous reader if any
+          streamReader.cancel('Starting new stream');
           streamReader = null;
         }
-        clearOutput('output-stream');
-        showLoader('loader-stream');
+        clearOutput(outputId);
+        showLoader(loaderId);
         if (runStreamButton) runStreamButton.disabled = true;
         if (stopStreamButton) stopStreamButton.disabled = false;
 
@@ -1487,7 +1547,7 @@ axios.post('/api/translate', formData, {
           const provider = document.getElementById('provider-stream')?.value;
           const model = document.getElementById('model-stream')?.value || undefined;
           const userPrompt = document.getElementById('user-prompt-stream')?.value;
-          const maxTokens = parseInt(document.getElementById('max-tokens-stream')?.value);
+          const maxTokens = parseInt(document.getElementById('max-tokens-stream')?.value) || undefined;
 
           const messages = [];
           if (userPrompt) messages.push({ role: 'user', content: userPrompt });
@@ -1496,7 +1556,6 @@ axios.post('/api/translate', formData, {
             throw new Error("Provider and User Prompt are required for streaming.");
           }
 
-          // --- Using fetch to handle POST for SSE initiation ---
           const response = await fetch(`${API_BASE_URL}/api/stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1507,22 +1566,18 @@ axios.post('/api/translate', formData, {
             const errorData = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
             throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
           }
+          if (!response.body) throw new Error("Response body is null.");
 
-          if (!response.body) {
-            throw new Error("Response body is null.");
-          }
+          hideLoader(loaderId); // Hide loader once headers are received
 
-          // Manually read the SSE stream
           streamReader = response.body.pipeThrough(new TextDecoderStream()).getReader();
           let buffer = '';
 
-          hideLoader('loader-stream'); // Hide loader once stream starts
-
+          // eslint-disable-next-line no-constant-condition
           while (true) {
             const { value, done } = await streamReader.read();
             if (done) {
-              console.log('Stream finished.');
-              appendStreamOutput('output-stream', '\n--- Stream Complete ---');
+              appendStreamOutput(outputId, '\n--- Stream Complete ---');
               break;
             }
 
@@ -1533,78 +1588,60 @@ axios.post('/api/translate', formData, {
               const message = buffer.substring(0, boundary);
               buffer = buffer.substring(boundary + 2);
 
-              let eventType = 'message'; // Default event type
+              let eventType = 'message';
               let eventData = '';
-
               message.split('\n').forEach(line => {
-                if (line.startsWith('event:')) {
-                  eventType = line.substring(6).trim();
-                } else if (line.startsWith('data:')) {
-                  eventData += line.substring(5).trim(); // Accumulate data lines if multi-line
-                }
+                if (line.startsWith('event:')) eventType = line.substring(6).trim();
+                else if (line.startsWith('data:')) eventData += line.substring(5).trim();
               });
 
               if (eventData) {
                 try {
                   const parsedData = JSON.parse(eventData);
                   if (eventType === 'message') {
-                    const chunk = parsedData; // Already parsed StreamChunk
-                    // Process chunk based on type
-                    if (chunk.type === 'content_delta') {
-                      appendStreamOutput('output-stream', chunk.data.delta);
-                    } else if (chunk.type === 'message_stop') {
-                      appendStreamOutput('output-stream', `\n--- Stream Stopped (Reason: ${chunk.data.finishReason}) ---`);
-                    } else if (chunk.type === 'final_usage') {
-                      appendStreamOutput('output-stream', `\nFinal Usage: ${JSON.stringify(chunk.data.usage)}`);
-                    } else if (chunk.type === 'final_result') {
-                      appendStreamOutput('output-stream', `\n--- Final Result Received ---`);
-                    }
-                    // Add handling for other chunk types (tool_call, thinking, etc.)
-                    else {
-                      appendStreamOutput('output-stream', `\n[${chunk.type}]`);
-                    }
+                    const chunk = parsedData;
+                    if (chunk.type === 'content_delta') appendStreamOutput(outputId, chunk.data.delta);
+                    else if (chunk.type === 'message_stop') appendStreamOutput(outputId, `\n--- Stream Stopped (Reason: ${chunk.data.finishReason}) ---`);
+                    else if (chunk.type === 'final_usage') appendStreamOutput(outputId, `\nFinal Usage: ${JSON.stringify(chunk.data.usage)}`);
+                    else if (chunk.type === 'final_result') appendStreamOutput(outputId, `\n--- Final Result Received ---`);
+                    else appendStreamOutput(outputId, `\n[${chunk.type}]`); // Handle others
                   } else if (eventType === 'error') {
-                    console.error('SSE Error Event:', parsedData);
-                    displayOutput('output-stream', `Stream Error: ${parsedData?.error?.message || eventData}`, true);
-                    if (streamReader) streamReader.cancel('Error received'); // Stop reading on error
-                    streamReader = null;
-                    break; // Exit inner while loop
+                    throw new Error(`Stream Error: ${parsedData?.error?.message || eventData}`);
                   } else if (eventType === 'end') {
-                    appendStreamOutput('output-stream', `\n--- Stream End Signal Received ---`);
+                    appendStreamOutput(outputId, `\n--- Stream End Signal ---`);
                     if (streamReader) streamReader.cancel('End event received');
                     streamReader = null;
                     break;
                   }
-                } catch (e) {
-                  console.error('Failed to parse SSE data:', e, 'Data:', eventData);
-                }
+                } catch (e) { console.error('SSE Parse Error:', e, 'Data:', eventData); }
               }
-              if (!streamReader) break; // Check if reader was cancelled by stop button
+              if (!streamReader) break; // Check if stopped
               boundary = buffer.indexOf('\n\n');
             } // end while boundary
-            if (!streamReader) break; // Check if reader was cancelled by stop button
+            if (!streamReader) break; // Check if stopped
           } // end while true
 
         } catch (error) {
           console.error("Streaming Error:", error);
-          displayOutput('output-stream', error.message || 'Failed to start stream.', true);
+          if (error.name !== 'AbortError' && !error.message?.includes('cancel')) { // Don't show error if user cancelled
+            displayOutput(outputId, error.message || 'Failed to start stream.', true);
+          } else {
+            appendStreamOutput(outputId, `\n--- Stream Cancelled ---`)
+          }
         } finally {
-          hideLoader('loader-stream');
+          hideLoader(loaderId);
           if (runStreamButton) runStreamButton.disabled = false;
           if (stopStreamButton) stopStreamButton.disabled = true;
-          streamReader = null; // Clear reader reference
+          streamReader = null;
         }
       });
 
       stopStreamButton?.addEventListener('click', () => {
         if (streamReader) {
           console.log('Stopping stream by client request...');
-          streamReader.cancel('Stopped by user');
-          streamReader = null;
-          appendStreamOutput('output-stream', '\n--- Stream Stopped by User ---');
-          if (runStreamButton) runStreamButton.disabled = false;
-          if (stopStreamButton) stopStreamButton.disabled = true;
-          hideLoader('loader-stream');
+          streamReader.cancel('Stopped by user'); // This will cause the read loop to throw/exit
+          // No need to manually set streamReader = null here, the finally block in runStreamButton handles it
+          // UI updates are also handled in the finally block
         }
       });
 
@@ -1613,7 +1650,10 @@ axios.post('/api/translate', formData, {
       document.querySelectorAll('.copy-button').forEach(button => {
         button.addEventListener('click', () => {
           const codeId = button.dataset.codeId;
-          const codeElement = document.getElementById(codeId);
+          // Find code within the closest <pre> of the button
+          const preElement = button.closest('pre');
+          const codeElement = preElement?.querySelector(`code#${codeId}`); // Find code *within* that pre
+
           if (codeElement) {
             navigator.clipboard.writeText(codeElement.textContent || '')
               .then(() => {
@@ -1628,6 +1668,8 @@ axios.post('/api/translate', formData, {
                 console.error('Failed to copy text: ', err);
                 button.textContent = 'Error';
               });
+          } else {
+            console.error(`Copy button failed: Could not find code element with id #${codeId} inside the parent <pre>`);
           }
         });
       });
