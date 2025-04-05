@@ -54,7 +54,8 @@ function mapRoleToGoogle(role: RosettaMessage['role']): 'user' | 'model' | 'func
 function mapContentToGoogleParts(content: RosettaMessage['content']): GooglePart[] {
   if (content === null) {
     // Google generally expects non-null content for user/model. Return empty array or handle error.
-    console.warn('Mapping null content to empty parts array for Google.')
+    // This is acceptable for history messages, but not for the final message sent to sendMessage.
+    console.warn('Mapping null content to empty parts array for Google history.')
     return []
   }
   if (typeof content === 'string') {
@@ -106,10 +107,16 @@ export function mapToGoogleParams(
 ): { googleMappedParams: GenerateContentRequest | (StartChatParams & { contents: GooglePart[] }); isChat: boolean } {
   let systemInstruction: GoogleContent | undefined = undefined
   const history: GoogleContent[] = []
-  let lastUserMessageParts: GooglePart[] = []
+  const messagesToProcess = [...params.messages] // Create a mutable copy
 
-  params.messages.forEach((msg, index) => {
-    const isLastMessage = index === params.messages.length - 1
+  // Extract the last message for the current turn's content
+  const lastMessage = messagesToProcess.pop()
+  if (!lastMessage) {
+    throw new MappingError('No messages provided to map for Google.', Provider.Google)
+  }
+
+  // Process the history messages (all except the last one)
+  messagesToProcess.forEach(msg => {
     const googleRole = mapRoleToGoogle(msg.role)
 
     if (googleRole === 'system') {
@@ -123,7 +130,7 @@ export function mapToGoogleParams(
 
     const parts = mapContentToGoogleParts(msg.content)
 
-    // Handle model's function calls
+    // Handle model's function calls in history
     if (googleRole === 'model' && msg.toolCalls && msg.toolCalls.length > 0) {
       const functionCallParts: FunctionCallPart[] = msg.toolCalls.map(tc => {
         try {
@@ -141,15 +148,14 @@ export function mapToGoogleParams(
       const existingTextParts = parts.filter((p): p is TextPart => 'text' in p)
       history.push({ role: googleRole, parts: [...existingTextParts, ...functionCallParts] })
     }
-    // Handle user's function responses
+    // Handle user's function responses in history
     else if (googleRole === 'function') {
       if (!msg.toolCallId || typeof msg.content !== 'string') {
         throw new MappingError(
-          'Invalid tool result message for Google. Requires toolCallId and string content.',
+          'Invalid tool result message for Google history. Requires toolCallId and string content.',
           Provider.Google
         )
       }
-      // Find the name associated with this response from previous model turn
       const funcName = findLastToolCallName(history, msg.toolCallId)
       if (!funcName) {
         throw new MappingError(
@@ -159,18 +165,12 @@ export function mapToGoogleParams(
       }
       let respContent: any
       try {
-        // Google expects the 'response' field to be an object
         respContent = JSON.parse(msg.content)
       } catch {
-        // If parsing fails, wrap the string content in a standard object structure
         respContent = { content: msg.content }
         console.warn(`Tool result content for ${funcName} was not valid JSON. Wrapping as { content: "..." }`)
       }
       history.push({ role: googleRole, parts: [{ functionResponse: { name: funcName, response: respContent } }] })
-    }
-    // Handle the last user message separately for chat vs. non-chat
-    else if (isLastMessage && googleRole === 'user') {
-      lastUserMessageParts = parts
     }
     // Handle regular user/model messages in history
     else {
@@ -179,7 +179,50 @@ export function mapToGoogleParams(
     }
   })
 
-  // Map Tools and Grounding
+  // Map the last message to parts for the current turn's content
+  let currentTurnParts: GooglePart[]
+  const lastMessageRole = mapRoleToGoogle(lastMessage.role)
+
+  if (lastMessageRole === 'function') {
+    // Handle the last message being a tool result
+    if (!lastMessage.toolCallId || typeof lastMessage.content !== 'string') {
+      throw new MappingError(
+        'Invalid last message: Tool result requires toolCallId and string content.',
+        Provider.Google
+      )
+    }
+    const funcName = findLastToolCallName(history, lastMessage.toolCallId) // Check history before last message
+    if (!funcName) {
+      throw new MappingError(
+        `Cannot find function name for final tool result (ID: ${lastMessage.toolCallId}).`,
+        Provider.Google
+      )
+    }
+    let respContent: any
+    try {
+      respContent = JSON.parse(lastMessage.content)
+    } catch {
+      respContent = { content: lastMessage.content }
+      console.warn(`Final tool result content for ${funcName} was not valid JSON. Wrapping as { content: "..." }`)
+    }
+    currentTurnParts = [{ functionResponse: { name: funcName, response: respContent } }]
+  } else if (lastMessageRole === 'user') {
+    // Handle the last message being a user message
+    currentTurnParts = mapContentToGoogleParts(lastMessage.content)
+    if (currentTurnParts.length === 0) {
+      // This prevents the "No content provided" error for user messages
+      throw new MappingError('Final user message content cannot be null or empty.', Provider.Google)
+    }
+  } else {
+    // The last message should typically be 'user' or 'tool' ('function') in a conversation flow.
+    // If it's 'assistant' or 'system', the flow is likely incorrect for Google's chat model.
+    throw new MappingError(
+      `Invalid role for the final message in a Google chat turn: '${lastMessageRole}'. Expected 'user' or 'tool'.`,
+      Provider.Google
+    )
+  }
+
+  // Map Tools and Grounding (same as before)
   const googleTools: GoogleTool[] | undefined = params.tools?.map(tool => {
     if (tool.type !== 'function') {
       throw new MappingError(`Only 'function' tools are currently supported for Google.`, Provider.Google)
@@ -198,8 +241,7 @@ export function mapToGoogleParams(
 
   let finalTools = googleTools
   if (params.grounding?.enabled) {
-    // Currently only supports GoogleSearchRetrieval
-    const searchTool: GoogleTool = { googleSearchRetrieval: {} } // Default empty config
+    const searchTool: GoogleTool = { googleSearchRetrieval: {} }
     if (params.grounding.source && params.grounding.source !== 'web') {
       console.warn(
         `Only 'web' grounding source currently mapped for Google Search Retrieval. Ignoring source: ${params.grounding.source}`
@@ -208,51 +250,43 @@ export function mapToGoogleParams(
     finalTools = finalTools ? [...finalTools, searchTool] : [searchTool]
   }
 
-  // Map Response Format
+  // Map Response Format (same as before)
   let responseMimeType: string | undefined
-  // const responseSchemaForConfig: GoogleSchema | undefined = undefined // Not directly usable in GenerationConfig. no unused vars!
   if (params.responseFormat?.type === 'json_object') {
     responseMimeType = 'application/json'
     if (params.responseFormat.schema) {
-      // Note: Google's `responseSchema` in GenerationConfig is for function calling, not general JSON mode.
-      // We set responseMimeType, but schema needs to be handled via prompting.
       console.warn(
         'Google JSON mode requested via responseFormat. Ensure schema is described in the prompt. `schema` parameter is ignored for Google GenerationConfig.'
       )
-      // if (isFunctionDeclarationSchema(params.responseFormat.schema)) {
-      // responseSchemaForConfig = params.responseFormat.schema; // This is incorrect mapping for Google
-      // }
     }
   }
 
-  // Build GenerationConfig
+  // Build GenerationConfig (same as before)
   const generationConfig = {
     maxOutputTokens: params.maxTokens,
     temperature: params.temperature,
     topP: params.topP,
     stopSequences: Array.isArray(params.stop) ? params.stop : params.stop ? [params.stop] : undefined,
     responseMimeType: responseMimeType
-    // responseSchema: responseSchemaForConfig // Cannot map schema here directly
   }
 
-  // Determine if it's a chat or single-turn request
-  const isChat = history.length > 0 || !!systemInstruction
+  // Determine if it's a chat or single-turn request (always chat if history exists or system instruction)
+  const isChat = history.length > 0 || !!systemInstruction || messagesToProcess.length > 0
 
   if (isChat) {
-    // For chat, use StartChatParams structure, add last user message to `contents`
+    // For chat, use StartChatParams structure, add last message parts to `contents`
     const chatParams: StartChatParams = {
       history,
       generationConfig,
       tools: finalTools,
       systemInstruction
     }
-    // The google SDK's startChat doesn't take initial contents directly, sendMessage does.
-    // Return structure indicating chat and include the parts for the first sendMessage call.
-    return { googleMappedParams: { ...chatParams, contents: lastUserMessageParts }, isChat: true }
+    // Return structure indicating chat and include the parts for the current sendMessage call.
+    return { googleMappedParams: { ...chatParams, contents: currentTurnParts }, isChat: true }
   } else {
-    // For single-turn, use GenerateContentRequest
+    // For single-turn (only one user message), use GenerateContentRequest
     const request: GenerateContentRequest = {
-      contents: [{ role: 'user', parts: lastUserMessageParts }],
+      contents: [{ role: 'user', parts: currentTurnParts }], // Use currentTurnParts here
       generationConfig,
       tools: finalTools,
       systemInstruction
@@ -417,8 +451,6 @@ export function mapFromGoogleResponse(response: GenerateContentResponse | undefi
     rawResponse: response
   }
 }
-
-// --- Stream Mapping ---
 
 // --- Stream Mapping ---
 

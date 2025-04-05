@@ -17,7 +17,8 @@ import {
   ChatCompletionChunk as GroqChatCompletionChunk,
   ChatCompletion as GroqChatCompletion
 } from 'groq-sdk/resources/chat/completions'
-import { Stream as GroqStreamType } from 'groq-sdk/lib/streaming' // Use type import for Groq Stream
+// FIX: Change import from GroqStreamType to standard AsyncIterable
+// import { Stream as GroqStreamType } from 'groq-sdk/lib/streaming'
 import { Uploadable as OpenAIUploadable } from 'openai/uploads'
 import { Uploadable as GroqUploadable } from 'groq-sdk/core'
 
@@ -249,12 +250,17 @@ export class RosettaAI {
         case Provider.Google:
           if (!this.googleClient) throw this.providerNotConfigured(Provider.Google)
           const googleM = this.getGoogleModel(model, params.providerOptions)
+          // FIX: Pass effectiveParams to the mapper
           const { googleMappedParams: googleP, isChat } = GoogleMapper.mapToGoogleParams(effectiveParams)
 
           if (isChat) {
-            const chatP = googleP as StartChatParams & { contents: GooglePart[] }
-            const chat = googleM.startChat(chatP)
-            const googleCR = await chat.sendMessage(chatP.contents)
+            // FIX: Extract chatParams and currentTurnContent correctly
+            const { contents: currentTurnContent, ...chatParams } = googleP as StartChatParams & {
+              contents: GooglePart[]
+            }
+            const chat = googleM.startChat(chatParams)
+            // FIX: Send the currentTurnContent to sendMessage
+            const googleCR = await chat.sendMessage(currentTurnContent)
             return GoogleMapper.mapFromGoogleResponse(googleCR.response, model)
           } else {
             const googleR = await googleM.generateContent(googleP as GenerateContentRequest)
@@ -265,8 +271,8 @@ export class RosettaAI {
           if (!this.groqClient) throw this.providerNotConfigured(Provider.Groq)
           const groqP = GroqMapper.mapToGroqParams(effectiveParams) as GroqChatCompletionCreateParams
           const groqR = await this.groqClient.chat.completions.create(groqP)
-          if ('iterator' in groqR || Symbol.asyncIterator in groqR) {
-            // Check both possible stream indicators
+          // FIX: Change check for Groq stream type
+          if (typeof (groqR as any)[Symbol.asyncIterator] === 'function') {
             throw new MappingError('Groq returned a stream for a non-streaming request.', Provider.Groq)
           }
           // Cast result to non-streaming type for the mapper
@@ -330,12 +336,17 @@ export class RosettaAI {
         case Provider.Google:
           if (!this.googleClient) throw this.providerNotConfigured(Provider.Google)
           const googleM = this.getGoogleModel(model, params.providerOptions)
+          // FIX: Pass effectiveParams to the mapper
           const { googleMappedParams: googleP, isChat } = GoogleMapper.mapToGoogleParams(effectiveParams)
 
           if (isChat) {
-            const chatP = googleP as StartChatParams & { contents: GooglePart[] }
-            const chat = googleM.startChat(chatP)
-            const googleSR = await chat.sendMessageStream(chatP.contents)
+            // FIX: Extract chatParams and currentTurnContent correctly
+            const { contents: currentTurnContent, ...chatParams } = googleP as StartChatParams & {
+              contents: GooglePart[]
+            }
+            const chat = googleM.startChat(chatParams)
+            // FIX: Send the currentTurnContent to sendMessageStream
+            const googleSR = await chat.sendMessageStream(currentTurnContent)
             yield* GoogleMapper.mapGoogleStream(googleSR.stream)
           } else {
             const googleSR = await googleM.generateContentStream(googleP as GenerateContentRequest)
@@ -347,13 +358,15 @@ export class RosettaAI {
           if (!this.groqClient) throw this.providerNotConfigured(Provider.Groq)
           const groqP = GroqMapper.mapToGroqParams(effectiveParams) as GroqChatCompletionCreateParams
           const groqSR = await this.groqClient.chat.completions.create(groqP)
+          // FIX: Change check for Groq stream type
           if (!(typeof (groqSR as any)[Symbol.asyncIterator] === 'function')) {
             throw new MappingError(
               'Groq did not return a stream (async iterator) for a streaming request.',
               Provider.Groq
             )
           }
-          yield* GroqMapper.mapGroqStream(groqSR as GroqStreamType<GroqChatCompletionChunk>)
+          // FIX: Cast to the correct AsyncIterable type
+          yield* GroqMapper.mapGroqStream(groqSR as AsyncIterable<GroqChatCompletionChunk>)
           break
 
         case Provider.OpenAI:
@@ -814,17 +827,25 @@ export class RosettaAI {
       // FIX: Access status, code, type directly
       return new ProviderAPIError(message, Provider.OpenAI, error.status, error.code, error.type, error)
     }
+    // FIX: Improve Google error detection and extraction
     if (
       typeof error === 'object' &&
       error !== null &&
       'message' in error &&
-      (error.constructor?.name?.includes('GoogleGenerativeAI') || 'errorDetails' in error || 'response' in error)
+      (error.constructor?.name?.includes('Google') || // Broader check for Google errors
+      (error as any).code || // Check for code property
+      (error as any).status || // Check for status property
+        (error as any).httpStatus ||
+        (error as any).errorDetails)
     ) {
       const gError = error as any
-      const statusCode = gError.status ?? gError.httpStatus ?? safeGet<number>(gError, 'response', 'status')
-      const errorCode = safeGet<string>(gError, 'errorDetails', 0, 'reason') ?? gError.code
-      const errorType = gError.name ?? safeGet<string>(gError, 'errorDetails', 0, 'type')
-      return new ProviderAPIError((error as Error).message, Provider.Google, statusCode, errorCode, errorType, error)
+      // Prioritize specific Google error properties if available
+      const statusCode =
+        gError.httpStatus ?? gError.status ?? safeGet<number>(gError, 'response', 'status') ?? undefined
+      const errorCode = safeGet<string>(gError, 'errorDetails', 0, 'reason') ?? gError.code ?? undefined
+      const errorType = gError.name ?? safeGet<string>(gError, 'errorDetails', 0, 'type') ?? undefined
+      const message = (error as Error).message || 'Unknown Google API Error'
+      return new ProviderAPIError(message, Provider.Google, statusCode, errorCode, errorType, error)
     }
     if (error instanceof Error) {
       return new ProviderAPIError(error.message, provider, undefined, undefined, undefined, error)
