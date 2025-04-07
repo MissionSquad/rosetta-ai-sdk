@@ -2,7 +2,7 @@
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm version](https://badge.fury.io/js/rosetta-ai-sdk.svg)](https://badge.fury.io/js/rosetta-ai-sdk) <!-- TODO: Replace with actual package name -->
-[![Node.js CI](https://github.com/your-username/rosetta-ai-sdk/actions/workflows/node.js.yml/badge.svg)](https://github.com/your-username/rosetta-ai-sdk/actions/workflows/node.js.yml) <!-- TODO: Replace with actual repo path -->
+[![Node.js CI](https://github.com/MissionSquad/rosetta-ai-sdk/actions/workflows/node.js.yml/badge.svg)](https://github.com/MissionSquad/rosetta-ai-sdk/actions/workflows/node.js.yml) <!-- TODO: Replace with actual repo path -->
 
 **RosettaAI** is a unified TypeScript SDK designed for seamless interaction with multiple Large Language Model (LLM) providers like OpenAI (including Azure), Anthropic, Google Generative AI, and Groq. It provides a consistent interface (`generate`, `stream`, `embed`, `generateSpeech`, `transcribe`, etc.) that abstracts away the provider-specific implementations, allowing you to switch between backends with minimal code changes.
 
@@ -697,7 +697,7 @@ Runnable examples demonstrating various features can be found in the `/examples`
 
 ## Development
 
-1.  **Clone:** `git clone https://github.com/your-username/rosetta-ai-sdk.git` <!-- TODO: Replace with actual repo path -->
+1.  **Clone:** `git clone https://github.com/MissionSquad/rosetta-ai-sdk.git` <!-- TODO: Replace with actual repo path -->
 2.  **Install:** `cd rosetta-ai-sdk && npm install`
 3.  **Build:** `npm run build` (Compiles TypeScript to JavaScript in `/dist`)
 4.  **Test:** `npm test` (Runs Jest tests)
