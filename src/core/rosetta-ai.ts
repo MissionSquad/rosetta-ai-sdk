@@ -7,20 +7,11 @@ import {
   StartChatParams,
   GenerateContentRequest,
   EmbedContentRequest,
-  Part as GooglePart // Import Part type alias
+  BatchEmbedContentsRequest,
+  Part as GooglePart
 } from '@google/generative-ai'
 import Groq from 'groq-sdk'
 import OpenAI, { AzureOpenAI } from 'openai'
-import { Stream } from 'openai/streaming'
-import {
-  ChatCompletionCreateParams as GroqChatCompletionCreateParams,
-  ChatCompletionChunk as GroqChatCompletionChunk,
-  ChatCompletion as GroqChatCompletion
-} from 'groq-sdk/resources/chat/completions'
-// FIX: Change import from GroqStreamType to standard AsyncIterable
-// import { Stream as GroqStreamType } from 'groq-sdk/lib/streaming'
-import { Uploadable as OpenAIUploadable } from 'openai/uploads'
-import { Uploadable as GroqUploadable } from 'groq-sdk/core'
 
 import { config as dotenvConfig } from 'dotenv'
 
@@ -37,18 +28,22 @@ import {
   TranslateParams,
   TranscriptionResult,
   StreamChunk,
-  ProviderOptions
+  ProviderOptions,
+  RosettaModelList, // Import new model types
+  ModelListingSourceConfig // Import new config type
 } from '../types'
 import { ConfigurationError, ProviderAPIError, UnsupportedFeatureError, RosettaAIError, MappingError } from '../errors'
 
-// Import mapping functions
-import * as AnthropicMapper from './mapping/anthropic.mapper'
-import * as GoogleMapper from './mapping/google.mapper'
-import * as GroqMapper from './mapping/groq.mapper'
-import * as OpenAIMapper from './mapping/openai.mapper'
-import * as AzureOpenAIMapper from './mapping/azure.openai.mapper'
-import * as GoogleEmbedMapper from './mapping/google.embed.mapper'
-import { prepareAudioUpload, safeGet } from './utils'
+// Import V2 Mappers and Interface
+import { IProviderMapper } from './mapping/base.mapper'
+import { AnthropicMapper } from './mapping/anthropic.mapper'
+import { GoogleMapper } from './mapping/google.mapper'
+import { GroqMapper } from './mapping/groq.mapper'
+import { OpenAIMapper } from './mapping/openai.mapper'
+import { AzureOpenAIMapper } from './mapping/azure.openai.mapper'
+
+import { prepareAudioUpload } from './utils'
+import { listModelsForProvider } from './listing/model.lister' // Import internal lister function
 
 dotenvConfig()
 
@@ -63,6 +58,8 @@ export class RosettaAI {
   private groqClient?: Groq
   private openAIClient?: OpenAI
   private azureOpenAIClient?: AzureOpenAI
+  /** @internal Map holding initialized provider mappers. */
+  private mappers: Map<Provider, IProviderMapper>
 
   /** Creates an instance of the RosettaAI client. */
   constructor(config: RosettaAIConfig = {}) {
@@ -81,13 +78,12 @@ export class RosettaAI {
       azureOpenAIDefaultEmbeddingDeploymentName:
         config.azureOpenAIDefaultEmbeddingDeploymentName ?? loadEnv('ROSETTA_AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME'),
       azureOpenAIApiVersion: config.azureOpenAIApiVersion ?? loadEnv('AZURE_OPENAI_API_VERSION'),
-      // Default models with fallbacks from env
       defaultModels: {
         [Provider.Anthropic]: config.defaultModels?.[Provider.Anthropic] ?? loadEnv('ROSETTA_DEFAULT_ANTHROPIC_MODEL'),
         [Provider.Google]: config.defaultModels?.[Provider.Google] ?? loadEnv('ROSETTA_DEFAULT_GOOGLE_MODEL'),
         [Provider.Groq]: config.defaultModels?.[Provider.Groq] ?? loadEnv('ROSETTA_DEFAULT_GROQ_MODEL'),
         [Provider.OpenAI]: config.defaultModels?.[Provider.OpenAI] ?? loadEnv('ROSETTA_DEFAULT_OPENAI_MODEL'),
-        ...config.defaultModels // Allow overriding with constructor args
+        ...config.defaultModels
       },
       defaultEmbeddingModels: {
         [Provider.Google]:
@@ -109,10 +105,12 @@ export class RosettaAI {
       },
       providerOptions: config.providerOptions,
       defaultMaxRetries: config.defaultMaxRetries ?? 2,
-      defaultTimeoutMs: config.defaultTimeoutMs ?? 60 * 1000
+      defaultTimeoutMs: config.defaultTimeoutMs ?? 60 * 1000,
+      modelListingConfig: config.modelListingConfig // Include new config option
     }
 
     this.initializeClients()
+    this.initializeMappers() // Initialize mappers after clients
     this.validateConfiguration()
   }
 
@@ -130,7 +128,6 @@ export class RosettaAI {
 
     // Google
     if (this.config.googleApiKey) {
-      // Google SDK doesn't take baseURL/retries/timeout in constructor
       this.googleClient = new GoogleGenerativeAI(this.config.googleApiKey)
     }
 
@@ -150,7 +147,6 @@ export class RosettaAI {
     }
 
     // OpenAI / Azure OpenAI
-    // Prioritize Azure if endpoint and key are provided
     if (this.config.azureOpenAIEndpoint && this.config.azureOpenAIApiKey && this.config.azureOpenAIApiVersion) {
       try {
         this.azureOpenAIClient = new AzureOpenAI({
@@ -159,7 +155,6 @@ export class RosettaAI {
           apiVersion: this.config.azureOpenAIApiVersion,
           maxRetries: this.config.defaultMaxRetries,
           timeout: this.config.defaultTimeoutMs
-          // deployment: this.config.azureOpenAIDefaultChatDeploymentName, // Deployment applied per-request if needed
         })
         console.log(
           `RosettaAI: Initialized Azure OpenAI client (Endpoint: ${this.config.azureOpenAIEndpoint}, API Version: ${this.config.azureOpenAIApiVersion}).`
@@ -167,10 +162,8 @@ export class RosettaAI {
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
         console.warn(`RosettaAI: Azure OpenAI init failed: ${message}. Ensure endpoint and apiVersion are correct.`)
-        // Fallback to standard OpenAI if key exists? Or just fail Azure? Let's just warn.
       }
     } else if (this.config.openaiApiKey) {
-      // Initialize standard OpenAI if Azure isn't fully configured but OpenAI key exists
       this.openAIClient = new OpenAI({
         apiKey: this.config.openaiApiKey,
         baseURL: this.config.providerOptions?.[Provider.OpenAI]?.baseURL,
@@ -178,6 +171,20 @@ export class RosettaAI {
         timeout: this.config.defaultTimeoutMs
       })
       console.log('RosettaAI: Initialized standard OpenAI client.')
+    }
+  }
+
+  /** @internal Initializes the provider mappers map. */
+  private initializeMappers(): void {
+    this.mappers = new Map<Provider, IProviderMapper>()
+    if (this.anthropicClient) this.mappers.set(Provider.Anthropic, new AnthropicMapper())
+    if (this.googleClient) this.mappers.set(Provider.Google, new GoogleMapper())
+    if (this.groqClient) this.mappers.set(Provider.Groq, new GroqMapper())
+    // Handle OpenAI/Azure selection for the 'openai' provider key
+    if (this.azureOpenAIClient) {
+      this.mappers.set(Provider.OpenAI, new AzureOpenAIMapper(this.config)) // Pass config
+    } else if (this.openAIClient) {
+      this.mappers.set(Provider.OpenAI, new OpenAIMapper())
     }
   }
 
@@ -207,279 +214,220 @@ export class RosettaAI {
         'RosettaAI Warning: Azure OpenAI endpoint and key provided, but API version is missing. Azure OpenAI client not initialized.'
       )
     }
-    if (this.azureOpenAIClient && this.openAIClient) {
-      console.warn(
-        "RosettaAI Warning: Both Azure and standard OpenAI clients are configured. Azure OpenAI will be prioritized for provider 'openai'."
-      )
-    }
   }
 
   /** Gets a list of successfully configured providers for this client instance. */
   public getConfiguredProviders(): Provider[] {
-    const p: Provider[] = []
-    if (this.anthropicClient) p.push(Provider.Anthropic)
-    if (this.googleClient) p.push(Provider.Google)
-    if (this.groqClient) p.push(Provider.Groq)
-    // Provider.OpenAI is active if either Azure or standard client is initialized
-    if (this.openAIClient || this.azureOpenAIClient) p.push(Provider.OpenAI)
-    return p
+    return Array.from(this.mappers.keys()) // Providers are keys in the mappers map
+  }
+
+  /** @internal Gets the mapper instance for a given provider. */
+  private getMapper(provider: Provider): IProviderMapper {
+    const mapper = this.mappers.get(provider)
+    if (!mapper) {
+      throw this.providerNotConfigured(provider)
+    }
+    return mapper
+  }
+
+  /** @internal Gets the underlying SDK client instance for a given provider. */
+  private getClientForProvider(provider: Provider): Anthropic | GoogleGenerativeAI | Groq | OpenAI | AzureOpenAI {
+    switch (provider) {
+      case Provider.Anthropic:
+        if (!this.anthropicClient) throw this.providerNotConfigured(provider)
+        return this.anthropicClient
+      case Provider.Google:
+        if (!this.googleClient) throw this.providerNotConfigured(provider)
+        return this.googleClient // Note: Methods are called on model object, not client directly
+      case Provider.Groq:
+        if (!this.groqClient) throw this.providerNotConfigured(provider)
+        return this.groqClient
+      case Provider.OpenAI:
+        // Prioritize Azure
+        const client = this.azureOpenAIClient ?? this.openAIClient
+        if (!client) throw this.providerNotConfigured(provider)
+        return client
+      default:
+        // Ensure exhaustive check works with `never`
+        const _e: never = provider
+        throw new RosettaAIError(`Unsupported provider: ${_e}`)
+    }
   }
 
   /** Generates a chat completion (non-streaming). */
   public async generate(params: GenerateParams): Promise<GenerateResult> {
+    const mapper = this.getMapper(params.provider)
     const model = params.model ?? this.config.defaultModels?.[params.provider]
     if (!model) {
       throw new ConfigurationError(`Model must be specified for provider ${params.provider} (or set a default).`)
     }
     const effectiveParams = { ...params, model, stream: false }
-    this.checkUnsupportedFeatures(params.provider, effectiveParams, !!this.azureOpenAIClient)
+    this.checkUnsupportedFeatures(params.provider, effectiveParams, 'Generate', !!this.azureOpenAIClient)
 
     try {
-      switch (params.provider) {
-        case Provider.Anthropic:
-          if (!this.anthropicClient) throw this.providerNotConfigured(Provider.Anthropic)
-          const anthropicP = AnthropicMapper.mapToAnthropicParams(effectiveParams)
-          const anthropicR = await this.anthropicClient.messages.create(
-            anthropicP as Anthropic.Messages.MessageCreateParamsNonStreaming
-          )
-          if (Symbol.asyncIterator in anthropicR) {
-            throw new MappingError('Anthropic returned a stream for a non-streaming request.', Provider.Anthropic)
+      const providerParams = mapper.mapToProviderParams(effectiveParams)
+      const client = this.getClientForProvider(params.provider)
+
+      // --- Client Call Logic ---
+      let providerResponse: any
+      if (params.provider === Provider.Anthropic) {
+        providerResponse = await (client as Anthropic).messages.create(providerParams)
+      } else if (params.provider === Provider.Google) {
+        const googleM = this.getGoogleModel(model, params.providerOptions) // Reuse existing helper
+        // The mapper now returns an object indicating if it's chat and the mapped params
+        const { googleMappedParams: googleP, isChat } = providerParams
+        if (isChat) {
+          const { contents: currentTurnContent, ...chatParams } = googleP as StartChatParams & {
+            contents: GooglePart[]
           }
-          return AnthropicMapper.mapFromAnthropicResponse(anthropicR, model)
-
-        case Provider.Google:
-          if (!this.googleClient) throw this.providerNotConfigured(Provider.Google)
-          const googleM = this.getGoogleModel(model, params.providerOptions)
-          // FIX: Pass effectiveParams to the mapper
-          const { googleMappedParams: googleP, isChat } = GoogleMapper.mapToGoogleParams(effectiveParams)
-
-          if (isChat) {
-            // FIX: Extract chatParams and currentTurnContent correctly
-            const { contents: currentTurnContent, ...chatParams } = googleP as StartChatParams & {
-              contents: GooglePart[]
-            }
-            const chat = googleM.startChat(chatParams)
-            // FIX: Send the currentTurnContent to sendMessage
-            const googleCR = await chat.sendMessage(currentTurnContent)
-            return GoogleMapper.mapFromGoogleResponse(googleCR.response, model)
-          } else {
-            const googleR = await googleM.generateContent(googleP as GenerateContentRequest)
-            return GoogleMapper.mapFromGoogleResponse(googleR.response, model)
-          }
-
-        case Provider.Groq:
-          if (!this.groqClient) throw this.providerNotConfigured(Provider.Groq)
-          const groqP = GroqMapper.mapToGroqParams(effectiveParams) as GroqChatCompletionCreateParams
-          const groqR = await this.groqClient.chat.completions.create(groqP)
-          // FIX: Change check for Groq stream type
-          if (typeof (groqR as any)[Symbol.asyncIterator] === 'function') {
-            throw new MappingError('Groq returned a stream for a non-streaming request.', Provider.Groq)
-          }
-          // Cast result to non-streaming type for the mapper
-          return GroqMapper.mapFromGroqResponse(groqR as GroqChatCompletion, model)
-
-        case Provider.OpenAI:
-          if (this.azureOpenAIClient) {
-            const azureP = AzureOpenAIMapper.mapToAzureOpenAIParams(effectiveParams, this.config)
-            const azureR = await this.azureOpenAIClient.chat.completions.create(
-              azureP as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming
-            )
-            if (typeof (azureR as any)[Symbol.asyncIterator] === 'function')
-              throw new MappingError('Azure returned stream for non-stream request.', Provider.OpenAI)
-            return AzureOpenAIMapper.mapFromAzureOpenAIResponse(azureR as OpenAI.Chat.ChatCompletion, azureP.model)
-          } else if (this.openAIClient) {
-            const openaiP = OpenAIMapper.mapToOpenAIParams(effectiveParams)
-            const openaiR = await this.openAIClient.chat.completions.create(
-              openaiP as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming
-            )
-            if (typeof (openaiR as any)[Symbol.asyncIterator] === 'function')
-              throw new MappingError('OpenAI returned stream for non-stream request.', Provider.OpenAI)
-            return OpenAIMapper.mapFromOpenAIResponse(openaiR as OpenAI.Chat.ChatCompletion, model)
-          } else {
-            throw this.providerNotConfigured(Provider.OpenAI)
-          }
-
-        default:
-          const _e: never = params.provider
-          throw new RosettaAIError(`Unsupported provider: ${_e}`)
+          const chat = googleM.startChat(chatParams)
+          const googleCR = await chat.sendMessage(currentTurnContent)
+          providerResponse = googleCR.response // Extract the response part
+        } else {
+          const googleR = await googleM.generateContent(googleP as GenerateContentRequest)
+          providerResponse = googleR.response // Extract the response part
+        }
+      } else if (params.provider === Provider.Groq) {
+        providerResponse = await (client as Groq).chat.completions.create(providerParams)
+      } else if (params.provider === Provider.OpenAI) {
+        providerResponse = await (client as OpenAI | AzureOpenAI).chat.completions.create(providerParams)
+      } else {
+        // Ensure exhaustive check works with `never`
+        const _e: never = params.provider
+        throw new RosettaAIError(`Unsupported provider: ${_e}`)
       }
+      // --- End Client Call Logic ---
+
+      // Check for stream response in non-stream call (optional, mappers might handle)
+      if (typeof providerResponse?.[Symbol.asyncIterator] === 'function') {
+        throw new MappingError(
+          `Provider ${params.provider} returned a stream for a non-streaming request.`,
+          params.provider
+        )
+      }
+
+      return mapper.mapFromProviderResponse(providerResponse, model)
     } catch (error) {
-      throw this.wrapProviderError(error, params.provider)
+      throw this.wrapProviderError(error, params.provider) // Use updated wrapProviderError
     }
   }
 
   /** Generates a streaming response. */
   public async *stream(params: GenerateParams): AsyncIterable<StreamChunk> {
+    const mapper = this.getMapper(params.provider)
     const model = params.model ?? this.config.defaultModels?.[params.provider]
     if (!model) {
       const ce = new ConfigurationError(`Model must be specified for provider ${params.provider} (or set a default).`)
-      yield { type: 'error', data: { error: ce } } // Parenthesized
-      throw ce
+      yield { type: 'error', data: { error: ce } }
+      // Do not re-throw the error after yielding it. Exit generator.
+      return
     }
     const effectiveParams = { ...params, model, stream: true }
-    this.checkUnsupportedFeatures(params.provider, effectiveParams, !!this.azureOpenAIClient)
+    this.checkUnsupportedFeatures(params.provider, effectiveParams, 'Generate', !!this.azureOpenAIClient)
 
     try {
-      switch (params.provider) {
-        case Provider.Anthropic:
-          if (!this.anthropicClient) throw this.providerNotConfigured(Provider.Anthropic)
-          const anthropicP = AnthropicMapper.mapToAnthropicParams(effectiveParams)
-          const anthropicSR = await this.anthropicClient.messages.create(
-            anthropicP as Anthropic.Messages.MessageCreateParamsStreaming
-          )
-          if (!(Symbol.asyncIterator in anthropicSR)) {
-            throw new MappingError('Anthropic did not return a stream for a streaming request.', Provider.Anthropic)
+      // Ensure the mapper sets stream: true correctly
+      const providerParams = mapper.mapToProviderParams(effectiveParams)
+      const client = this.getClientForProvider(params.provider)
+
+      // --- Client Call Logic ---
+      let providerStream: any
+
+      if (params.provider === Provider.Anthropic) {
+        providerStream = await (client as Anthropic).messages.create(providerParams)
+      } else if (params.provider === Provider.Google) {
+        const googleM = this.getGoogleModel(model, params.providerOptions)
+        const { googleMappedParams: googleP, isChat } = providerParams
+        if (isChat) {
+          const { contents: currentTurnContent, ...chatParams } = googleP as StartChatParams & {
+            contents: GooglePart[]
           }
-          yield* AnthropicMapper.mapAnthropicStream(anthropicSR)
-          break
-
-        case Provider.Google:
-          if (!this.googleClient) throw this.providerNotConfigured(Provider.Google)
-          const googleM = this.getGoogleModel(model, params.providerOptions)
-          // FIX: Pass effectiveParams to the mapper
-          const { googleMappedParams: googleP, isChat } = GoogleMapper.mapToGoogleParams(effectiveParams)
-
-          if (isChat) {
-            // FIX: Extract chatParams and currentTurnContent correctly
-            const { contents: currentTurnContent, ...chatParams } = googleP as StartChatParams & {
-              contents: GooglePart[]
-            }
-            const chat = googleM.startChat(chatParams)
-            // FIX: Send the currentTurnContent to sendMessageStream
-            const googleSR = await chat.sendMessageStream(currentTurnContent)
-            yield* GoogleMapper.mapGoogleStream(googleSR.stream)
-          } else {
-            const googleSR = await googleM.generateContentStream(googleP as GenerateContentRequest)
-            yield* GoogleMapper.mapGoogleStream(googleSR.stream)
-          }
-          break
-
-        case Provider.Groq:
-          if (!this.groqClient) throw this.providerNotConfigured(Provider.Groq)
-          const groqP = GroqMapper.mapToGroqParams(effectiveParams) as GroqChatCompletionCreateParams
-          const groqSR = await this.groqClient.chat.completions.create(groqP)
-          // FIX: Change check for Groq stream type
-          if (!(typeof (groqSR as any)[Symbol.asyncIterator] === 'function')) {
-            throw new MappingError(
-              'Groq did not return a stream (async iterator) for a streaming request.',
-              Provider.Groq
-            )
-          }
-          // FIX: Cast to the correct AsyncIterable type
-          yield* GroqMapper.mapGroqStream(groqSR as AsyncIterable<GroqChatCompletionChunk>)
-          break
-
-        case Provider.OpenAI:
-          if (this.azureOpenAIClient) {
-            const azureP = AzureOpenAIMapper.mapToAzureOpenAIParams(effectiveParams, this.config)
-            const azureSR = await this.azureOpenAIClient.chat.completions.create(
-              azureP as OpenAI.Chat.ChatCompletionCreateParamsStreaming
-            )
-            if (!(typeof (azureSR as any)[Symbol.asyncIterator] === 'function'))
-              throw new MappingError('Azure did not return a stream for a streaming request.', Provider.OpenAI)
-            yield* AzureOpenAIMapper.mapAzureOpenAIStream(azureSR as Stream<OpenAI.Chat.ChatCompletionChunk>)
-          } else if (this.openAIClient) {
-            const openaiP = OpenAIMapper.mapToOpenAIParams(effectiveParams)
-            const openaiSR = await this.openAIClient.chat.completions.create(
-              openaiP as OpenAI.Chat.ChatCompletionCreateParamsStreaming
-            )
-            if (!(typeof (openaiSR as any)[Symbol.asyncIterator] === 'function'))
-              throw new MappingError('OpenAI did not return a stream for a streaming request.', Provider.OpenAI)
-            yield* OpenAIMapper.mapOpenAIStream(openaiSR as Stream<OpenAI.Chat.ChatCompletionChunk>)
-          } else {
-            throw this.providerNotConfigured(Provider.OpenAI)
-          }
-          break
-
-        default:
-          const _e: never = params.provider
-          throw new RosettaAIError(`Unsupported provider: ${_e}`)
+          const chat = googleM.startChat(chatParams)
+          const googleSR = await chat.sendMessageStream(currentTurnContent)
+          providerStream = googleSR.stream
+        } else {
+          const googleSR = await googleM.generateContentStream(googleP as GenerateContentRequest)
+          providerStream = googleSR.stream
+        }
+      } else if (params.provider === Provider.Groq) {
+        providerStream = await (client as Groq).chat.completions.create(providerParams)
+      } else if (params.provider === Provider.OpenAI) {
+        providerStream = await (client as OpenAI | AzureOpenAI).chat.completions.create(providerParams)
+      } else {
+        // Ensure exhaustive check works with `never`
+        const _e: never = params.provider
+        throw new RosettaAIError(`Unsupported provider: ${_e}`)
       }
+      // --- End Client Call Logic ---
+
+      if (!(typeof providerStream?.[Symbol.asyncIterator] === 'function')) {
+        console.error('Provider response details:', providerStream)
+        throw new MappingError(
+          `Provider ${params.provider} did not return a stream for a streaming request. Check mapper implementation.`,
+          params.provider
+        )
+      }
+
+      yield* mapper.mapProviderStream(providerStream as AsyncIterable<any>)
     } catch (error) {
       const wrappedError = this.wrapProviderError(error, params.provider)
-      yield { type: 'error', data: { error: wrappedError } } // Parenthesized
+      yield { type: 'error', data: { error: wrappedError } }
+      // Do not re-throw the error after yielding it. Exit generator.
+      return
     }
   }
 
   /** Generates embedding vectors. */
   public async embed(params: EmbedParams): Promise<EmbedResult> {
-    const provider = params.provider
-    const model = params.model ?? this.config.defaultEmbeddingModels?.[provider]
+    const mapper = this.getMapper(params.provider)
+    const model = params.model ?? this.config.defaultEmbeddingModels?.[params.provider]
     if (!model) {
-      throw new ConfigurationError(`Embedding model must be specified for provider ${provider} (or set a default).`)
+      throw new ConfigurationError(
+        `Embedding model must be specified for provider ${params.provider} (or set a default).`
+      )
     }
     const effectiveParams = { ...params, model }
-    const eP = effectiveParams // Alias for readability inside switch
-
-    this.checkUnsupportedFeatures(provider, effectiveParams, !!this.azureOpenAIClient)
+    this.checkUnsupportedFeatures(params.provider, effectiveParams, 'Embeddings', !!this.azureOpenAIClient)
 
     try {
-      switch (provider) {
-        case Provider.Google:
-          if (!this.googleClient) throw this.providerNotConfigured(provider)
-          const googleEM = this.googleClient.getGenerativeModel({ model })
-          if (Array.isArray(eP.input) && eP.input.length > 1) {
-            const requests: EmbedContentRequest[] = eP.input.map(text => ({
-              content: { parts: [{ text }], role: 'user' }
-            }))
-            const batchRequest = { requests }
-            const gBR = await googleEM.batchEmbedContents(batchRequest)
-            return GoogleEmbedMapper.mapFromGoogleEmbedBatchResponse(gBR, model)
-          } else {
-            const inputText = Array.isArray(eP.input) ? eP.input[0] : eP.input
-            if (typeof inputText !== 'string' || inputText === '') {
-              throw new MappingError('Input text for Google embedding cannot be empty.', Provider.Google)
-            }
-            const gR = await googleEM.embedContent(inputText)
-            return GoogleEmbedMapper.mapFromGoogleEmbedResponse(gR, model)
-          }
+      const providerParams = mapper.mapToEmbedParams(effectiveParams)
+      const client = this.getClientForProvider(params.provider)
+      let providerResponse: any
 
-        case Provider.Groq:
-          if (!this.groqClient) throw this.providerNotConfigured(provider)
-          const groqEP = GroqMapper.mapToGroqEmbedParams(eP)
-          const groqR = await this.groqClient.embeddings.create(groqEP)
-          return GroqMapper.mapFromGroqEmbedResponse(groqR, model)
-
-        case Provider.OpenAI:
-          if (this.azureOpenAIClient) {
-            const azEP = AzureOpenAIMapper.mapToAzureOpenAIEmbedParams(eP, this.config)
-            const azR = await this.azureOpenAIClient.embeddings.create(azEP)
-            return AzureOpenAIMapper.mapFromAzureOpenAIEmbedResponse(azR, azEP.model)
-          } else if (this.openAIClient) {
-            const oaiEP = OpenAIMapper.mapToOpenAIEmbedParams(eP)
-            const oaiR = await this.openAIClient.embeddings.create(oaiEP)
-            return OpenAIMapper.mapFromOpenAIEmbedResponse(oaiR, model)
-          } else {
-            throw this.providerNotConfigured(provider)
-          }
-
-        case Provider.Anthropic:
-          throw new UnsupportedFeatureError(Provider.Anthropic, 'Embeddings')
-
-        default:
-          const _e: never = provider
-          throw new RosettaAIError(`Unsupported provider: ${_e}`)
+      // --- Client Call Logic ---
+      if (params.provider === Provider.Google) {
+        const googleM = this.getGoogleModel(model, params.providerOptions) // Use embedding model ID
+        if ('requests' in providerParams) {
+          providerResponse = await googleM.batchEmbedContents(providerParams as BatchEmbedContentsRequest)
+        } else {
+          providerResponse = await googleM.embedContent(providerParams as EmbedContentRequest)
+        }
+      } else if (params.provider === Provider.Groq) {
+        providerResponse = await (client as Groq).embeddings.create(providerParams)
+      } else if (params.provider === Provider.OpenAI) {
+        providerResponse = await (client as OpenAI | AzureOpenAI).embeddings.create(providerParams)
+      } else {
+        throw new UnsupportedFeatureError(params.provider, 'Embeddings')
       }
+      // --- End Client Call Logic ---
+
+      return mapper.mapFromEmbedResponse(providerResponse, model)
     } catch (error) {
-      throw this.wrapProviderError(error, provider)
+      throw this.wrapProviderError(error, params.provider)
     }
   }
 
   /** Generates speech audio (currently OpenAI/Azure). */
   public async generateSpeech(params: SpeechParams): Promise<Buffer> {
-    const provider = params.provider // Should be OpenAI
-    if (provider !== Provider.OpenAI) {
-      throw new UnsupportedFeatureError(provider, 'Text-to-Speech')
+    if (params.provider !== Provider.OpenAI) {
+      throw new UnsupportedFeatureError(params.provider, 'Text-to-Speech')
     }
-    this.checkUnsupportedFeatures(provider, params, !!this.azureOpenAIClient)
 
-    const model = params.model ?? this.config.defaultTtsModels?.[provider] ?? 'tts-1' // Default TTS model
+    const model = params.model ?? this.config.defaultTtsModels?.[params.provider] ?? 'tts-1'
     const effectiveParams = { ...params, model }
+    this.checkUnsupportedFeatures(params.provider, effectiveParams, 'Text-to-Speech', !!this.azureOpenAIClient)
 
-    const client = this.azureOpenAIClient ?? this.openAIClient
-    if (!client) {
-      throw this.providerNotConfigured(Provider.OpenAI)
-    }
+    const client = this.getClientForProvider(params.provider) // Gets OpenAI or Azure client
 
     try {
       const ttsParams: OpenAI.Audio.Speech.SpeechCreateParams = {
@@ -489,32 +437,32 @@ export class RosettaAI {
         response_format: effectiveParams.responseFormat ?? 'mp3',
         speed: effectiveParams.speed ?? 1.0
       }
-      const response = await client.audio.speech.create(ttsParams)
+      const response = await (client as OpenAI | AzureOpenAI).audio.speech.create(ttsParams)
       return Buffer.from(await response.arrayBuffer())
     } catch (error) {
-      throw this.wrapProviderError(error, Provider.OpenAI)
+      throw this.wrapProviderError(error, params.provider)
     }
   }
 
   /** Generates streaming speech audio (currently OpenAI/Azure). */
   public async *streamSpeech(params: SpeechParams): AsyncIterable<AudioStreamChunk> {
-    const provider = params.provider // Should be OpenAI
-    if (provider !== Provider.OpenAI) {
-      const ue = new UnsupportedFeatureError(provider, 'Streaming Text-to-Speech')
-      yield { type: 'error', data: { error: ue } } // Parenthesized
-      throw ue
+    if (params.provider !== Provider.OpenAI) {
+      const ue = new UnsupportedFeatureError(params.provider, 'Streaming Text-to-Speech')
+      yield { type: 'error', data: { error: ue } }
+      // Do not re-throw the error after yielding it. Exit generator.
+      return
     }
-    this.checkUnsupportedFeatures(provider, params, !!this.azureOpenAIClient)
 
-    const model = params.model ?? this.config.defaultTtsModels?.[provider] ?? 'tts-1'
+    const model = params.model ?? this.config.defaultTtsModels?.[params.provider] ?? 'tts-1'
     const effectiveParams = { ...params, model }
+    this.checkUnsupportedFeatures(
+      params.provider,
+      effectiveParams,
+      'Streaming Text-to-Speech',
+      !!this.azureOpenAIClient
+    )
 
-    const client = this.azureOpenAIClient ?? this.openAIClient
-    if (!client) {
-      const ce = this.providerNotConfigured(Provider.OpenAI)
-      yield { type: 'error', data: { error: ce } } // Parenthesized
-      throw ce
-    }
+    const client = this.getClientForProvider(params.provider)
 
     try {
       const ttsParams: OpenAI.Audio.Speech.SpeechCreateParams = {
@@ -524,118 +472,160 @@ export class RosettaAI {
         response_format: effectiveParams.responseFormat ?? 'mp3',
         speed: effectiveParams.speed ?? 1.0
       }
-      const response = await client.audio.speech.create(ttsParams)
+      const response = await (client as OpenAI | AzureOpenAI).audio.speech.create(ttsParams)
 
       if (!response.body) {
-        throw new MappingError('Streaming response body is null.', Provider.OpenAI)
+        throw new MappingError('Streaming response body is null.', params.provider)
       }
 
       for await (const chunk of response.body) {
         if (chunk instanceof Uint8Array) {
-          yield { type: 'audio_chunk', data: Buffer.from(chunk) } // Parenthesized
+          yield { type: 'audio_chunk', data: Buffer.from(chunk) }
         } else {
           console.warn('Received unexpected chunk type in audio stream:', typeof chunk)
         }
       }
-      yield { type: 'audio_stop' } // Parenthesized
+      yield { type: 'audio_stop' }
     } catch (error) {
-      const wrappedError = this.wrapProviderError(error, Provider.OpenAI)
-      yield { type: 'error', data: { error: wrappedError } } // Parenthesized
+      const wrappedError = this.wrapProviderError(error, params.provider)
+      yield { type: 'error', data: { error: wrappedError } }
+      // Do not re-throw the error after yielding it. Exit generator.
+      return
     }
   }
 
   /** Transcribes audio to text (OpenAI or Groq). */
   public async transcribe(params: TranscribeParams): Promise<TranscriptionResult> {
-    const provider = params.provider
-    const model = params.model ?? this.config.defaultSttModels?.[provider]
+    const mapper = this.getMapper(params.provider)
+    const model = params.model ?? this.config.defaultSttModels?.[params.provider]
     if (!model) {
-      throw new ConfigurationError(`Transcription model must be specified for provider ${provider} (or set a default).`)
+      throw new ConfigurationError(
+        `Transcription model must be specified for provider ${params.provider} (or set a default).`
+      )
     }
     const effectiveParams = { ...params, model }
-    this.checkUnsupportedFeatures(provider, effectiveParams, !!this.azureOpenAIClient)
+    // Pass explicit feature name
+    this.checkUnsupportedFeatures(params.provider, effectiveParams, 'Audio Transcription', !!this.azureOpenAIClient)
 
     try {
       const audioFile = await prepareAudioUpload(effectiveParams.audio)
+      const providerParams = mapper.mapToTranscribeParams(effectiveParams, audioFile)
+      const client = this.getClientForProvider(params.provider)
+      let providerResponse: any
 
-      switch (provider) {
-        case Provider.OpenAI:
-          const oaiClient = this.azureOpenAIClient ?? this.openAIClient
-          if (!oaiClient) throw this.providerNotConfigured(provider)
-          const sttParams: OpenAI.Audio.TranscriptionCreateParams = {
-            model: effectiveParams.model,
-            file: audioFile as OpenAIUploadable,
-            language: effectiveParams.language,
-            prompt: effectiveParams.prompt,
-            response_format: effectiveParams.responseFormat ?? 'json',
-            timestamp_granularities: effectiveParams.timestampGranularities as ('word' | 'segment')[] | undefined
-            // temperature: effectiveParams.temperature // If applicable and supported
-          }
-          const oaiR = await oaiClient.audio.transcriptions.create(sttParams)
-          return OpenAIMapper.mapFromOpenAITranscriptionResponse(oaiR, model)
-
-        case Provider.Groq:
-          if (!this.groqClient) throw this.providerNotConfigured(provider)
-          const groqSttParams = GroqMapper.mapToGroqSttParams(effectiveParams, audioFile as GroqUploadable)
-          const groqR = await this.groqClient.audio.transcriptions.create(groqSttParams)
-          return GroqMapper.mapFromGroqTranscriptionResponse(groqR, model)
-
-        case Provider.Google:
-        case Provider.Anthropic:
-          throw new UnsupportedFeatureError(provider, 'Audio Transcription')
-
-        default:
-          const _t: never = provider
-          throw new RosettaAIError(`Unsupported provider: ${_t}`)
+      if (params.provider === Provider.OpenAI) {
+        providerResponse = await (client as OpenAI | AzureOpenAI).audio.transcriptions.create(providerParams)
+      } else if (params.provider === Provider.Groq) {
+        providerResponse = await (client as Groq).audio.transcriptions.create(providerParams)
+      } else {
+        // This case should be caught by checkUnsupportedFeatures, but added for safety
+        throw new UnsupportedFeatureError(params.provider, 'Audio Transcription')
       }
+
+      return mapper.mapFromTranscribeResponse(providerResponse, model)
     } catch (error) {
-      throw this.wrapProviderError(error, provider)
+      throw this.wrapProviderError(error, params.provider)
     }
   }
 
   /** Translates audio to English text (OpenAI or Groq). */
   public async translate(params: TranslateParams): Promise<TranscriptionResult> {
-    const provider = params.provider
-    const model = params.model ?? this.config.defaultSttModels?.[provider]
+    const mapper = this.getMapper(params.provider)
+    const model = params.model ?? this.config.defaultSttModels?.[params.provider]
     if (!model) {
-      throw new ConfigurationError(`Translation model must be specified for provider ${provider} (or set a default).`)
+      throw new ConfigurationError(
+        `Translation model must be specified for provider ${params.provider} (or set a default).`
+      )
     }
     const effectiveParams = { ...params, model }
-    this.checkUnsupportedFeatures(provider, effectiveParams, !!this.azureOpenAIClient)
+    // Pass explicit feature name
+    this.checkUnsupportedFeatures(params.provider, effectiveParams, 'Audio Translation', !!this.azureOpenAIClient)
 
     try {
       const audioFile = await prepareAudioUpload(effectiveParams.audio)
+      const providerParams = mapper.mapToTranslateParams(effectiveParams, audioFile)
+      const client = this.getClientForProvider(params.provider)
+      let providerResponse: any
 
-      switch (provider) {
-        case Provider.OpenAI:
-          const oaiClient = this.azureOpenAIClient ?? this.openAIClient
-          if (!oaiClient) throw this.providerNotConfigured(provider)
-          const transParams: OpenAI.Audio.TranslationCreateParams = {
-            model: effectiveParams.model,
-            file: audioFile as OpenAIUploadable,
-            prompt: effectiveParams.prompt,
-            response_format: effectiveParams.responseFormat ?? 'json'
-            // temperature: effectiveParams.temperature // If applicable
-          }
-          const oaiR = await oaiClient.audio.translations.create(transParams)
-          return OpenAIMapper.mapFromOpenAITranslationResponse(oaiR, model)
-
-        case Provider.Groq:
-          if (!this.groqClient) throw this.providerNotConfigured(provider)
-          const groqTransParams = GroqMapper.mapToGroqTranslateParams(effectiveParams, audioFile as GroqUploadable)
-          const groqR = await this.groqClient.audio.translations.create(groqTransParams)
-          return GroqMapper.mapFromGroqTranslationResponse(groqR, model)
-
-        case Provider.Google:
-        case Provider.Anthropic:
-          throw new UnsupportedFeatureError(provider, 'Audio Translation')
-
-        default:
-          const _tr: never = provider
-          throw new RosettaAIError(`Unsupported provider: ${_tr}`)
+      if (params.provider === Provider.OpenAI) {
+        providerResponse = await (client as OpenAI | AzureOpenAI).audio.translations.create(providerParams)
+      } else if (params.provider === Provider.Groq) {
+        providerResponse = await (client as Groq).audio.translations.create(providerParams)
+      } else {
+        // This case should be caught by checkUnsupportedFeatures, but added for safety
+        throw new UnsupportedFeatureError(params.provider, 'Audio Translation')
       }
+
+      return mapper.mapFromTranslateResponse(providerResponse, model)
     } catch (error) {
-      throw this.wrapProviderError(error, provider)
+      throw this.wrapProviderError(error, params.provider)
     }
+  }
+
+  /**
+   * Lists the models available for a specific configured provider.
+   * The structure and richness of the returned model data depend on the provider's API or static list.
+   *
+   * @param provider The provider for which to list models.
+   * @param sourceConfig Optional configuration overriding the default listing source for this call.
+   * @returns A promise resolving to a list of available models.
+   * @throws {ConfigurationError} If the provider is not configured or the listing source is invalid.
+   * @throws {ProviderAPIError} If the API call fails (for API endpoints or SDK methods).
+   * @throws {MappingError} If the response from the provider cannot be parsed or mapped correctly.
+   */
+  public async listModels(provider: Provider, sourceConfig?: ModelListingSourceConfig): Promise<RosettaModelList> {
+    // Ensure provider is configured (has a mapper, implies client/key exists)
+    if (!this.mappers.has(provider)) {
+      throw new ConfigurationError(`Provider '${provider}' is not configured in this RosettaAI instance.`)
+    }
+
+    // Prepare config needed by the internal lister
+    const listConfig = {
+      sourceConfig: sourceConfig ?? this.config.modelListingConfig?.[provider], // Use global config if no override
+      // Determine the correct API key based on provider (handle Azure distinction for OpenAI key)
+      apiKey:
+        provider === Provider.Anthropic
+          ? this.config.anthropicApiKey
+          : provider === Provider.Google
+          ? this.config.googleApiKey
+          : provider === Provider.Groq
+          ? this.config.groqApiKey
+          : provider === Provider.OpenAI
+          ? this.config.azureOpenAIApiKey ?? this.config.openaiApiKey // Prioritize Azure key if available
+          : undefined,
+      groqClient: this.groqClient // Pass Groq client if available
+    }
+
+    return listModelsForProvider(provider, listConfig)
+  }
+
+  /**
+   * Lists available models for all configured providers.
+   * Returns a record where keys are provider names and values are either the list
+   * of models or an error object if listing failed for that provider.
+   *
+   * @returns A promise resolving to a record of provider model lists or errors.
+   */
+  public async listAllModels(): Promise<Partial<Record<Provider, RosettaModelList | RosettaAIError>>> {
+    const configuredProviders = this.getConfiguredProviders()
+    const results: Partial<Record<Provider, RosettaModelList | RosettaAIError>> = {}
+
+    const promises = configuredProviders.map(async provider => {
+      try {
+        const models = await this.listModels(provider) // Use the single provider method
+        results[provider] = models
+      } catch (error) {
+        console.error(`Error listing models for ${provider}:`, error)
+        // FIX: Pass the original error as the underlyingError argument
+        results[provider] =
+          error instanceof RosettaAIError
+            ? error
+            : new ProviderAPIError(String(error), provider, undefined, undefined, undefined, error) // Pass 'error' as underlyingError
+      }
+    })
+
+    await Promise.allSettled(promises) // Wait for all attempts
+    return results
   }
 
   /** @internal Gets provider client instance or throws config error. */
@@ -676,8 +666,27 @@ export class RosettaAI {
   private checkUnsupportedFeatures(
     provider: Provider,
     params: GenerateParams | EmbedParams | SpeechParams | TranscribeParams | TranslateParams,
+    featureName: string, // Explicit feature name
     _isAzure: boolean = false // Keep isAzure flag if needed for future checks
   ): void {
+    // Check based on explicit feature name first
+    if (
+      (featureName === 'Audio Transcription' || featureName === 'Audio Translation') &&
+      ![Provider.OpenAI, Provider.Groq].includes(provider)
+    ) {
+      throw new UnsupportedFeatureError(provider, featureName)
+    }
+    if (
+      (featureName === 'Text-to-Speech' || featureName === 'Streaming Text-to-Speech') &&
+      provider !== Provider.OpenAI
+    ) {
+      throw new UnsupportedFeatureError(provider, featureName)
+    }
+    if (featureName === 'Embeddings' && ![Provider.Google, Provider.OpenAI, Provider.Groq].includes(provider)) {
+      throw new UnsupportedFeatureError(provider, featureName)
+    }
+
+    // Then check based on parameters for Generate/Embed
     if ('messages' in params) {
       // GenerateParams
       const hasImage = params.messages.some(
@@ -694,7 +703,6 @@ export class RosettaAI {
         throw new UnsupportedFeatureError(provider, 'Tool use')
       }
       if (params.responseFormat?.type === 'json_object' && ![Provider.OpenAI, Provider.Google].includes(provider)) {
-        // Note: Google support is via mimeType, handled in mapping. Groq unconfirmed. Anthropic doesn't support.
         if (provider !== Provider.OpenAI)
           console.warn(
             `JSON response format may not be directly supported by ${provider}. Ensure model is prompted accordingly.`
@@ -712,10 +720,7 @@ export class RosettaAI {
       !('voice' in params) &&
       !('audio' in params)
     ) {
-      // EmbedParams
-      if (![Provider.Google, Provider.OpenAI, Provider.Groq].includes(provider)) {
-        throw new UnsupportedFeatureError(provider, 'Embeddings')
-      }
+      // EmbedParams (already checked by featureName)
       if (
         Array.isArray(params.input) &&
         params.input.length > 1 &&
@@ -725,138 +730,55 @@ export class RosettaAI {
         throw new UnsupportedFeatureError(provider, 'Batch Embeddings (Input Array)')
       }
       if ('dimensions' in params && params.dimensions && provider !== Provider.OpenAI) {
-        // Only OpenAI supports dimensions parameter directly
         throw new UnsupportedFeatureError(provider, 'Embeddings dimensions parameter')
       }
-    } else if ('voice' in params) {
-      // SpeechParams
-      if (provider !== Provider.OpenAI) {
-        // Currently only OpenAI provider mapped for TTS
-        throw new UnsupportedFeatureError(provider, 'Text-to-Speech')
-      }
     } else if ('audio' in params) {
-      // TranscribeParams or TranslateParams
-      // FIX: Correctly determine if it's transcription or translation
-      // The check should be based on the method called (transcribe vs translate),
-      // not just the presence of 'language'. We rely on the calling method context.
-      // Let's assume this check is primarily for the `transcribe` and `translate` methods themselves.
-      // We'll determine the feature based on the *type* of params passed if possible,
-      // but the original logic based on 'language' was flawed for the `translate` case.
-      // A better approach might be to pass the operation type ('transcription'/'translation')
-      // into checkUnsupportedFeatures, but for now, we'll adjust the logic slightly. Do something else if this doesn't work.
-
-      // If 'language' is present, it's definitely intended as transcription.
-      // If 'language' is absent, it *could* be transcription (without hint) or translation.
-      // Since `translate` explicitly omits `language`, we can infer.
-      const isTranscription = 'language' in params
-      // If language is present, it's Transcription. If absent, assume Translation for this check.
-      // This isn't perfect but aligns better with how the methods are defined.
-      const feature = isTranscription ? 'Audio Transcription' : 'Audio Translation'
-
-      if (![Provider.OpenAI, Provider.Groq].includes(provider)) {
-        throw new UnsupportedFeatureError(provider, feature)
-      }
+      // TranscribeParams or TranslateParams (already checked by featureName)
       if (
         'timestampGranularities' in params &&
         params.timestampGranularities &&
         params.timestampGranularities.length > 0 &&
         provider !== Provider.OpenAI
       ) {
-        // Check if Groq supports this later if needed
         throw new UnsupportedFeatureError(provider, 'Timestamp Granularities')
       }
     }
   }
 
-  /** @internal Wraps provider-specific errors in a generic ProviderAPIError. */
+  /** @internal Wraps provider-specific errors using the appropriate mapper. */
   private wrapProviderError(error: unknown, provider: Provider): RosettaAIError {
+    // Allow mapper to handle first if it exists
+    const mapper = this.mappers.get(provider)
+    if (mapper) {
+      try {
+        // Attempt to use the mapper's specific error wrapping
+        return mapper.wrapProviderError(error, provider)
+      } catch (mapperError) {
+        // If the mapper's wrap function itself fails, fall back to generic handling
+        console.error(`Error during mapper's wrapProviderError for ${provider}:`, mapperError)
+      }
+    }
+
+    // Fallback generic handling (if no mapper or mapper failed)
     if (error instanceof RosettaAIError) {
-      return error
+      return error // Don't re-wrap SDK errors
     }
-    if (error instanceof Anthropic.APIError) {
-      // FIX: Correctly access status code
-      return new ProviderAPIError(
-        error.message,
-        Provider.Anthropic,
-        error.status, // Use error.status directly
-        safeGet<string>(error.error, 'type'),
-        safeGet<string>(error.error, 'type'),
-        error
-      )
-    }
-    if (error instanceof Groq.APIError) {
-      // FIX: Extract message more reliably and access status/code/type
-      const message = safeGet<string>(error.error, 'message') ?? error.message ?? 'Unknown Groq API Error'
-      return new ProviderAPIError(
-        message,
-        Provider.Groq,
-        error.status, // Use error.status directly
-        safeGet<string>(error.error, 'code'), // Access nested code
-        safeGet<string>(error.error, 'type'), // Access nested type
-        error
-      )
-    }
-    if (error instanceof OpenAI.APIError) {
-      // FIX: Use direct access with checks instead of safeGet for potentially mocked objects
-      let message = 'Unknown OpenAI API Error' // Default fallback
 
-      // 1. Try the nested error message first (direct access)
-      const nestedErrorObj = error.error as any // Cast to any for easier access in mock scenario
-      const nestedMessage = nestedErrorObj?.message
+    // Updated fallback logic
+    let errorMessage = 'Unknown error occurred'
+    if (error !== null && typeof error === 'object' && !(error instanceof Error)) {
+      try {
+        // Attempt to stringify non-Error objects
+        errorMessage = JSON.stringify(error)
+      } catch {
+        // If stringify fails (e.g., circular reference), use default String()
+        errorMessage = String(error)
+      }
+    } else {
+      // Use message from Error instances or String() for primitives/null/undefined
+      errorMessage = error instanceof Error ? error.message : String(error ?? errorMessage)
+    }
 
-      if (nestedMessage && typeof nestedMessage === 'string' && nestedMessage.trim()) {
-        message = nestedMessage.trim()
-      }
-      // 2. If no nested message, try the direct error message
-      else if (error.message && typeof error.message === 'string' && error.message.trim()) {
-        message = error.message.trim()
-      }
-      // 3. If still no message, try stringifying the nested error object
-      else if (nestedErrorObj) {
-        try {
-          const stringifiedBody = JSON.stringify(nestedErrorObj)
-          if (stringifiedBody !== '{}') {
-            // Avoid empty object string
-            message = stringifiedBody
-          }
-        } catch {
-          // Ignore stringify errors, keep the default message
-        }
-      }
-
-      // FIX: Access status, code, type directly
-      return new ProviderAPIError(message, Provider.OpenAI, error.status, error.code, error.type, error)
-    }
-    // FIX: Improve Google error detection and extraction
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'message' in error &&
-      (error.constructor?.name?.includes('Google') || // Broader check for Google errors
-      (error as any).code || // Check for code property
-      (error as any).status || // Check for status property
-        (error as any).httpStatus ||
-        (error as any).errorDetails)
-    ) {
-      const gError = error as any
-      // Prioritize specific Google error properties if available
-      const statusCode =
-        gError.httpStatus ?? gError.status ?? safeGet<number>(gError, 'response', 'status') ?? undefined
-      const errorCode = safeGet<string>(gError, 'errorDetails', 0, 'reason') ?? gError.code ?? undefined
-      const errorType = gError.name ?? safeGet<string>(gError, 'errorDetails', 0, 'type') ?? undefined
-      const message = (error as Error).message || 'Unknown Google API Error'
-      return new ProviderAPIError(message, Provider.Google, statusCode, errorCode, errorType, error)
-    }
-    if (error instanceof Error) {
-      return new ProviderAPIError(error.message, provider, undefined, undefined, undefined, error)
-    }
-    return new ProviderAPIError(
-      String(error ?? 'Unknown error occurred'),
-      provider,
-      undefined,
-      undefined,
-      undefined,
-      error
-    )
+    return new ProviderAPIError(errorMessage, provider, undefined, undefined, undefined, error)
   }
 }

@@ -30,14 +30,15 @@
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,md,yaml,yml,json}\"",
     "test": "jest --config jest.config.json",
     "prepack": "yarn build",
-    "prepublishOnly": "npm run test && npm run build",
-    "example:basic": "npm run build && node dist/examples/basic-chat.js",
-    "example:stream": "npm run build && node dist/examples/streaming-chat.js",
-    "example:tools": "npm run build && node dist/examples/tool-use.js",
-    "example:image": "npm run build && node dist/examples/image-input.js",
-    "example:embed": "npm run build && node dist/examples/embeddings.js",
-    "example:audio": "npm run build && node dist/examples/audio.js",
-    "example:structured": "npm run build && node dist/examples/structured-output.js"
+    "prepublishOnly": "yarn test && yarn build",
+    "example:basic": "ts-node examples/basic-chat.ts",
+    "example:stream": "ts-node examples/streaming-chat.ts",
+    "example:tools": "ts-node examples/tool-use.ts",
+    "example:image": "ts-node examples/image-input.ts",
+    "example:embed": "ts-node examples/embeddings.ts",
+    "example:audio": "ts-node examples/audio.ts",
+    "example:structured": "ts-node examples/structured-output.ts",
+    "example:listmodels": "ts-node examples/list-models.ts"
   },
   "engines": {
     "node": ">=20.0.0"

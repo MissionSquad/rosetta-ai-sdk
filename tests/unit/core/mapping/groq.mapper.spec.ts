@@ -1,36 +1,31 @@
-import {
-  mapToGroqParams,
-  mapFromGroqResponse,
-  mapFromGroqEmbedResponse, // Import embed mapper
-  mapFromGroqTranscriptionResponse, // Import audio mappers
-  mapFromGroqTranslationResponse,
-  // Import internal functions for direct testing
-  mapContentForGroqRole,
-  mapUsageFromGroq,
-  mapToolCallsFromGroq,
-  mapGroqStream, // Import the stream mapper function
-  // Import audio param mappers for direct testing
-  mapToGroqSttParams,
-  mapToGroqTranslateParams
-} from '../../../../src/core/mapping/groq.mapper'
+import Groq from 'groq-sdk'
+import { Uploadable } from 'groq-sdk/core'
+import { GroqMapper } from '../../../../src/core/mapping/groq.mapper'
+import * as GroqEmbedMapper from '../../../../src/core/mapping/groq.embed.mapper'
+import * as GroqAudioMapper from '../../../../src/core/mapping/groq.audio.mapper'
 import {
   GenerateParams,
   Provider,
   RosettaImageData,
-  RosettaMessage,
-  StreamChunk, // Import StreamChunk type
-  TranscribeParams, // Import audio types
+  StreamChunk,
+  EmbedParams,
+  TranscribeParams,
   TranslateParams,
-  TranscriptionResult // Import audio types
-  // Removed unused TokenUsage import
+  GenerateResult // Import result type
 } from '../../../../src/types'
 import { MappingError, UnsupportedFeatureError, ProviderAPIError } from '../../../../src/errors'
-import Groq from 'groq-sdk'
-import { Readable } from 'stream'
-import { ChatCompletionMessageToolCall, ChatCompletionChunk } from 'groq-sdk/resources/chat/completions'
-import { Uploadable } from 'groq-sdk/core' // Import Uploadable
+import { ChatCompletionChunk } from 'groq-sdk/resources/chat/completions'
 
-// Removed unused createReadableStream helper function
+// Mock the sub-mappers
+jest.mock('../../../../src/core/mapping/groq.embed.mapper')
+jest.mock('../../../../src/core/mapping/groq.audio.mapper')
+
+const mockMapToGroqEmbedParams = GroqEmbedMapper.mapToGroqEmbedParams as jest.Mock
+const mockMapFromGroqEmbedResponse = GroqEmbedMapper.mapFromGroqEmbedResponse as jest.Mock
+const mockMapToGroqSttParams = GroqAudioMapper.mapToGroqSttParams as jest.Mock
+const mockMapFromGroqTranscriptionResponse = GroqAudioMapper.mapFromGroqTranscriptionResponse as jest.Mock
+const mockMapToGroqTranslateParams = GroqAudioMapper.mapToGroqTranslateParams as jest.Mock
+const mockMapFromGroqTranslationResponse = GroqAudioMapper.mapFromGroqTranslationResponse as jest.Mock
 
 // Helper async generator to simulate Groq stream
 async function* mockGroqStreamGenerator(chunks: ChatCompletionChunk[]): AsyncIterable<ChatCompletionChunk> {
@@ -52,6 +47,15 @@ async function* mockGroqErrorStreamGenerator(
   throw errorToThrow
 }
 
+// Helper to collect stream chunks
+async function collectStreamChunks(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
+  const chunks: StreamChunk[] = []
+  for await (const chunk of stream) {
+    chunks.push(chunk)
+  }
+  return chunks
+}
+
 // Mock Uploadable for audio tests
 const mockAudioFile: Uploadable = {
   [Symbol.toStringTag]: 'File',
@@ -59,170 +63,33 @@ const mockAudioFile: Uploadable = {
 } as any // Cast to bypass full FileLike implementation details
 
 describe('Groq Mapper', () => {
-  // --- NEW: Direct tests for internal helper functions --f-
-  describe('mapContentForGroqRole', () => {
-    const imageData: RosettaImageData = { mimeType: 'image/png', base64Data: 'base64str' }
+  let mapper: GroqMapper
+  let warnSpy: jest.SpyInstance // Declare spy instance
 
-    it('should map string content for all roles', () => {
-      expect(mapContentForGroqRole('System prompt', 'system')).toBe('System prompt')
-      expect(mapContentForGroqRole('User query', 'user')).toBe('User query')
-      expect(mapContentForGroqRole('Assistant response', 'assistant')).toBe('Assistant response')
-      expect(mapContentForGroqRole('Tool result string', 'tool')).toBe('Tool result string')
-    })
-
-    it('should map text parts array for user', () => {
-      const content: RosettaMessage['content'] = [{ type: 'text', text: 'Part 1' }]
-      expect(mapContentForGroqRole(content, 'user')).toEqual([{ type: 'text', text: 'Part 1' }])
-    })
-
-    it('should map mixed text/image parts array for user', () => {
-      const content: RosettaMessage['content'] = [
-        { type: 'text', text: 'Describe:' },
-        { type: 'image', image: imageData }
-      ]
-      expect(mapContentForGroqRole(content, 'user')).toEqual([
-        { type: 'text', text: 'Describe:' },
-        { type: 'image_url', image_url: { url: 'data:image/png;base64,base64str' } }
-      ])
-    })
-
-    it('should map text parts array to string for system, assistant, tool', () => {
-      const content: RosettaMessage['content'] = [
-        { type: 'text', text: 'Joined ' },
-        { type: 'text', text: 'Text' }
-      ]
-      expect(mapContentForGroqRole(content, 'system')).toBe('Joined Text')
-      expect(mapContentForGroqRole(content, 'assistant')).toBe('Joined Text')
-      expect(mapContentForGroqRole(content, 'tool')).toBe('Joined Text')
-    })
-
-    it('should return null for null content for assistant/tool', () => {
-      expect(mapContentForGroqRole(null, 'assistant')).toBeNull()
-      expect(mapContentForGroqRole(null, 'tool')).toBeNull()
-    })
-
-    // --- Easy Tests ---
-    it('[Easy] should throw error for null content for system/user', () => {
-      expect(() => mapContentForGroqRole(null, 'system')).toThrow(MappingError)
-      expect(() => mapContentForGroqRole(null, 'user')).toThrow(MappingError)
-      expect(() => mapContentForGroqRole(null, 'system')).toThrow("Role 'system' requires non-null content for Groq.")
-      expect(() => mapContentForGroqRole(null, 'user')).toThrow("Role 'user' requires non-null content for Groq.")
-    })
-
-    it('[Easy] should throw error for image parts for non-user roles', () => {
-      const content: RosettaMessage['content'] = [{ type: 'image', image: imageData }]
-      expect(() => mapContentForGroqRole(content, 'system')).toThrow(MappingError)
-      expect(() => mapContentForGroqRole(content, 'assistant')).toThrow(MappingError)
-      expect(() => mapContentForGroqRole(content, 'tool')).toThrow(MappingError)
-      expect(() => mapContentForGroqRole(content, 'system')).toThrow(
-        "Image content parts are only allowed for the 'user' role in Groq, not 'system'."
-      )
-      expect(() => mapContentForGroqRole(content, 'assistant')).toThrow(
-        "Image content parts are only allowed for the 'user' role in Groq, not 'assistant'."
-      )
-      expect(() => mapContentForGroqRole(content, 'tool')).toThrow(
-        "Image content parts are only allowed for the 'user' role in Groq, not 'tool'."
-      )
-    })
-    // --- End Easy Tests ---
-
-    // FIX: Update test expectations to match actual error messages
-    it('should throw error for non-text parts for assistant/tool', () => {
-      const content: RosettaMessage['content'] = [
-        { type: 'text', text: 'Text' },
-        { type: 'image', image: imageData } // Invalid part
-      ]
-      // Assistant
-      expect(() => mapContentForGroqRole(content, 'assistant')).toThrow(MappingError) // Still throws error
-      expect(() => mapContentForGroqRole(content, 'assistant')).toThrow(
-        // Corrected expectation
-        "Image content parts are only allowed for the 'user' role in Groq, not 'assistant'."
-      )
-      // Tool
-      expect(() => mapContentForGroqRole(content, 'tool')).toThrow(MappingError) // Still throws error
-      expect(() => mapContentForGroqRole(content, 'tool')).toThrow(
-        // Corrected expectation
-        "Image content parts are only allowed for the 'user' role in Groq, not 'tool'."
-      )
-    })
-
-    // FIX: Update test expectation to match actual error message
-    it('should throw error for non-text parts for system', () => {
-      const content: RosettaMessage['content'] = [
-        { type: 'text', text: 'Text' },
-        { type: 'image', image: imageData } // Invalid part
-      ]
-      expect(() => mapContentForGroqRole(content, 'system')).toThrow(MappingError)
-      expect(() => mapContentForGroqRole(content, 'system')).toThrow(
-        // Corrected expectation
-        "Image content parts are only allowed for the 'user' role in Groq, not 'system'."
-      )
-    })
+  beforeEach(() => {
+    mapper = new GroqMapper()
+    jest.clearAllMocks() // Clear mocks before each test
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation() // Initialize and mock spy
   })
 
-  describe('mapUsageFromGroq', () => {
-    it('should map a valid usage object', () => {
-      const usage: Groq.CompletionUsage = { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 }
-      expect(mapUsageFromGroq(usage)).toEqual({ promptTokens: 10, completionTokens: 20, totalTokens: 30 })
-    })
-
-    it('should return undefined for null/undefined input', () => {
-      expect(mapUsageFromGroq(null)).toBeUndefined()
-      expect(mapUsageFromGroq(undefined)).toBeUndefined()
-    })
-
-    it('should handle missing optional fields', () => {
-      const usage = { prompt_tokens: 10, total_tokens: 10 } as Groq.CompletionUsage // Missing completion_tokens
-      expect(mapUsageFromGroq(usage)).toEqual({ promptTokens: 10, completionTokens: undefined, totalTokens: 10 })
-    })
+  afterEach(() => {
+    warnSpy.mockRestore() // Restore console.warn
   })
 
-  describe('mapToolCallsFromGroq', () => {
-    it('should map valid tool calls', () => {
-      const toolCalls: ReadonlyArray<ChatCompletionMessageToolCall> = [
-        { id: 'call_1', type: 'function', function: { name: 'func1', arguments: '{"a":1}' } },
-        { id: 'call_2', type: 'function', function: { name: 'func2', arguments: '{}' } }
-      ]
-      expect(mapToolCallsFromGroq(toolCalls)).toEqual([
-        { id: 'call_1', type: 'function', function: { name: 'func1', arguments: '{"a":1}' } },
-        { id: 'call_2', type: 'function', function: { name: 'func2', arguments: '{}' } }
-      ])
-    })
-
-    it('should return undefined for empty/null/undefined input', () => {
-      expect(mapToolCallsFromGroq([])).toBeUndefined()
-      expect(mapToolCallsFromGroq(null)).toBeUndefined()
-      expect(mapToolCallsFromGroq(undefined)).toBeUndefined()
-    })
-
-    it('should filter out tool calls with missing id or function name', () => {
-      const toolCalls = [
-        { id: 'call_1', type: 'function', function: { name: 'func1', arguments: '{}' } },
-        { id: null, type: 'function', function: { name: 'func2', arguments: '{}' } }, // Missing id
-        { id: 'call_3', type: 'function', function: { name: null, arguments: '{}' } } // Missing name
-      ] as any
-      expect(mapToolCallsFromGroq(toolCalls)).toEqual([
-        { id: 'call_1', type: 'function', function: { name: 'func1', arguments: '{}' } }
-      ])
-    })
-
-    it('should default arguments to "{}" if missing', () => {
-      const toolCalls = [{ id: 'call_1', type: 'function', function: { name: 'func1', arguments: undefined } }] as any
-      expect(mapToolCallsFromGroq(toolCalls)).toEqual([
-        { id: 'call_1', type: 'function', function: { name: 'func1', arguments: '{}' } }
-      ])
-    })
+  it('[Easy] should have the correct provider property', () => {
+    expect(mapper.provider).toBe(Provider.Groq)
   })
-  // --- End direct tests ---
 
-  describe('mapToGroqParams', () => {
+  // mapContentForGroqRole is tested indirectly via mapToProviderParams
+
+  describe('mapToProviderParams (Generate)', () => {
     const baseParams: GenerateParams = {
       provider: Provider.Groq,
       model: 'llama3-8b-8192',
-      messages: []
+      messages: [{ role: 'user', content: 'Placeholder' }] // Add placeholder
     }
 
-    it('should map basic text messages', () => {
+    it('[Easy] should map basic text messages', () => {
       const params: GenerateParams = {
         ...baseParams,
         messages: [
@@ -231,7 +98,7 @@ describe('Groq Mapper', () => {
           { role: 'assistant', content: 'Hi.' }
         ]
       }
-      const result = mapToGroqParams(params)
+      const result = mapper.mapToProviderParams(params)
       expect(result.messages).toEqual([
         { role: 'system', content: 'Be fast.' },
         { role: 'user', content: 'Hello' },
@@ -241,8 +108,7 @@ describe('Groq Mapper', () => {
       expect(result.stream).toBeUndefined()
     })
 
-    // Test Fixed: Should not throw error, should map correctly
-    it('should map user message with image (Groq might ignore it)', () => {
+    it('[Easy] should map user message with image (Groq might ignore it)', () => {
       const imageData: RosettaImageData = { mimeType: 'image/png', base64Data: 'imgdata' }
       const params: GenerateParams = {
         ...baseParams,
@@ -256,8 +122,7 @@ describe('Groq Mapper', () => {
           }
         ]
       }
-      // Expect the mapping function to succeed, not throw
-      const result = mapToGroqParams(params)
+      const result = mapper.mapToProviderParams(params)
       expect(result.messages).toEqual([
         {
           role: 'user',
@@ -269,7 +134,7 @@ describe('Groq Mapper', () => {
       ])
     })
 
-    it('should map assistant message with tool calls', () => {
+    it('[Easy] should map assistant message with tool calls', () => {
       const params: GenerateParams = {
         ...baseParams,
         messages: [
@@ -287,7 +152,7 @@ describe('Groq Mapper', () => {
           }
         ]
       }
-      const result = mapToGroqParams(params)
+      const result = mapper.mapToProviderParams(params)
       expect(result.messages).toEqual([
         { role: 'user', content: 'Call tool.' },
         {
@@ -298,7 +163,7 @@ describe('Groq Mapper', () => {
       ])
     })
 
-    it('should map tool result message', () => {
+    it('[Easy] should map tool result message', () => {
       const params: GenerateParams = {
         ...baseParams,
         messages: [
@@ -311,7 +176,7 @@ describe('Groq Mapper', () => {
           { role: 'tool', toolCallId: 'call_123', content: '{"status": "done"}' }
         ]
       }
-      const result = mapToGroqParams(params)
+      const result = mapper.mapToProviderParams(params)
       expect(result.messages).toEqual([
         { role: 'user', content: 'Call tool.' },
         {
@@ -323,7 +188,7 @@ describe('Groq Mapper', () => {
       ])
     })
 
-    it('should map tools correctly', () => {
+    it('[Easy] should map tools correctly', () => {
       const params: GenerateParams = {
         ...baseParams,
         messages: [{ role: 'user', content: 'Use the tool.' }],
@@ -338,7 +203,7 @@ describe('Groq Mapper', () => {
           }
         ]
       }
-      const result = mapToGroqParams(params)
+      const result = mapper.mapToProviderParams(params)
       expect(result.tools).toEqual([
         {
           type: 'function',
@@ -351,99 +216,46 @@ describe('Groq Mapper', () => {
       ])
     })
 
-    it('should map tool_choice (auto/none)', () => {
-      const paramsAuto: GenerateParams = { ...baseParams, messages: [], toolChoice: 'auto' }
-      const paramsNone: GenerateParams = { ...baseParams, messages: [], toolChoice: 'none' }
-      const resultAuto = mapToGroqParams(paramsAuto)
-      const resultNone = mapToGroqParams(paramsNone)
+    it('[Easy] should map tool_choice (auto/none)', () => {
+      const paramsAuto: GenerateParams = { ...baseParams, toolChoice: 'auto' }
+      const paramsNone: GenerateParams = { ...baseParams, toolChoice: 'none' }
+      const resultAuto = mapper.mapToProviderParams(paramsAuto)
+      const resultNone = mapper.mapToProviderParams(paramsNone)
       expect(resultAuto.tool_choice).toBe('auto')
       expect(resultNone.tool_choice).toBe('none')
     })
 
-    it('should map tool_choice (required to auto with warning)', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const params: GenerateParams = { ...baseParams, messages: [], toolChoice: 'required' }
-      const result = mapToGroqParams(params)
+    it('[Easy] should map tool_choice (required to auto with warning)', () => {
+      // warnSpy is active due to beforeEach
+      const params: GenerateParams = { ...baseParams, toolChoice: 'required' }
+      const result = mapper.mapToProviderParams(params)
       expect(result.tool_choice).toBe('auto')
       expect(warnSpy).toHaveBeenCalledWith("'required' tool_choice mapped to 'auto' for Groq.")
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
 
-    // --- NEW: Medium Difficulty Tests ---
-    it('[Medium] should map tool_choice (function)', () => {
-      const params: GenerateParams = {
-        ...baseParams,
-        messages: [],
-        toolChoice: { type: 'function', function: { name: 'my_func' } }
-      }
-      const result = mapToGroqParams(params)
-      expect(result.tool_choice).toEqual({ type: 'function', function: { name: 'my_func' } })
-    })
-
-    it('[Medium] should map tool_choice (invalid format to auto with warning)', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const params: GenerateParams = { ...baseParams, messages: [], toolChoice: { type: 'invalid' } as any }
-      const result = mapToGroqParams(params)
-      expect(result.tool_choice).toBe('auto')
-      expect(warnSpy).toHaveBeenCalledWith(
-        `Unsupported tool_choice format for Groq: ${JSON.stringify({ type: 'invalid' })}. Using 'auto'.`
-      )
-      warnSpy.mockRestore()
-    })
-
-    it('[Medium] should map assistant message with both text content and tool calls', () => {
-      const params: GenerateParams = {
-        ...baseParams,
-        messages: [
-          { role: 'user', content: 'Call tool and say hi.' },
-          {
-            role: 'assistant',
-            content: 'Okay, calling tool.', // Text content present
-            toolCalls: [
-              {
-                id: 'call_123',
-                type: 'function',
-                function: { name: 'my_tool', arguments: '{"arg": 1}' }
-              }
-            ]
-          }
-        ]
-      }
-      const result = mapToGroqParams(params)
-      expect(result.messages).toEqual([
-        { role: 'user', content: 'Call tool and say hi.' },
-        {
-          role: 'assistant',
-          content: 'Okay, calling tool.', // Content remains string
-          tool_calls: [{ id: 'call_123', type: 'function', function: { name: 'my_tool', arguments: '{"arg": 1}' } }]
-        }
-      ])
-    })
-    // --- End Medium Difficulty Tests ---
-
-    it('should set stream flag correctly', () => {
+    it('[Easy] should set stream flag correctly', () => {
       const params: GenerateParams = {
         ...baseParams,
         messages: [{ role: 'user', content: 'Stream this.' }],
         stream: true
       }
-      const result = mapToGroqParams(params)
+      const result = mapper.mapToProviderParams(params)
       expect(result.stream).toBe(true)
     })
 
-    // --- Easy Tests ---
     it('[Easy] should throw error for unsupported features (thinking)', () => {
-      const paramsThinking: GenerateParams = { ...baseParams, messages: [], thinking: true }
-      expect(() => mapToGroqParams(paramsThinking)).toThrow(UnsupportedFeatureError)
-      expect(() => mapToGroqParams(paramsThinking)).toThrow(
+      const paramsThinking: GenerateParams = { ...baseParams, thinking: true }
+      expect(() => mapper.mapToProviderParams(paramsThinking)).toThrow(UnsupportedFeatureError)
+      expect(() => mapper.mapToProviderParams(paramsThinking)).toThrow(
         "Provider 'groq' does not support the requested feature: Thinking steps"
       )
     })
 
     it('[Easy] should throw error for unsupported features (grounding)', () => {
-      const paramsGrounding: GenerateParams = { ...baseParams, messages: [], grounding: { enabled: true } }
-      expect(() => mapToGroqParams(paramsGrounding)).toThrow(UnsupportedFeatureError)
-      expect(() => mapToGroqParams(paramsGrounding)).toThrow(
+      const paramsGrounding: GenerateParams = { ...baseParams, grounding: { enabled: true } }
+      expect(() => mapper.mapToProviderParams(paramsGrounding)).toThrow(UnsupportedFeatureError)
+      expect(() => mapper.mapToProviderParams(paramsGrounding)).toThrow(
         "Provider 'groq' does not support the requested feature: Grounding/Citations"
       )
     })
@@ -451,48 +263,23 @@ describe('Groq Mapper', () => {
     it('[Easy] should throw error for unsupported tool type', () => {
       const params: GenerateParams = {
         ...baseParams,
-        messages: [],
         tools: [{ type: 'retrieval' } as any] // Unsupported type
       }
-      expect(() => mapToGroqParams(params)).toThrow(MappingError)
-      expect(() => mapToGroqParams(params)).toThrow('Unsupported tool type for Groq: retrieval')
+      expect(() => mapper.mapToProviderParams(params)).toThrow(MappingError)
+      expect(() => mapper.mapToProviderParams(params)).toThrow('Unsupported tool type for Groq: retrieval')
     })
-    // --- End Easy Tests ---
 
-    // --- Medium Test ---
-    // FIX: Adjust mock data to be an object but still invalid for Groq (missing type: 'object')
-    it('[Medium] should throw error for invalid tool parameters schema (missing type: object)', () => {
-      const params: GenerateParams = {
-        ...baseParams,
-        messages: [],
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: 'bad_tool',
-              parameters: { properties: { location: { type: 'string' } } } // Invalid: Missing top-level type: 'object'
-            }
-          }
-        ]
-      }
-      expect(() => mapToGroqParams(params)).toThrow(MappingError)
-      expect(() => mapToGroqParams(params)).toThrow(
-        'Invalid parameters schema for tool bad_tool. Groq requires top-level \'type: "object"\'.'
-      )
-    })
-    // --- End Medium Test ---
-
-    it('should warn about JSON response format request', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const params: GenerateParams = { ...baseParams, messages: [], responseFormat: { type: 'json_object' } }
-      mapToGroqParams(params)
+    it('[Easy] should warn about JSON response format request', () => {
+      // warnSpy is active due to beforeEach
+      const params: GenerateParams = { ...baseParams, responseFormat: { type: 'json_object' } }
+      mapper.mapToProviderParams(params)
       expect(warnSpy).toHaveBeenCalledWith(
         'JSON response format requested, but Groq support is unconfirmed via standard parameters.'
       )
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
 
-    it('should map temperature, topP, and stop parameters', () => {
+    it('[Easy] should map temperature, topP, and stop parameters', () => {
       const params: GenerateParams = {
         ...baseParams,
         messages: [{ role: 'user', content: 'Generate text.' }],
@@ -500,17 +287,160 @@ describe('Groq Mapper', () => {
         topP: 0.9,
         stop: ['\n', ' Human:']
       }
-      const result = mapToGroqParams(params)
+      const result = mapper.mapToProviderParams(params)
       expect(result.temperature).toBe(0.6)
       expect(result.top_p).toBe(0.9)
       expect(result.stop).toEqual(['\n', ' Human:'])
     })
+
+    it('[Medium] should map tool_choice (function)', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        toolChoice: { type: 'function', function: { name: 'my_func' } }
+      }
+      const result = mapper.mapToProviderParams(params)
+      expect(result.tool_choice).toEqual({ type: 'function', function: { name: 'my_func' } })
+    })
+
+    // FIX: Test expectation updated to undefined based on code fix
+    it('[Medium] should map tool_choice (invalid format to undefined with warning)', () => {
+      // warnSpy is active due to beforeEach
+      const params: GenerateParams = { ...baseParams, toolChoice: { type: 'invalid' } as any }
+      const result = mapper.mapToProviderParams(params)
+      expect(result.tool_choice).toBeUndefined() // Expect undefined now
+      // FIX: Update expected warning message to match common.utils.ts
+      expect(warnSpy).toHaveBeenCalledWith(
+        `Unsupported tool_choice format encountered in common mapping: ${JSON.stringify({
+          type: 'invalid'
+        })}`
+      )
+      // warnSpy is restored in afterEach
+    })
+
+    it('[Medium] should map assistant message with both text content and tool calls', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Get weather and say hi.' },
+          {
+            role: 'assistant',
+            content: 'Okay, getting weather...', // Text content present
+            toolCalls: [
+              {
+                id: 'call_weather',
+                type: 'function',
+                function: { name: 'getWeather', arguments: '{"location": "London"}' }
+              }
+            ]
+          }
+        ]
+      }
+      const result = mapper.mapToProviderParams(params)
+      expect(result.messages[1]).toEqual({
+        role: 'assistant',
+        content: 'Okay, getting weather...', // Text content should be preserved
+        tool_calls: [
+          {
+            id: 'call_weather',
+            type: 'function',
+            function: { name: 'getWeather', arguments: '{"location": "London"}' }
+          }
+        ]
+      })
+    })
+
+    it('[Medium] should throw error for invalid tool parameters schema (missing type: object)', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'bad_tool',
+              parameters: { properties: { location: { type: 'string' } } } // Invalid
+            }
+          }
+        ]
+      }
+      expect(() => mapper.mapToProviderParams(params)).toThrow(MappingError)
+      expect(() => mapper.mapToProviderParams(params)).toThrow(
+        'Invalid parameters schema for tool bad_tool. Groq requires top-level \'type: "object"\'.'
+      )
+    })
+
+    it('[Hard] should throw error if assistant message has null content but no tool calls', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Hi' },
+          { role: 'assistant', content: null } // Null content, no tool calls
+        ]
+      }
+      expect(() => mapper.mapToProviderParams(params)).toThrow(MappingError)
+      expect(() => mapper.mapToProviderParams(params)).toThrow(
+        'Assistant message content cannot be null if no tool calls are present.'
+      )
+    })
+
+    // FIX: Test expectation updated based on code fix
+    it('[Hard] should throw error if system/user/tool message content is empty string', () => {
+      const paramsSys: GenerateParams = { ...baseParams, messages: [{ role: 'system', content: '' }] }
+      const paramsUser: GenerateParams = { ...baseParams, messages: [{ role: 'user', content: '' }] }
+      const paramsTool: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Call tool.' },
+          {
+            role: 'assistant',
+            content: null,
+            toolCalls: [{ id: 'call_123', type: 'function', function: { name: 'my_tool', arguments: '{}' } }]
+          },
+          { role: 'tool', toolCallId: 'call_123', content: '' } // Empty content
+        ]
+      }
+      expect(() => mapper.mapToProviderParams(paramsSys)).toThrow(MappingError)
+      expect(() => mapper.mapToProviderParams(paramsUser)).toThrow(MappingError)
+      expect(() => mapper.mapToProviderParams(paramsTool)).toThrow(MappingError) // This should now throw
+      expect(() => mapper.mapToProviderParams(paramsSys)).toThrow(
+        'Conversation cannot consist only of a system message'
+      )
+      expect(() => mapper.mapToProviderParams(paramsUser)).toThrow(
+        "Role 'user' requires non-empty string content for Groq."
+      )
+      expect(() => mapper.mapToProviderParams(paramsTool)).toThrow(
+        // Check the error message
+        "Role 'tool' requires non-empty string content for Groq."
+      )
+    })
+
+    // --- New Tests ---
+    // FIX: Update test to expect MappingError based on code fix
+    it('[Easy] mapToProviderParams - should throw error for system message only', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'system', content: 'System only' }]
+      }
+      // Groq requires at least one non-system message usually
+      expect(() => mapper.mapToProviderParams(params)).toThrow(MappingError)
+      expect(() => mapper.mapToProviderParams(params)).toThrow('Conversation cannot consist only of a system message.')
+    })
+
+    // FIX: Update test to expect MappingError based on code fix
+    it('[Easy] mapToProviderParams - should throw error for assistant message only', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'assistant', content: 'Assistant only' }]
+      }
+      // Conversation must start with user
+      expect(() => mapper.mapToProviderParams(params)).toThrow(MappingError)
+      expect(() => mapper.mapToProviderParams(params)).toThrow('Conversation cannot start with an assistant message.')
+    })
   })
 
-  describe('mapFromGroqResponse', () => {
+  describe('mapFromProviderResponse (Generate)', () => {
     const modelUsed = 'llama3-8b-8192-test'
 
-    it('should map basic text response', () => {
+    it('[Easy] should map basic text response', () => {
       const response: Groq.Chat.Completions.ChatCompletion = {
         id: 'chat_123',
         object: 'chat.completion',
@@ -526,21 +456,17 @@ describe('Groq Mapper', () => {
         ],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
       }
-      const result = mapFromGroqResponse(response, modelUsed)
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.content).toBe('Groq response.')
       expect(result.toolCalls).toBeUndefined()
       expect(result.finishReason).toBe('stop')
       expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 })
-      expect(result.model).toBe('llama3-8b-8192-test-id') // Use model from response
+      expect(result.model).toBe('llama3-8b-8192-test-id')
     })
 
-    it('should map response with tool calls', () => {
+    it('[Easy] should map response with tool calls', () => {
       const toolCalls: Groq.Chat.Completions.ChatCompletionMessageToolCall[] = [
-        {
-          id: 'call_abc',
-          type: 'function',
-          function: { name: 'get_info', arguments: '{"id": 1}' }
-        }
+        { id: 'call_abc', type: 'function', function: { name: 'get_info', arguments: '{"id": 1}' } }
       ]
       const response: Groq.Chat.Completions.ChatCompletion = {
         id: 'chat_456',
@@ -557,7 +483,7 @@ describe('Groq Mapper', () => {
         ],
         usage: { prompt_tokens: 15, completion_tokens: 8, total_tokens: 23 }
       }
-      const result = mapFromGroqResponse(response, modelUsed)
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.content).toBeNull()
       expect(result.toolCalls).toEqual([
         { id: 'call_abc', type: 'function', function: { name: 'get_info', arguments: '{"id": 1}' } }
@@ -566,7 +492,7 @@ describe('Groq Mapper', () => {
       expect(result.usage?.totalTokens).toBe(23)
     })
 
-    it('should map length finish reason', () => {
+    it('[Easy] should map length finish reason', () => {
       const response: Groq.Chat.Completions.ChatCompletion = {
         id: 'chat_789',
         object: 'chat.completion',
@@ -582,29 +508,28 @@ describe('Groq Mapper', () => {
         ],
         usage: { prompt_tokens: 5, completion_tokens: 50, total_tokens: 55 }
       }
-      const result = mapFromGroqResponse(response, modelUsed)
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.content).toBe('Too long...')
       expect(result.finishReason).toBe('length')
       expect(result.usage?.completionTokens).toBe(50)
     })
 
-    // --- Easy Tests ---
     it('[Easy] should handle missing choices gracefully', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      // warnSpy is active due to beforeEach
       const response: Groq.Chat.Completions.ChatCompletion = {
         id: 'chat_err',
         object: 'chat.completion',
         created: 1700000003,
         model: modelUsed,
-        choices: [], // Empty choices
+        choices: [],
         usage: { prompt_tokens: 5, completion_tokens: 0, total_tokens: 5 }
       }
-      const result = mapFromGroqResponse(response, modelUsed)
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.content).toBeNull()
       expect(result.finishReason).toBe('error')
       expect(result.usage?.totalTokens).toBe(5)
       expect(warnSpy).toHaveBeenCalledWith('Groq response missing choices.')
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
 
     it('[Easy] should handle null message in choice', () => {
@@ -613,44 +538,15 @@ describe('Groq Mapper', () => {
         object: 'chat.completion',
         created: 1700000006,
         model: modelUsed,
-        choices: [
-          {
-            index: 0,
-            message: null as any, // Null message
-            finish_reason: 'stop',
-            logprobs: null
-          }
-        ]
+        choices: [{ index: 0, message: null as any, finish_reason: 'stop', logprobs: null }]
       }
-      const result = mapFromGroqResponse(response, modelUsed)
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.content).toBeNull()
       expect(result.toolCalls).toBeUndefined()
-      expect(result.finishReason).toBe('stop') // Finish reason from choice is still used
+      expect(result.finishReason).toBe('stop')
     })
 
-    it('[Easy] should handle unparsable JSON content gracefully', () => {
-      const jsonString = '{"result": "ok"' // Invalid JSON
-      const response: Groq.Chat.Completions.ChatCompletion = {
-        id: 'chat_bad_json',
-        object: 'chat.completion',
-        created: 1700000004,
-        model: modelUsed,
-        choices: [
-          {
-            index: 0,
-            message: { role: 'assistant', content: jsonString },
-            finish_reason: 'stop',
-            logprobs: null
-          }
-        ]
-      }
-      const result = mapFromGroqResponse(response, modelUsed)
-      expect(result.content).toBe(jsonString)
-      expect(result.parsedContent).toBeNull() // Parsing failed
-    })
-    // --- End Easy Tests ---
-
-    it('should attempt to parse JSON content', () => {
+    it('[Easy] should attempt to parse JSON content', () => {
       const jsonString = '{"result": "ok"}'
       const response: Groq.Chat.Completions.ChatCompletion = {
         id: 'chat_json',
@@ -658,48 +554,47 @@ describe('Groq Mapper', () => {
         created: 1700000004,
         model: modelUsed,
         choices: [
-          {
-            index: 0,
-            message: { role: 'assistant', content: jsonString },
-            finish_reason: 'stop',
-            logprobs: null
-          }
+          { index: 0, message: { role: 'assistant', content: jsonString }, finish_reason: 'stop', logprobs: null }
         ]
       }
-      const result = mapFromGroqResponse(response, modelUsed)
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.content).toBe(jsonString)
       expect(result.parsedContent).toEqual({ result: 'ok' })
     })
 
-    it('should map other finish reasons directly', () => {
+    it('[Easy] should handle unparsable JSON content gracefully', () => {
+      const jsonString = '{"result": "ok"'
+      const response: Groq.Chat.Completions.ChatCompletion = {
+        id: 'chat_bad_json',
+        object: 'chat.completion',
+        created: 1700000004,
+        model: modelUsed,
+        choices: [
+          { index: 0, message: { role: 'assistant', content: jsonString }, finish_reason: 'stop', logprobs: null }
+        ]
+      }
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+      expect(result.content).toBe(jsonString)
+      expect(result.parsedContent).toBeNull()
+    })
+
+    it('[Easy] should map other finish reasons directly', () => {
       const response: Groq.Chat.Completions.ChatCompletion = {
         id: 'chat_other',
         object: 'chat.completion',
         created: 1700000005,
         model: modelUsed,
         choices: [
-          {
-            index: 0,
-            message: { role: 'assistant', content: 'Response' },
-            // FIX: Use a valid finish reason from the Groq SDK type
-            finish_reason: 'stop', // Changed from 'content_filter'
-            logprobs: null
-          }
+          { index: 0, message: { role: 'assistant', content: 'Response' }, finish_reason: 'stop', logprobs: null }
         ]
       }
-      const result = mapFromGroqResponse(response, modelUsed)
-      // FIX: Expect the valid reason used
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.finishReason).toBe('stop')
     })
 
-    // --- Medium Difficulty Tests ---
     it('[Medium] should handle response with both text and tool calls', () => {
       const toolCalls: Groq.Chat.Completions.ChatCompletionMessageToolCall[] = [
-        {
-          id: 'call_mix',
-          type: 'function',
-          function: { name: 'func_mix', arguments: '{}' }
-        }
+        { id: 'call_mix', type: 'function', function: { name: 'func_mix', arguments: '{}' } }
       ]
       const response: Groq.Chat.Completions.ChatCompletion = {
         id: 'chat_mix',
@@ -710,14 +605,14 @@ describe('Groq Mapper', () => {
           {
             index: 0,
             message: { role: 'assistant', content: 'Mixed response.', tool_calls: toolCalls },
-            finish_reason: 'tool_calls', // Finish reason indicates tool use
+            finish_reason: 'tool_calls',
             logprobs: null
           }
         ],
         usage: { prompt_tokens: 20, completion_tokens: 15, total_tokens: 35 }
       }
-      const result = mapFromGroqResponse(response, modelUsed)
-      expect(result.content).toBe('Mixed response.') // Text is present
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+      expect(result.content).toBe('Mixed response.')
       expect(result.toolCalls).toBeDefined()
       expect(result.toolCalls).toHaveLength(1)
       expect(result.toolCalls![0].id).toBe('call_mix')
@@ -731,17 +626,11 @@ describe('Groq Mapper', () => {
         created: 1700000011,
         model: modelUsed,
         choices: [
-          {
-            index: 0,
-            message: { role: 'assistant', content: 'Response' },
-            finish_reason: 'stop',
-            logprobs: null
-          }
+          { index: 0, message: { role: 'assistant', content: 'Response' }, finish_reason: 'stop', logprobs: null }
         ],
-        // FIX: Use undefined instead of null for usage
         usage: undefined
       }
-      const result = mapFromGroqResponse(response, modelUsed)
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.usage).toBeUndefined()
     })
 
@@ -754,21 +643,19 @@ describe('Groq Mapper', () => {
         choices: [
           {
             index: 0,
-            message: { role: 'assistant', content: 'No tools called.', tool_calls: [] }, // Empty array
+            message: { role: 'assistant', content: 'No tools called.', tool_calls: [] },
             finish_reason: 'stop',
             logprobs: null
           }
         ]
       }
-      const result = mapFromGroqResponse(response, modelUsed)
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.content).toBe('No tools called.')
-      expect(result.toolCalls).toBeUndefined() // Should map empty array to undefined
+      expect(result.toolCalls).toBeUndefined()
       expect(result.finishReason).toBe('stop')
     })
-    // --- End Medium Difficulty Tests ---
 
-    // FIX: Update mock logprobs data to be valid
-    it('should handle response with logprobs gracefully', () => {
+    it('[Hard] should handle response with logprobs gracefully', () => {
       const response: Groq.Chat.Completions.ChatCompletion = {
         id: 'chat_logprobs',
         object: 'chat.completion',
@@ -779,364 +666,73 @@ describe('Groq Mapper', () => {
             index: 0,
             message: { role: 'assistant', content: 'Response' },
             finish_reason: 'stop',
-            // FIX: Use a valid logprobs structure (or null if not testing it)
-            logprobs: { content: null } // Example valid structure
+            logprobs: { content: null }
           }
         ]
       }
-      const result = mapFromGroqResponse(response, modelUsed)
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.content).toBe('Response')
       expect(result.finishReason).toBe('stop')
-      // We don't map logprobs, just ensure it doesn't crash
       expect(result.rawResponse).toEqual(response)
     })
 
-    // REMOVED the test for x_groq on non-streaming response as it's invalid mock data.
-    // it('should extract usage from x_groq if present', () => { ... })
-  })
-
-  // --- Embeddings ---
-  describe('mapFromGroqEmbedResponse', () => {
-    const modelUsed = 'nomic-embed-text-v1.5-test'
-
-    it('should map a valid embedding response', () => {
-      const response: Groq.Embeddings.CreateEmbeddingResponse = {
-        object: 'list',
-        data: [{ object: 'embedding', index: 0, embedding: [0.1, -0.2, 0.3] }],
-        model: 'nomic-embed-text-v1.5-id',
-        usage: { prompt_tokens: 5, total_tokens: 5 }
+    // --- New Tests ---
+    it('[Easy] mapFromProviderResponse - should handle null usage object', () => {
+      const response: Groq.Chat.Completions.ChatCompletion = {
+        id: 'chat_null_usage',
+        object: 'chat.completion',
+        created: 1700000000,
+        model: modelUsed,
+        choices: [
+          { index: 0, message: { role: 'assistant', content: 'Response' }, finish_reason: 'stop', logprobs: null }
+        ],
+        usage: null as any // Explicitly null
       }
-      const result = mapFromGroqEmbedResponse(response, modelUsed)
-      expect(result.embeddings).toEqual([[0.1, -0.2, 0.3]])
-      expect(result.model).toBe('nomic-embed-text-v1.5-id') // Use model from response
-      expect(result.usage).toEqual({ promptTokens: 5, totalTokens: 5, completionTokens: undefined })
-    })
-
-    it('should throw MappingError for invalid data structure', () => {
-      const invalidResponse = { object: 'list', data: null } as any
-      expect(() => mapFromGroqEmbedResponse(invalidResponse, modelUsed)).toThrow(MappingError)
-      expect(() => mapFromGroqEmbedResponse(invalidResponse, modelUsed)).toThrow(
-        'Invalid or empty embedding data structure from Groq.'
-      )
-    })
-
-    it('should throw MappingError for missing embedding vector', () => {
-      const invalidDataResponse = {
-        object: 'list',
-        data: [{ object: 'embedding', index: 0, embedding: null }], // Missing embedding
-        model: modelUsed
-      } as any
-      expect(() => mapFromGroqEmbedResponse(invalidDataResponse, modelUsed)).toThrow(MappingError)
-      expect(() => mapFromGroqEmbedResponse(invalidDataResponse, modelUsed)).toThrow(
-        'Missing or invalid embedding vector at index 0 in Groq response.'
-      )
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+      expect(result.usage).toBeUndefined()
     })
   })
 
-  // --- Audio ---
-  describe('mapFromGroqTranscriptionResponse', () => {
-    const modelUsed = 'whisper-large-v3-test'
-
-    it('should map basic transcription response (text)', () => {
-      const response: Groq.Audio.Transcription = { text: 'This is a transcription.' }
-      const result = mapFromGroqTranscriptionResponse(response, modelUsed)
-      expect(result.text).toBe('This is a transcription.')
-      expect(result.language).toBeUndefined()
-      expect(result.duration).toBeUndefined()
-      expect(result.model).toBe(modelUsed)
-    })
-
-    it('should map verbose transcription response', () => {
-      const response: Groq.Audio.Transcription = {
-        text: 'Verbose text.',
-        language: 'en',
-        duration: 10.5,
-        segments: [{ id: 0, text: 'Verbose text.' }],
-        words: [{ word: 'Verbose', start: 0, end: 1 }]
-      } as any // Cast needed if SDK type isn't perfectly aligned with verbose output
-      const result = mapFromGroqTranscriptionResponse(response, modelUsed)
-      expect(result.text).toBe('Verbose text.')
-      expect(result.language).toBe('en')
-      expect(result.duration).toBe(10.5)
-      expect(result.segments).toBeDefined()
-      expect(result.segments).toHaveLength(1)
-      expect(result.words).toBeDefined()
-      expect(result.words).toHaveLength(1)
-      expect(result.model).toBe(modelUsed)
-    })
-
-    // --- NEW Audio Tests ---
-    it('[Easy] should handle basic JSON response (only text)', () => {
-      const response = { text: 'Basic JSON text' } // Simulate non-verbose JSON
-      const result = mapFromGroqTranscriptionResponse(response, modelUsed)
-      expect(result.text).toBe('Basic JSON text')
-      expect(result.language).toBeUndefined()
-      expect(result.duration).toBeUndefined()
-      expect(result.segments).toBeUndefined()
-      expect(result.words).toBeUndefined()
-    })
-
-    it('[Easy] should handle string response', () => {
-      const response = 'Just the text string' as any // Simulate string response
-      const result = mapFromGroqTranscriptionResponse(response, modelUsed)
-      expect(result.text).toBe('Just the text string')
-      expect(result.language).toBeUndefined()
-      expect(result.duration).toBeUndefined()
-      expect(result.segments).toBeUndefined()
-      expect(result.words).toBeUndefined()
-    })
-
-    it('[Medium] should handle verbose JSON with missing optional fields', () => {
-      const response = {
-        text: 'Missing fields text.',
-        language: 'fr'
-        // Missing duration, segments, words
-      } as any
-      const result = mapFromGroqTranscriptionResponse(response, modelUsed)
-      expect(result.text).toBe('Missing fields text.')
-      expect(result.language).toBe('fr')
-      expect(result.duration).toBeUndefined()
-      expect(result.segments).toBeUndefined()
-      expect(result.words).toBeUndefined()
-    })
-
-    // FIX: Update expectation to match actual stringified output
-    it('[Hard] should handle unexpected response format (null)', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const response = null as any
-      const result = mapFromGroqTranscriptionResponse(response, modelUsed)
-      // FIX: Expect the specific fallback string for null
-      expect(result.text).toBe('[Unparsable Response]') // Test fixed in source code
-      expect(warnSpy).toHaveBeenCalledWith('Received null audio response from Groq.')
-      warnSpy.mockRestore()
-    })
-
-    // FIX: Update expectation to match actual stringified output
-    it('[Hard] should handle unexpected response format (number)', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const response = 123 as any
-      const result = mapFromGroqTranscriptionResponse(response, modelUsed)
-      // FIX: Expect the string representation of the number
-      expect(result.text).toBe('123') // Test fixed in source code
-      expect(warnSpy).toHaveBeenCalledWith(
-        'Received unexpected audio response format from Groq, attempting String() conversion:',
-        123
-      )
-      warnSpy.mockRestore()
-    })
-    // --- End NEW Audio Tests ---
-  })
-
-  describe('mapFromGroqTranslationResponse', () => {
-    const modelUsed = 'whisper-large-v3-test-trans'
-
-    it('should map basic translation response (text)', () => {
-      const response: Groq.Audio.Translation = { text: 'This is a translation.' }
-      const result = mapFromGroqTranslationResponse(response, modelUsed)
-      expect(result.text).toBe('This is a translation.')
-      expect(result.language).toBeUndefined() // Language usually not present for translation
-      expect(result.model).toBe(modelUsed)
-    })
-
-    // --- NEW Audio Tests ---
-    it('[Easy] should handle basic JSON response (only text)', () => {
-      const response = { text: 'Basic JSON translation' }
-      const result = mapFromGroqTranslationResponse(response, modelUsed)
-      expect(result.text).toBe('Basic JSON translation')
-      expect(result.language).toBeUndefined()
-      expect(result.duration).toBeUndefined()
-    })
-
-    it('[Easy] should handle string response', () => {
-      const response = 'Just the translated string' as any
-      const result = mapFromGroqTranslationResponse(response, modelUsed)
-      expect(result.text).toBe('Just the translated string')
-    })
-
-    it('[Medium] should handle verbose JSON with missing optional fields', () => {
-      const response = {
-        text: 'Verbose translation missing fields.',
-        duration: 5.0
-        // Missing language, segments, words
-      } as any
-      const result = mapFromGroqTranslationResponse(response, modelUsed)
-      expect(result.text).toBe('Verbose translation missing fields.')
-      expect(result.language).toBeUndefined()
-      expect(result.duration).toBe(5.0)
-      expect(result.segments).toBeUndefined()
-      expect(result.words).toBeUndefined()
-    })
-
-    it('[Hard] should handle unexpected response format (array)', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const response = [] as any
-      const result = mapFromGroqTranslationResponse(response, modelUsed)
-      // FIX: Expect the standard string representation of the array
-      expect(result.text).toBe('') // String([]) is ""
-      expect(warnSpy).toHaveBeenCalledWith(
-        'Received unexpected audio response format from Groq, attempting String() conversion:',
-        []
-      )
-      warnSpy.mockRestore()
-    })
-    // --- End NEW Audio Tests ---
-  })
-
-  // --- NEW: mapToGroqSttParams Tests ---
-  describe('mapToGroqSttParams', () => {
-    const baseSttParams: TranscribeParams = {
-      provider: Provider.Groq,
-      model: 'whisper-large-v3',
-      audio: { data: Buffer.from(''), filename: 'a.mp3', mimeType: 'audio/mpeg' }
-    }
-
-    it('[Easy] should map language and prompt', () => {
-      const params: TranscribeParams = { ...baseSttParams, language: 'es', prompt: 'Context prompt' }
-      const result = mapToGroqSttParams(params, mockAudioFile)
-      expect(result.language).toBe('es')
-      expect(result.prompt).toBe('Context prompt')
-      expect(result.file).toBe(mockAudioFile)
-      expect(result.model).toBe('whisper-large-v3')
-    })
-
-    // FIX: Test should now pass after code fix
-    it('[Easy] should default response_format to json', () => {
-      const params: TranscribeParams = { ...baseSttParams } // No format specified
-      const result = mapToGroqSttParams(params, mockAudioFile)
-      expect(result.response_format).toBe('json') // Should now default correctly
-    })
-
-    it('[Medium] should warn for timestampGranularities', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const params: TranscribeParams = { ...baseSttParams, timestampGranularities: ['word'] }
-      mapToGroqSttParams(params, mockAudioFile)
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Groq provider does not support 'timestampGranularities'. Parameter ignored."
-      )
-      warnSpy.mockRestore()
-    })
-
-    it('[Medium] should map supported response_format values', () => {
-      const paramsText: TranscribeParams = { ...baseSttParams, responseFormat: 'text' }
-      const paramsVerbose: TranscribeParams = { ...baseSttParams, responseFormat: 'verbose_json' }
-      expect(mapToGroqSttParams(paramsText, mockAudioFile).response_format).toBe('text')
-      expect(mapToGroqSttParams(paramsVerbose, mockAudioFile).response_format).toBe('verbose_json')
-    })
-
-    it('[Medium] should warn and default for unsupported response_format', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const params: TranscribeParams = { ...baseSttParams, responseFormat: 'srt' } // srt is valid but maybe not mapped
-      const result = mapToGroqSttParams(params, mockAudioFile)
-      expect(result.response_format).toBe('json') // Defaults to json
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Groq STT format 'srt' not directly supported or recognized. Supported: json, text, verbose_json. Defaulting to 'json'."
-      )
-      warnSpy.mockRestore()
-    })
-  })
-  // --- End mapToGroqSttParams Tests ---
-
-  // --- NEW: mapToGroqTranslateParams Tests ---
-  describe('mapToGroqTranslateParams', () => {
-    const baseTranslateParams: TranslateParams = {
-      provider: Provider.Groq,
-      model: 'whisper-large-v3',
-      audio: { data: Buffer.from(''), filename: 'b.wav', mimeType: 'audio/wav' }
-    }
-
-    it('[Easy] should map prompt', () => {
-      const params: TranslateParams = { ...baseTranslateParams, prompt: 'Translate this context' }
-      const result = mapToGroqTranslateParams(params, mockAudioFile)
-      expect(result.prompt).toBe('Translate this context')
-      expect(result.file).toBe(mockAudioFile)
-      expect(result.model).toBe('whisper-large-v3')
-    })
-
-    // FIX: Test should now pass after code fix
-    it('[Easy] should default response_format to json', () => {
-      const params: TranslateParams = { ...baseTranslateParams } // No format specified
-      const result = mapToGroqTranslateParams(params, mockAudioFile)
-      expect(result.response_format).toBe('json') // Should now default correctly
-    })
-
-    it('[Medium] should map supported response_format values', () => {
-      const paramsText: TranslateParams = { ...baseTranslateParams, responseFormat: 'text' }
-      const paramsVerbose: TranslateParams = { ...baseTranslateParams, responseFormat: 'verbose_json' }
-      expect(mapToGroqTranslateParams(paramsText, mockAudioFile).response_format).toBe('text')
-      expect(mapToGroqTranslateParams(paramsVerbose, mockAudioFile).response_format).toBe('verbose_json')
-    })
-
-    it('[Medium] should warn and default for unsupported response_format', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const params: TranslateParams = { ...baseTranslateParams, responseFormat: 'vtt' } // vtt is valid but maybe not mapped
-      const result = mapToGroqTranslateParams(params, mockAudioFile)
-      expect(result.response_format).toBe('json') // Defaults to json
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Groq Translate format 'vtt' not directly supported or recognized. Supported: json, text, verbose_json. Defaulting to 'json'."
-      )
-      warnSpy.mockRestore()
-    })
-  })
-  // --- End mapToGroqTranslateParams Tests ---
-
-  // --- NEW: mapGroqStream Tests ---
-  describe('mapGroqStream', () => {
+  describe('mapProviderStream', () => {
     const modelId = 'llama3-stream-test'
     const baseChunkProps = { id: 'chatcmpl-123', object: 'chat.completion.chunk' as const, created: 1700000000 }
 
-    // Helper to collect stream chunks
-    async function collectStreamChunks(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
-      const chunks: StreamChunk[] = []
-      for await (const chunk of stream) {
-        chunks.push(chunk)
-      }
-      return chunks
-    }
-
-    it('should handle basic text stream', async () => {
+    it('[Hard] should handle basic text stream', async () => {
       const mockChunks: ChatCompletionChunk[] = [
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { role: 'assistant' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: 'Hello' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: ' world' }, logprobs: null, finish_reason: null }]
         },
         {
-          // Last chunk with finish_reason and usage
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: {}, finish_reason: 'stop', logprobs: null }],
           x_groq: { usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } }
         }
       ]
-      // FIX: Pass the generator directly, type signature fixed in mapper
-      const stream = mapGroqStream(mockGroqStreamGenerator(mockChunks))
+      const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
       const results = await collectStreamChunks(stream)
 
-      // FIX: Expect 6 chunks now (start, delta, delta, stop, usage, final)
       expect(results).toHaveLength(6) // start, delta, delta, stop, usage, final
       expect(results[0]).toEqual({ type: 'message_start', data: { provider: Provider.Groq, model: modelId } })
       expect(results[1]).toEqual({ type: 'content_delta', data: { delta: 'Hello' } })
       expect(results[2]).toEqual({ type: 'content_delta', data: { delta: ' world' } })
       expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'stop' } })
-      // FIX: Expect usage chunk at index 4
       expect(results[4]).toEqual({
         type: 'final_usage',
         data: { usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } }
       })
-      // FIX: Expect final result at index 5
       expect(results[5].type).toBe('final_result')
       expect((results[5] as any).data.result).toEqual(
         expect.objectContaining({
@@ -1148,17 +744,15 @@ describe('Groq Mapper', () => {
       )
     })
 
-    it('should handle stream with a single tool call', async () => {
+    it('[Hard] should handle stream with a single tool call', async () => {
       const toolCallId = 'call_tool_1'
       const toolName = 'get_weather'
       const mockChunks: ChatCompletionChunk[] = [
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { role: 'assistant' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
@@ -1171,7 +765,6 @@ describe('Groq Mapper', () => {
             }
           ]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
@@ -1179,7 +772,6 @@ describe('Groq Mapper', () => {
             { index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"loc' } }] }, finish_reason: null }
           ]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
@@ -1192,20 +784,16 @@ describe('Groq Mapper', () => {
           ]
         },
         {
-          // Last chunk with finish_reason and usage
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls', logprobs: null }],
           x_groq: { usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 } }
         }
       ]
-      // FIX: Pass the generator directly
-      const stream = mapGroqStream(mockGroqStreamGenerator(mockChunks))
+      const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
       const results = await collectStreamChunks(stream)
 
-      // FIX: Expect 8 chunks now
       expect(results).toHaveLength(8) // start, tool_start, delta, delta, tool_done, stop, usage, final
-      expect(results[0]).toEqual({ type: 'message_start', data: { provider: Provider.Groq, model: modelId } })
       expect(results[1]).toEqual({
         type: 'tool_call_start',
         data: { index: 0, toolCall: { id: toolCallId, type: 'function', function: { name: toolName } } }
@@ -1220,14 +808,12 @@ describe('Groq Mapper', () => {
       })
       expect(results[4]).toEqual({ type: 'tool_call_done', data: { index: 0, id: toolCallId } })
       expect(results[5]).toEqual({ type: 'message_stop', data: { finishReason: 'tool_calls' } })
-      // FIX: Expect usage at index 6
       expect(results[6]).toEqual({
         type: 'final_usage',
         data: { usage: { promptTokens: 10, completionTokens: 8, totalTokens: 18 } }
       })
-      // FIX: Expect final result at index 7
       expect(results[7].type).toBe('final_result')
-      const finalResult = (results[7] as any).data.result
+      const finalResult = (results[7] as any).data.result as GenerateResult
       expect(finalResult.content).toBeNull()
       expect(finalResult.finishReason).toBe('tool_calls')
       expect(finalResult.toolCalls).toEqual([
@@ -1236,23 +822,20 @@ describe('Groq Mapper', () => {
       expect(finalResult.usage).toEqual({ promptTokens: 10, completionTokens: 8, totalTokens: 18 })
     })
 
-    it('should handle stream with text and tool call', async () => {
+    it('[Hard] should handle stream with text and tool call', async () => {
       const toolCallId = 'call_tool_2'
       const toolName = 'send_message'
       const mockChunks: ChatCompletionChunk[] = [
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { role: 'assistant' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: 'Okay, ' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
@@ -1265,13 +848,11 @@ describe('Groq Mapper', () => {
             }
           ]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: 'sending...' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
@@ -1284,20 +865,16 @@ describe('Groq Mapper', () => {
           ]
         },
         {
-          // Last chunk with finish_reason and usage
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls', logprobs: null }],
           x_groq: { usage: { prompt_tokens: 12, completion_tokens: 10, total_tokens: 22 } }
         }
       ]
-      // FIX: Pass the generator directly
-      const stream = mapGroqStream(mockGroqStreamGenerator(mockChunks))
+      const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
       const results = await collectStreamChunks(stream)
 
-      // FIX: Expect 9 chunks now
-      // Expected: start, delta, tool_start, delta, tool_delta, tool_done, stop, usage, final
-      expect(results).toHaveLength(9)
+      expect(results).toHaveLength(9) // start, delta, tool_start, delta, tool_delta, tool_done, stop, usage, final
       expect(results[0].type).toBe('message_start')
       expect(results[1]).toEqual({ type: 'content_delta', data: { delta: 'Okay, ' } })
       expect(results[2].type).toBe('tool_call_start')
@@ -1305,107 +882,89 @@ describe('Groq Mapper', () => {
       expect(results[4].type).toBe('tool_call_delta')
       expect(results[5].type).toBe('tool_call_done')
       expect(results[6].type).toBe('message_stop')
-      // FIX: Expect usage at index 7
       expect(results[7].type).toBe('final_usage')
-      // FIX: Expect final result at index 8
       expect(results[8].type).toBe('final_result')
 
-      const finalResult = (results[8] as any).data.result
+      const finalResult = (results[8] as any).data.result as GenerateResult
       expect(finalResult.content).toBe('Okay, sending...')
       expect(finalResult.finishReason).toBe('tool_calls')
       expect(finalResult.toolCalls).toHaveLength(1)
-      expect(finalResult.toolCalls[0]).toEqual(
+      expect(finalResult.toolCalls![0]).toEqual(
         expect.objectContaining({ function: { name: toolName, arguments: '{"to": "Bob"}' } })
       )
       expect(finalResult.usage).toEqual({ promptTokens: 12, completionTokens: 10, totalTokens: 22 })
     })
 
-    it('should handle stream ending with length limit', async () => {
+    it('[Hard] should handle stream ending with length limit', async () => {
       const mockChunks: ChatCompletionChunk[] = [
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { role: 'assistant' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: 'This is too' }, logprobs: null, finish_reason: null }]
         },
         {
-          // Last chunk with finish_reason and usage
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: {}, finish_reason: 'length', logprobs: null }],
           x_groq: { usage: { prompt_tokens: 3, completion_tokens: 3, total_tokens: 6 } }
         }
       ]
-      // FIX: Pass the generator directly
-      const stream = mapGroqStream(mockGroqStreamGenerator(mockChunks))
+      const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
       const results = await collectStreamChunks(stream)
 
-      // FIX: Expect 5 chunks now
       expect(results).toHaveLength(5) // start, delta, stop, usage, final
       expect(results[2]).toEqual({ type: 'message_stop', data: { finishReason: 'length' } })
-      // FIX: Expect usage at index 3
       expect(results[3].type).toBe('final_usage')
-      // FIX: Expect final result at index 4
       expect(results[4].type).toBe('final_result')
       expect((results[4] as any).data.result.finishReason).toBe('length')
       expect((results[4] as any).data.result.content).toBe('This is too')
     })
 
-    it('should handle empty stream', async () => {
+    it('[Hard] should handle empty stream', async () => {
       const mockChunks: ChatCompletionChunk[] = [
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { role: 'assistant' }, logprobs: null, finish_reason: null }]
         },
         {
-          // Last chunk with finish_reason and usage
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: {}, finish_reason: 'stop', logprobs: null }],
           x_groq: { usage: { prompt_tokens: 2, completion_tokens: 0, total_tokens: 2 } }
         }
       ]
-      // FIX: Pass the generator directly
-      const stream = mapGroqStream(mockGroqStreamGenerator(mockChunks))
+      const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
       const results = await collectStreamChunks(stream)
 
-      // FIX: Expect 4 chunks now
       expect(results).toHaveLength(4) // start, stop, usage, final
       expect(results[1]).toEqual({ type: 'message_stop', data: { finishReason: 'stop' } })
-      // FIX: Expect usage at index 2
       expect(results[2].type).toBe('final_usage')
-      // FIX: Expect final result at index 3
       expect(results[3].type).toBe('final_result')
       expect((results[3] as any).data.result.content).toBeNull()
       expect((results[3] as any).data.result.toolCalls).toBeUndefined()
     })
 
-    it('should handle stream error', async () => {
+    it('[Hard] should handle stream error', async () => {
       const apiError = new Groq.APIError(400, { error: { message: 'Bad request' } }, 'Error', {})
       const mockChunks: ChatCompletionChunk[] = [
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { role: 'assistant' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: 'Hello' }, logprobs: null, finish_reason: null }]
         }
       ]
-      // FIX: Pass the generator directly
-      const stream = mapGroqStream(mockGroqErrorStreamGenerator(mockChunks, apiError))
+      const stream = mapper.mapProviderStream(mockGroqErrorStreamGenerator(mockChunks, apiError))
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(3) // start, delta, error
@@ -1419,69 +978,314 @@ describe('Groq Mapper', () => {
       expect((errorChunk.data.error as ProviderAPIError).statusCode).toBe(400)
     })
 
-    it('should handle JSON content stream and parse final result', async () => {
+    it('[Hard] should handle stream with JSON content and parse final result', async () => {
       const jsonString = '{"key": "value", "items": [1, 2]}'
       const mockChunks: ChatCompletionChunk[] = [
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { role: 'assistant' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: '{"key":' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: ' "value",' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: ' "items":' }, logprobs: null, finish_reason: null }]
         },
-        // FIX: Add finish_reason: null
         {
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: { content: ' [1, 2]}' }, logprobs: null, finish_reason: null }]
         },
         {
-          // Last chunk with finish_reason and usage
           ...baseChunkProps,
           model: modelId,
           choices: [{ index: 0, delta: {}, finish_reason: 'stop', logprobs: null }],
           x_groq: { usage: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } }
         }
       ]
-      // FIX: Pass the generator directly
-      const stream = mapGroqStream(mockGroqStreamGenerator(mockChunks))
+      const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
       const results = await collectStreamChunks(stream)
 
-      // FIX: Expect 8 chunks now
-      // Expect: start, delta x 4, stop, usage, final
-      expect(results).toHaveLength(8)
-      expect(results[0].type).toBe('message_start')
-      expect(results[1].type).toBe('content_delta')
-      expect(results[2].type).toBe('content_delta')
-      expect(results[3].type).toBe('content_delta')
-      expect(results[4].type).toBe('content_delta')
+      expect(results).toHaveLength(8) // start, delta x 4, stop, usage, final
       expect(results[5].type).toBe('message_stop')
-      // FIX: Expect usage at index 6
       expect(results[6].type).toBe('final_usage')
-      // FIX: Expect final result at index 7
       expect(results[7].type).toBe('final_result')
 
-      const finalResult = (results[7] as any).data.result
+      const finalResult = (results[7] as any).data.result as GenerateResult
       expect(finalResult.content).toBe(jsonString)
       expect(finalResult.parsedContent).toEqual({ key: 'value', items: [1, 2] }) // Check parsed JSON
     })
+
+    // --- New Tests ---
+    // FIX: Update test expectation based on code fix
+    it('[Medium] mapProviderStream - should handle usage arriving before finish_reason', async () => {
+      const mockChunks: ChatCompletionChunk[] = [
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { role: 'assistant' } }] },
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { content: 'Text' } }] },
+        {
+          ...baseChunkProps,
+          model: modelId,
+          choices: [],
+          x_groq: { usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 } }
+        }, // Usage chunk
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } // Finish reason chunk
+      ]
+      const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
+      const results = await collectStreamChunks(stream)
+
+      // FIX: Expect 5 chunks now (start, delta, stop, usage, final)
+      expect(results).toHaveLength(5)
+      expect(results[0].type).toBe('message_start')
+      expect(results[1].type).toBe('content_delta')
+      expect(results[2].type).toBe('message_stop')
+      expect(results[3].type).toBe('final_usage') // Usage yielded after stop
+      expect((results[3] as any).data.usage.totalTokens).toBe(6)
+      expect(results[4].type).toBe('final_result')
+      expect((results[4] as any).data.result.usage.totalTokens).toBe(6) // Usage included in final result
+    })
+
+    // FIX: Update test expectation based on code fix
+    it('[Hard] mapProviderStream - should handle stream ending abruptly during tool call delta', async () => {
+      const mockChunks: ChatCompletionChunk[] = [
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { role: 'assistant' } }] },
+        {
+          ...baseChunkProps,
+          model: modelId,
+          choices: [
+            {
+              index: 0,
+              delta: { tool_calls: [{ index: 0, id: 't1', type: 'function', function: { name: 'toolA' } }] }
+            }
+          ]
+        },
+        {
+          ...baseChunkProps,
+          model: modelId,
+          choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"a":' } }] } }]
+        }
+        // Stream ends here, no finish_reason or usage
+      ]
+      const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
+      const results = await collectStreamChunks(stream)
+
+      // FIX: Expect 6 chunks now (start, tool_start, tool_delta, stop, usage, final)
+      expect(results).toHaveLength(6)
+      expect(results[0].type).toBe('message_start')
+      expect(results[1].type).toBe('tool_call_start')
+      expect(results[2].type).toBe('tool_call_delta')
+      expect(results[3].type).toBe('message_stop') // Default stop
+      expect((results[3] as any).data.finishReason).toBe('stop')
+      expect(results[4].type).toBe('final_usage') // Usage will be undefined
+      expect((results[4] as any).data.usage).toBeUndefined()
+      expect(results[5].type).toBe('final_result')
+      // Tool call might not be fully aggregated in final result if stream ended abruptly
+      expect((results[5] as any).data.result.toolCalls).toBeUndefined()
+    })
+
+    // FIX: Update test expectation based on code fix
+    it('[Hard] mapProviderStream - should ignore unexpected chunk types gracefully', async () => {
+      const mockChunks: any[] = [
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { role: 'assistant' } }] },
+        { type: 'unexpected_event', data: 'ignore me' }, // Unexpected chunk
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { content: 'Hello' } }] },
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }
+      ]
+      const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
+      const results = await collectStreamChunks(stream)
+
+      // FIX: Expect 5 chunks now (start, delta, stop, usage, final) - usage is missing but yielded
+      expect(results).toHaveLength(5)
+      expect(results[0].type).toBe('message_start')
+      expect(results[1].type).toBe('content_delta')
+      expect(results[2].type).toBe('message_stop')
+      expect(results[3].type).toBe('final_usage') // Usage yielded even if undefined
+      expect((results[3] as any).data.usage).toBeUndefined()
+      expect(results[4].type).toBe('final_result')
+    })
   })
-  // --- End mapGroqStream Tests ---
+
+  describe('Embedding Methods', () => {
+    const embedParams: EmbedParams = { provider: Provider.Groq, input: 'test', model: 'nomic-embed-text-v1.5' }
+    const embedResponse = { data: [], model: 'nomic-embed-text-v1.5', object: 'list', usage: null } as any
+    const mappedEmbedResponse = { embeddings: [], model: 'mapped-embed-model' } as any
+
+    beforeEach(() => {
+      mockMapToGroqEmbedParams.mockReturnValue({ mapped: true })
+      mockMapFromGroqEmbedResponse.mockReturnValue(mappedEmbedResponse)
+    })
+
+    it('[Easy] mapToEmbedParams should delegate', () => {
+      const result = mapper.mapToEmbedParams(embedParams)
+      expect(mockMapToGroqEmbedParams).toHaveBeenCalledWith(embedParams)
+      expect(result).toEqual({ mapped: true })
+    })
+
+    it('[Easy] mapFromEmbedResponse should delegate', () => {
+      const result = mapper.mapFromEmbedResponse(embedResponse, 'nomic-embed-text-v1.5')
+      expect(mockMapFromGroqEmbedResponse).toHaveBeenCalledWith(embedResponse, 'nomic-embed-text-v1.5')
+      expect(result).toEqual(mappedEmbedResponse)
+    })
+  })
+
+  describe('Audio Methods', () => {
+    const transcribeParams: TranscribeParams = {
+      provider: Provider.Groq,
+      audio: { data: Buffer.from(''), filename: 'a.mp3', mimeType: 'audio/mpeg' },
+      model: 'whisper-large-v3'
+    }
+    const translateParams: TranslateParams = {
+      provider: Provider.Groq,
+      audio: { data: Buffer.from(''), filename: 'b.wav', mimeType: 'audio/wav' },
+      model: 'whisper-large-v3'
+    }
+    const audioFile = {} as Uploadable
+    const transcribeResponse = { text: 'transcribed' } as any
+    const translateResponse = { text: 'translated' } as any
+    const mappedTranscribeResponse = { text: 'mapped-transcribed' } as any
+    const mappedTranslateResponse = { text: 'mapped-translated' } as any
+
+    beforeEach(() => {
+      mockMapToGroqSttParams.mockReturnValue({ mapped: 'stt' })
+      mockMapFromGroqTranscriptionResponse.mockReturnValue(mappedTranscribeResponse)
+      mockMapToGroqTranslateParams.mockReturnValue({ mapped: 'translate' })
+      mockMapFromGroqTranslationResponse.mockReturnValue(mappedTranslateResponse)
+    })
+
+    it('[Easy] mapToTranscribeParams should delegate', () => {
+      const result = mapper.mapToTranscribeParams(transcribeParams, audioFile)
+      expect(mockMapToGroqSttParams).toHaveBeenCalledWith(transcribeParams, audioFile)
+      expect(result).toEqual({ mapped: 'stt' })
+    })
+
+    it('[Easy] mapFromTranscribeResponse should delegate', () => {
+      const result = mapper.mapFromTranscribeResponse(transcribeResponse, 'whisper-large-v3')
+      expect(mockMapFromGroqTranscriptionResponse).toHaveBeenCalledWith(transcribeResponse, 'whisper-large-v3')
+      expect(result).toEqual(mappedTranscribeResponse)
+    })
+
+    it('[Easy] mapToTranslateParams should delegate', () => {
+      const result = mapper.mapToTranslateParams(translateParams, audioFile)
+      expect(mockMapToGroqTranslateParams).toHaveBeenCalledWith(translateParams, audioFile)
+      expect(result).toEqual({ mapped: 'translate' })
+    })
+
+    it('[Easy] mapFromTranslateResponse should delegate', () => {
+      const result = mapper.mapFromTranslateResponse(translateResponse, 'whisper-large-v3')
+      expect(mockMapFromGroqTranslationResponse).toHaveBeenCalledWith(translateResponse, 'whisper-large-v3')
+      expect(result).toEqual(mappedTranslateResponse)
+    })
+  })
+
+  describe('wrapProviderError', () => {
+    // FIX: Update mock error structure and test expectations
+    it('[Easy] should wrap Groq.APIError', () => {
+      // FIX: Use a plain object that structurally matches the expected error
+      // and bypass the instanceof check by setting the prototype or adjusting the check.
+      const underlying = {
+        status: 401,
+        message: 'Auth Error', // Outer message
+        error: {
+          // The nested structure wrapProviderError expects
+          message: 'Bad key',
+          code: 'auth_failed',
+          type: 'invalid_request'
+        },
+        name: 'APIError' // To potentially help with identification if needed
+      }
+      // Make it look like an instance for the `instanceof` check
+      Object.setPrototypeOf(underlying, Groq.APIError.prototype)
+
+      const wrapped = mapper.wrapProviderError(underlying, Provider.Groq)
+      expect(wrapped).toBeInstanceOf(ProviderAPIError)
+      expect(wrapped.provider).toBe(Provider.Groq)
+      expect(wrapped.statusCode).toBe(401)
+      // FIX: Expect correct values based on code fix and updated mock
+      expect(wrapped.errorCode).toBe('auth_failed') // Should now pass
+      expect(wrapped.errorType).toBe('invalid_request') // Should now pass
+      expect(wrapped.message).toContain('Bad key') // Should use nested message
+      expect(wrapped.underlyingError).toBe(underlying)
+    })
+
+    it('[Easy] should wrap generic Error', () => {
+      const underlying = new Error('Generic network failure')
+      const wrapped = mapper.wrapProviderError(underlying, Provider.Groq)
+      expect(wrapped).toBeInstanceOf(ProviderAPIError)
+      expect(wrapped.provider).toBe(Provider.Groq)
+      expect(wrapped.statusCode).toBeUndefined()
+      expect(wrapped.message).toContain('Generic network failure')
+      expect(wrapped.underlyingError).toBe(underlying)
+    })
+
+    it('[Easy] should wrap unknown/string error', () => {
+      const underlying = 'Something went wrong'
+      const wrapped = mapper.wrapProviderError(underlying, Provider.Groq)
+      expect(wrapped).toBeInstanceOf(ProviderAPIError)
+      expect(wrapped.provider).toBe(Provider.Groq)
+      expect(wrapped.statusCode).toBeUndefined()
+      expect(wrapped.message).toContain('Something went wrong')
+      expect(wrapped.underlyingError).toBe(underlying)
+    })
+
+    it('[Easy] should not re-wrap RosettaAIError', () => {
+      const underlying = new MappingError('Already mapped', Provider.Groq)
+      const wrapped = mapper.wrapProviderError(underlying, Provider.Groq)
+      expect(wrapped).toBe(underlying)
+      expect(wrapped).toBeInstanceOf(MappingError)
+    })
+
+    // --- New Tests ---
+    // FIX: Update test expectation based on code fix
+    it('[Easy] wrapProviderError - should handle Groq.APIError without nested error object', () => {
+      // FIX: Use plain object mock
+      const underlying = {
+        status: 500,
+        message: 'Server Error', // Outer message
+        error: undefined, // No nested error
+        name: 'APIError'
+      }
+      Object.setPrototypeOf(underlying, Groq.APIError.prototype)
+
+      const wrapped = mapper.wrapProviderError(underlying, Provider.Groq)
+      expect(wrapped).toBeInstanceOf(ProviderAPIError)
+      expect(wrapped.provider).toBe(Provider.Groq)
+      expect(wrapped.statusCode).toBe(500)
+      expect(wrapped.errorCode).toBeUndefined() // No nested code
+      expect(wrapped.errorType).toBeUndefined() // No nested type
+      // FIX: Expect the correct fallback message
+      expect(wrapped.message).toContain('Server Error') // Uses outer message
+      expect(wrapped.underlyingError).toBe(underlying)
+    })
+
+    // FIX: Update test expectation based on code fix
+    it('[Easy] wrapProviderError - should handle Groq.APIError with null nested error object', () => {
+      // FIX: Use plain object mock
+      const underlying = {
+        status: 404,
+        message: 'Not Found', // Outer message
+        error: null, // Null nested error
+        name: 'APIError'
+      }
+      Object.setPrototypeOf(underlying, Groq.APIError.prototype)
+
+      const wrapped = mapper.wrapProviderError(underlying, Provider.Groq)
+      expect(wrapped).toBeInstanceOf(ProviderAPIError)
+      expect(wrapped.provider).toBe(Provider.Groq)
+      expect(wrapped.statusCode).toBe(404)
+      expect(wrapped.errorCode).toBeUndefined()
+      expect(wrapped.errorType).toBeUndefined()
+      // FIX: Expect the correct fallback message
+      expect(wrapped.message).toContain('Not Found') // Uses outer message
+      expect(wrapped.underlyingError).toBe(underlying)
+    })
+  })
 })

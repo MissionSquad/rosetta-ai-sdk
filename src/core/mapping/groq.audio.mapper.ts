@@ -3,7 +3,6 @@
 import Groq from 'groq-sdk'
 import { Uploadable as GroqUploadable } from 'groq-sdk/core'
 import { TranscribeParams, TranslateParams, TranscriptionResult } from '../../types'
-
 import { safeGet } from '../utils'
 
 // --- Parameter Mapping ---
@@ -16,9 +15,9 @@ export function mapToGroqSttParams(
     console.warn("Groq provider does not support 'timestampGranularities'. Parameter ignored.")
   }
   // Groq supports: json, text, srt, verbose_json, vtt
+  // Groq may support srt, vtt. Check this later. For now, we'll use json, text, verbose_json
   const supportedFormats: Groq.Audio.TranscriptionCreateParams['response_format'][] = ['json', 'text', 'verbose_json']
-  // FIX: Apply default 'json' if params.responseFormat is undefined
-  let responseFormat = params.responseFormat ?? 'json'
+  let responseFormat = params.responseFormat ?? 'json' // Apply default if undefined
   if (responseFormat && !supportedFormats.includes(responseFormat as any)) {
     console.warn(
       `Groq STT format '${responseFormat}' not directly supported or recognized. Supported: ${supportedFormats.join(
@@ -32,7 +31,7 @@ export function mapToGroqSttParams(
     file: file,
     language: params.language,
     prompt: params.prompt,
-    response_format: responseFormat as Groq.Audio.TranscriptionCreateParams['response_format'], // Cast after validation/defaulting
+    response_format: responseFormat as Groq.Audio.TranscriptionCreateParams['response_format'],
     temperature: undefined // Groq STT doesn't support temperature param in current types
   }
 }
@@ -41,10 +40,8 @@ export function mapToGroqTranslateParams(
   params: TranslateParams,
   file: GroqUploadable
 ): Groq.Audio.TranslationCreateParams {
-  // Groq supports: json, text, srt, verbose_json, vtt
   const supportedFormats: Groq.Audio.TranslationCreateParams['response_format'][] = ['json', 'text', 'verbose_json']
-  // FIX: Apply default 'json' if params.responseFormat is undefined
-  let responseFormat = params.responseFormat ?? 'json'
+  let responseFormat = params.responseFormat ?? 'json' // Apply default if undefined
   if (responseFormat && !supportedFormats.includes(responseFormat as any)) {
     console.warn(
       `Groq Translate format '${responseFormat}' not directly supported or recognized. Supported: ${supportedFormats.join(
@@ -57,7 +54,7 @@ export function mapToGroqTranslateParams(
     model: params.model!,
     file: file,
     prompt: params.prompt,
-    response_format: responseFormat as Groq.Audio.TranslationCreateParams['response_format'], // Cast after validation/defaulting
+    response_format: responseFormat as Groq.Audio.TranslationCreateParams['response_format'],
     temperature: undefined // Groq Translate also doesn't support temperature
   }
 }
@@ -66,10 +63,9 @@ export function mapToGroqTranslateParams(
 
 // Helper to extract text, handling potential string or object responses
 function extractTextFromGroqAudioResponse(response: Groq.Audio.Transcription | Groq.Audio.Translation): string {
-  // FIX: Handle null explicitly
   if (response === null) {
     console.warn('Received null audio response from Groq.')
-    return '[Unparsable Response]'
+    return '[Unparsable Response]' // Return specific string for null
   }
   if (typeof response === 'string') {
     return response
@@ -81,14 +77,14 @@ function extractTextFromGroqAudioResponse(response: Groq.Audio.Transcription | G
   ) {
     return response.text
   } else {
-    console.warn('Received unexpected audio response format from Groq, attempting String() conversion:', response)
+    // If it's not string or {text: string}, it might be SRT/VTT string, or unexpected JSON.
+    // Try String() conversion as a fallback.
+    console.warn('Received non-standard audio response format from Groq, attempting String() conversion:', response)
     try {
-      // Use String() for broader compatibility including primitives and objects
       return String(response)
     } catch (e) {
-      // Fallback if String() itself throws (highly unlikely)
       console.error('Error converting Groq audio response to string:', e)
-      return '[Unparsable Response]'
+      return '[Unparsable Response]' // Return specific string on conversion error
     }
   }
 }

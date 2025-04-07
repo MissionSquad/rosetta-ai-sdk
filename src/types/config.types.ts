@@ -1,4 +1,5 @@
 import { Provider } from './common.types'
+import { ModelListingSourceConfig } from './models.types'
 
 /**
  * Optional provider-specific configuration settings that can override global defaults
@@ -57,4 +58,7 @@ export interface RosettaAIConfig {
   defaultMaxRetries?: number
   /** Default request timeout in milliseconds (where supported by underlying SDK). Defaults to 60000 (1 minute). */
   defaultTimeoutMs?: number
+
+  /** Optional configuration for how model lists are retrieved per provider. */
+  modelListingConfig?: Partial<Record<Provider, ModelListingSourceConfig>>
 }

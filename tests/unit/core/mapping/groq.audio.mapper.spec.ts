@@ -4,7 +4,7 @@ import {
   mapFromGroqTranscriptionResponse,
   mapFromGroqTranslationResponse
 } from '../../../../src/core/mapping/groq.audio.mapper'
-import { TranscribeParams, TranslateParams, TranscriptionResult, Provider } from '../../../../src/types'
+import { TranscribeParams, TranslateParams, Provider } from '../../../../src/types'
 import Groq from 'groq-sdk'
 import { Uploadable } from 'groq-sdk/core'
 
@@ -21,6 +21,17 @@ describe('Groq Audio Mapper', () => {
     filename: 'a.mp3',
     mimeType: 'audio/mpeg' as const
   }
+  let warnSpy: jest.SpyInstance // Declare spy instance
+
+  // Reset mocks before each test
+  beforeEach(() => {
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation() // Initialize and mock spy
+  })
+
+  // Restore mocks after each test
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
 
   describe('mapToGroqSttParams', () => {
     const baseParams: TranscribeParams = {
@@ -69,18 +80,18 @@ describe('Groq Audio Mapper', () => {
     })
 
     it('[Medium] should warn and default for unsupported responseFormat', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      // warnSpy is active due to beforeEach
       const params: TranscribeParams = { ...baseParams, responseFormat: 'srt' }
       const result = mapToGroqSttParams(params, mockAudioFile)
       expect(result.response_format).toBe('json')
       expect(warnSpy).toHaveBeenCalledWith(
         "Groq STT format 'srt' not directly supported or recognized. Supported: json, text, verbose_json. Defaulting to 'json'."
       )
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
 
     it('[Medium] should warn for timestampGranularities', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      // warnSpy is active due to beforeEach
       const params: TranscribeParams = {
         ...baseParams,
         timestampGranularities: ['word']
@@ -89,7 +100,7 @@ describe('Groq Audio Mapper', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         "Groq provider does not support 'timestampGranularities'. Parameter ignored."
       )
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
   })
 
@@ -134,14 +145,14 @@ describe('Groq Audio Mapper', () => {
     })
 
     it('[Medium] should warn and default for unsupported responseFormat', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      // warnSpy is active due to beforeEach
       const params: TranslateParams = { ...baseParams, responseFormat: 'vtt' }
       const result = mapToGroqTranslateParams(params, mockAudioFile)
       expect(result.response_format).toBe('json')
       expect(warnSpy).toHaveBeenCalledWith(
         "Groq Translate format 'vtt' not directly supported or recognized. Supported: json, text, verbose_json. Defaulting to 'json'."
       )
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
   })
 
@@ -158,7 +169,7 @@ describe('Groq Audio Mapper', () => {
       expect(result.rawResponse).toBe(response)
     })
 
-    it('should map basic JSON response (only text)', () => {
+    it('[Easy] should map basic JSON response (only text)', () => {
       const response: Groq.Audio.Transcription = {
         text: 'Transcription from JSON.'
       }
@@ -172,7 +183,7 @@ describe('Groq Audio Mapper', () => {
       expect(result.rawResponse).toBe(response)
     })
 
-    it('should map verbose JSON response', () => {
+    it('[Easy] should map verbose JSON response', () => {
       const response: Groq.Audio.Transcription = {
         text: 'Verbose transcription.',
         language: 'en',
@@ -206,10 +217,9 @@ describe('Groq Audio Mapper', () => {
     })
 
     it('[Hard] should handle unexpected response format (null)', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      // warnSpy is active due to beforeEach
       const response = null as any
       const result = mapFromGroqTranscriptionResponse(response, model)
-      // FIX: Expect the specific fallback string for null
       expect(result.text).toBe('[Unparsable Response]')
       expect(result.language).toBeUndefined()
       expect(result.duration).toBeUndefined()
@@ -217,20 +227,20 @@ describe('Groq Audio Mapper', () => {
       expect(result.words).toBeUndefined()
       expect(result.model).toBe(model)
       expect(warnSpy).toHaveBeenCalledWith('Received null audio response from Groq.')
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
 
     it('[Hard] should handle unexpected response format (number)', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      // warnSpy is active due to beforeEach
       const response = 42 as any
       const result = mapFromGroqTranscriptionResponse(response, model)
-      // FIX: Expect the string representation of the number
       expect(result.text).toBe('42')
+      // FIX: Update expected warning message
       expect(warnSpy).toHaveBeenCalledWith(
-        'Received unexpected audio response format from Groq, attempting String() conversion:',
+        'Received non-standard audio response format from Groq, attempting String() conversion:',
         42
       )
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
   })
 
@@ -247,7 +257,7 @@ describe('Groq Audio Mapper', () => {
       expect(result.rawResponse).toBe(response)
     })
 
-    it('should map basic JSON response (only text)', () => {
+    it('[Easy] should map basic JSON response (only text)', () => {
       const response: Groq.Audio.Translation = {
         text: 'Translation from JSON.'
       }
@@ -261,7 +271,7 @@ describe('Groq Audio Mapper', () => {
       expect(result.rawResponse).toBe(response)
     })
 
-    it('should map verbose JSON response', () => {
+    it('[Easy] should map verbose JSON response', () => {
       const response: Groq.Audio.Translation = {
         text: 'Verbose translation.',
         // language: 'en', // Typically not present in translation
@@ -295,37 +305,37 @@ describe('Groq Audio Mapper', () => {
     })
 
     it('[Hard] should handle unexpected response format (array)', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      // warnSpy is active due to beforeEach
       const response = ['unexpected'] as any
       const result = mapFromGroqTranslationResponse(response, model)
-      // FIX: Expect the standard string representation of the array
-      expect(result.text).toBe('unexpected')
+      expect(result.text).toBe('unexpected') // String(['unexpected'])
       expect(result.language).toBeUndefined()
       expect(result.duration).toBeUndefined()
       expect(result.segments).toBeUndefined()
       expect(result.words).toBeUndefined()
       expect(result.model).toBe(model)
+      // FIX: Update expected warning message
       expect(
         warnSpy
-      ).toHaveBeenCalledWith('Received unexpected audio response format from Groq, attempting String() conversion:', [
+      ).toHaveBeenCalledWith('Received non-standard audio response format from Groq, attempting String() conversion:', [
         'unexpected'
       ])
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
 
     it('[Hard] should handle unexpected response format (object without text)', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      // warnSpy is active due to beforeEach
       const response = { some_other_field: 'value' } as any
       const result = mapFromGroqTranslationResponse(response, model)
-      // FIX: Expect the standard string representation of the object
-      expect(result.text).toBe('[object Object]')
+      expect(result.text).toBe('[object Object]') // String({ some_other_field: 'value' })
+      // FIX: Update expected warning message
       expect(warnSpy).toHaveBeenCalledWith(
-        'Received unexpected audio response format from Groq, attempting String() conversion:',
+        'Received non-standard audio response format from Groq, attempting String() conversion:',
         {
           some_other_field: 'value'
         }
       )
-      warnSpy.mockRestore()
+      // warnSpy is restored in afterEach
     })
   })
 })

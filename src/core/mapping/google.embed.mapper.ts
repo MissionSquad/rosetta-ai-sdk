@@ -1,20 +1,11 @@
 // Dedicated mapper for Google Embeddings
 
-import { EmbedContentResponse, BatchEmbedContentsResponse, UsageMetadata } from '@google/generative-ai' // Import UsageMetadata
-import { EmbedResult, Provider, TokenUsage } from '../../types'
+import { EmbedContentResponse, BatchEmbedContentsResponse } from '@google/generative-ai'
+import { EmbedResult, Provider } from '../../types'
 import { MappingError } from '../../errors'
+import { mapTokenUsage } from './common.utils'
 
-function mapUsageFromGoogleEmbed(usageMetadata: UsageMetadata | undefined): TokenUsage | undefined {
-  // Google Embeddings API responses *do* include token usage in v1beta+
-  if (!usageMetadata) return undefined
-  return {
-    // Note: Google Embeddings usage only reports total tokens, not prompt/completion breakdown.
-    promptTokens: undefined,
-    completionTokens: undefined,
-    totalTokens: usageMetadata.totalTokenCount ?? undefined, // Prefer totalTokenCount if available
-    cachedContentTokenCount: usageMetadata.cachedContentTokenCount
-  }
-}
+// Removed mapUsageFromGoogleEmbed as mapTokenUsage handles it
 
 // Map single embedding response
 export function mapFromGoogleEmbedResponse(response: EmbedContentResponse, model: string): EmbedResult {
@@ -27,9 +18,9 @@ export function mapFromGoogleEmbedResponse(response: EmbedContentResponse, model
   }
   return {
     embeddings: [response.embedding.values],
-    // Assuming UsageMetadata might be available at the top level or within a specific field.
-    // Adjust path if necessary based on actual response structure.
-    usage: mapUsageFromGoogleEmbed((response as any).usageMetadata), // Access usage if present
+    // Use common utility for usage mapping
+    // Google Embeddings API v1beta includes usageMetadata
+    usage: mapTokenUsage((response as any).usageMetadata), // Access usage if present
     model: model,
     rawResponse: response
   }
@@ -59,8 +50,9 @@ export function mapFromGoogleEmbedBatchResponse(response: BatchEmbedContentsResp
 
   return {
     embeddings: embeddings,
-    // Batch responses might also have overall usage info. Adjust if needed.
-    usage: mapUsageFromGoogleEmbed((response as any).usageMetadata),
+    // Use common utility for usage mapping
+    // Batch responses in v1beta also include usageMetadata
+    usage: mapTokenUsage((response as any).usageMetadata),
     model: model,
     rawResponse: response
   }

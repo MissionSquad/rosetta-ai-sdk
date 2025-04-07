@@ -1,9 +1,8 @@
-// Mappers for OpenAI Embeddings
-
 import OpenAI from 'openai'
-import { Embedding, EmbeddingCreateParams } from 'openai/resources/embeddings' // Import CreateEmbeddingResponse correctly
-import { EmbedParams, EmbedResult, Provider, TokenUsage } from '../../types'
+import { Embedding, EmbeddingCreateParams } from 'openai/resources/embeddings'
+import { EmbedParams, EmbedResult, Provider } from '../../types'
 import { MappingError } from '../../errors'
+import { mapTokenUsage } from './common.utils'
 
 // --- Parameter Mapping ---
 
@@ -23,18 +22,6 @@ export function mapToOpenAIEmbedParams(params: EmbedParams): EmbeddingCreatePara
     input: inputData,
     encoding_format: params.encodingFormat,
     dimensions: params.dimensions
-  }
-}
-
-// Define specific usage type for Embedding response based on OpenAI's type
-type EmbeddingUsage = OpenAI.Embeddings.CreateEmbeddingResponse['usage']
-
-function mapUsageFromOpenAIEmbed(usage: EmbeddingUsage | undefined | null): TokenUsage | undefined {
-  if (!usage) return undefined
-  return {
-    promptTokens: usage.prompt_tokens,
-    totalTokens: usage.total_tokens,
-    completionTokens: undefined // Embeddings don't have completion tokens
   }
 }
 
@@ -63,10 +50,10 @@ export function mapFromOpenAIEmbedResponse(
     )
   }
 
-  // Use correct usage type for embeddings
+  // Use common utility for usage mapping
   return {
     embeddings: embeddings as number[][], // Cast after validation
-    usage: mapUsageFromOpenAIEmbed(response.usage), // Use specific embed usage mapper
+    usage: mapTokenUsage(response.usage), // Use specific embed usage mapper
     model: response.model ?? modelUsed, // Use model from response if available
     rawResponse: response
   }

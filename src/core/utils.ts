@@ -1,10 +1,7 @@
 import { Readable } from 'stream'
-import { RosettaAudioData } from '../types'
-// Import the OpenAI client and the toFile helper
 import { toFile } from 'openai'
-// Import the specific FileLike type for structure definition if needed elsewhere, but toFile handles creation
 import { FileLike } from 'openai/uploads'
-// Import Groq's Uploadable type for the union
+import { RosettaAudioData } from '../types'
 
 /**
  * Prepares audio data (Buffer or ReadableStream) into a format suitable for SDK uploads.

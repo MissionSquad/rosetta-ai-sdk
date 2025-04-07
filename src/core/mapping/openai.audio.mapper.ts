@@ -1,9 +1,80 @@
 // Mappers for OpenAI Audio features (Transcription, Translation)
 
 import OpenAI from 'openai'
-import { TranscriptionResult, Provider } from '../../types'
+import { Uploadable as OpenAIUploadable } from 'openai/uploads'
+import { TranscriptionResult, Provider, TranscribeParams, TranslateParams } from '../../types'
 import { MappingError } from '../../errors'
 import { safeGet } from '../utils'
+
+// --- Parameter Mapping ---
+
+export function mapToOpenAITranscribeParams(
+  params: TranscribeParams,
+  file: OpenAIUploadable
+): OpenAI.Audio.TranscriptionCreateParams {
+  // OpenAI uses standard model names for Whisper.
+  if (params.timestampGranularities && params.timestampGranularities.length > 0) {
+    // Timestamp granularities are supported by OpenAI
+  }
+  // OpenAI supports: json, text, srt, verbose_json, vtt
+  const supportedFormats: OpenAI.Audio.TranscriptionCreateParams['response_format'][] = [
+    'json',
+    'text',
+    'srt',
+    'verbose_json',
+    'vtt'
+  ]
+  let responseFormat = params.responseFormat ?? 'json'
+  if (responseFormat && !supportedFormats.includes(responseFormat as any)) {
+    console.warn(
+      `OpenAI STT format '${responseFormat}' not directly supported or recognized. Supported: ${supportedFormats.join(
+        ', '
+      )}. Defaulting to 'json'.`
+    )
+    responseFormat = 'json'
+  }
+
+  return {
+    model: params.model!, // e.g., 'whisper-1'
+    file: file,
+    language: params.language,
+    prompt: params.prompt,
+    response_format: responseFormat as OpenAI.Audio.TranscriptionCreateParams['response_format'],
+    temperature: undefined, // Temperature not typically supported in OpenAI STT
+    timestamp_granularities: params.timestampGranularities as ('word' | 'segment')[] | undefined
+  }
+}
+
+export function mapToOpenAITranslateParams(
+  params: TranslateParams,
+  file: OpenAIUploadable
+): OpenAI.Audio.TranslationCreateParams {
+  // OpenAI uses standard model names for Whisper translation.
+  // OpenAI supports: json, text, srt, verbose_json, vtt
+  const supportedFormats: OpenAI.Audio.TranslationCreateParams['response_format'][] = [
+    'json',
+    'text',
+    'srt',
+    'verbose_json',
+    'vtt'
+  ]
+  let responseFormat = params.responseFormat ?? 'json'
+  if (responseFormat && !supportedFormats.includes(responseFormat as any)) {
+    console.warn(
+      `OpenAI Translate format '${responseFormat}' not directly supported or recognized. Supported: ${supportedFormats.join(
+        ', '
+      )}. Defaulting to 'json'.`
+    )
+    responseFormat = 'json'
+  }
+  return {
+    model: params.model!, // e.g., 'whisper-1'
+    file: file,
+    prompt: params.prompt,
+    response_format: responseFormat as OpenAI.Audio.TranslationCreateParams['response_format'],
+    temperature: undefined // Temperature not typically supported
+  }
+}
 
 // --- Result Mapping ---
 
