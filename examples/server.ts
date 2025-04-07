@@ -14,7 +14,6 @@ import {
   TranscribeParams,
   TranslateParams,
   RosettaAudioData,
-  StreamChunk,
   RosettaAIError,
   ConfigurationError,
   ProviderAPIError,
