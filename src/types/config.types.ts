@@ -1,5 +1,6 @@
-import { Provider } from './common.types'
+import { ProviderKey } from './common.types' // Import ProviderKey
 import { ModelListingSourceConfig } from './models.types'
+import { CustomProviderConfig } from './custom.types'
 
 /**
  * Optional provider-specific configuration settings that can override global defaults
@@ -43,16 +44,16 @@ export interface RosettaAIConfig {
   azureOpenAIApiVersion?: string
 
   /** Optional provider-specific configurations applied to all requests for that provider unless overridden per-request. */
-  providerOptions?: Partial<Record<Provider, ProviderOptions>>
+  providerOptions?: Partial<Record<ProviderKey, ProviderOptions>> // Use ProviderKey
 
-  /** Default chat/completion model ID to use if not specified in request, keyed by provider. E.g., `{ openai: 'gpt-4o-mini' }`. */
-  defaultModels?: Partial<Record<Provider, string>>
+  /** Default chat/completion model ID to use if not specified in request, keyed by provider. E.g., `{ openai: 'gpt-4o-mini', 'my-custom': 'model-x' }`. */
+  defaultModels?: Partial<Record<ProviderKey, string>> // Use ProviderKey
   /** Default embedding model ID to use if not specified, keyed by provider. E.g., `{ openai: 'text-embedding-3-small' }`. */
-  defaultEmbeddingModels?: Partial<Record<Provider, string>>
+  defaultEmbeddingModels?: Partial<Record<ProviderKey, string>> // Use ProviderKey
   /** Default TTS model ID to use if not specified, keyed by provider. E.g., `{ openai: 'tts-1' }`. */
-  defaultTtsModels?: Partial<Record<Provider, string>>
+  defaultTtsModels?: Partial<Record<ProviderKey, string>> // Use ProviderKey
   /** Default STT model ID to use if not specified, keyed by provider. E.g., `{ openai: 'whisper-1' }`. */
-  defaultSttModels?: Partial<Record<Provider, string>>
+  defaultSttModels?: Partial<Record<ProviderKey, string>> // Use ProviderKey
 
   /** Default maximum retries for API calls (where supported by underlying SDK). Defaults to 2. */
   defaultMaxRetries?: number
@@ -60,5 +61,8 @@ export interface RosettaAIConfig {
   defaultTimeoutMs?: number
 
   /** Optional configuration for how model lists are retrieved per provider. */
-  modelListingConfig?: Partial<Record<Provider, ModelListingSourceConfig>>
+  modelListingConfig?: Partial<Record<ProviderKey, ModelListingSourceConfig>> // Use ProviderKey
+
+  /** Optional array of custom provider configurations. */
+  customProviders?: CustomProviderConfig[]
 }

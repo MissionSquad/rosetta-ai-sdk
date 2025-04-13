@@ -1,6 +1,7 @@
 import { TokenUsage, GenerateResult } from './result.types'
-import { Citation } from './common.types'
-import { Provider } from './common.types'
+import { Citation, ProviderKey } from './common.types' // Import ProviderKey
+// Remove unused Provider import
+// import { Provider } from './common.types' // Removed
 
 /**
  * Discriminated union representing the different types of events
@@ -9,7 +10,7 @@ import { Provider } from './common.types'
 export type StreamChunk =
   // --- Lifecycle & Metadata ---
   /** Signals the start of the stream, providing initial metadata like provider and model ID. */
-  | { type: 'message_start'; data: { provider: Provider; model: string } }
+  | { type: 'message_start'; data: { provider: ProviderKey; model: string } } // Changed Provider to ProviderKey
   /** Signals the end of the message generation, indicating the reason for stopping. */
   | { type: 'message_stop'; data: { finishReason: string | null } }
   /** Contains the final token usage statistics for the entire operation, usually sent at the very end. */

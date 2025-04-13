@@ -167,7 +167,7 @@ describe('listModelsForProvider', () => {
     it('[Easy] should use apiEndpoint for Google by default', async () => {
       await listModelsForProvider(Provider.Google, { apiKey: testApiKey })
       expect(mockFetchAndValidateModelsFromApi).toHaveBeenCalledWith(
-        'https://generativelanguage.googleapis.com/v1beta/models',
+        'https://generativelanguage.googleapis.com/v1beta/openai/models',
         Provider.Google,
         testApiKey
       )

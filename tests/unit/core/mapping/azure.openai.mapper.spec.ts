@@ -1,8 +1,7 @@
 import { AzureOpenAIMapper } from '../../../../src/core/mapping/azure.openai.mapper'
-// import * as OpenAIMapper from '../../../../src/core/mapping/openai.mapper' // No longer needed
 import * as OpenAIAudioMapper from '../../../../src/core/mapping/openai.audio.mapper'
 import * as OpenAIEmbedMapper from '../../../../src/core/mapping/openai.embed.mapper'
-import * as OpenAICommon from '../../../../src/core/mapping/openai.common' // Import common module
+import * as OpenAICommon from '../../../../src/core/mapping/openai.common'
 import {
   GenerateParams,
   EmbedParams,
@@ -20,6 +19,7 @@ import { ConfigurationError, MappingError, ProviderAPIError, UnsupportedFeatureE
 import OpenAI from 'openai'
 import { Stream } from 'openai/streaming'
 import { Uploadable } from 'openai/uploads'
+import { z } from 'zod'
 
 // Mock the base OpenAI common functions and sub-mappers
 // We mock the *exported functions* from the common/sub-mapper modules that Azure mapper delegates to.
@@ -327,7 +327,16 @@ describe('Azure OpenAI Mapper (V2)', () => {
     it('[Medium] should map tools array', () => {
       const params: GenerateParams = {
         ...baseGenerateParams,
-        tools: [{ type: 'function', function: { name: 'myFunc', parameters: { type: 'object' } } }]
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'myFunc',
+              parameters: { type: 'object' },
+              zodSchema: z.object({})
+            }
+          }
+        ]
       }
       const result = mapper.mapToProviderParams(params)
       expect(result.tools).toEqual([{ type: 'function', function: { name: 'myFunc', parameters: { type: 'object' } } }])
@@ -476,7 +485,7 @@ describe('Azure OpenAI Mapper (V2)', () => {
   })
 
   describe('Delegation Checks', () => {
-    // FIX: Use the updated mockValidResponse with choices
+    // Use the updated mockValidResponse with choices
     const mockResponse = mockValidResponse
     const mockStream = mockValidStream
     const mockEmbedResponse = mockValidEmbedResponse
@@ -486,20 +495,40 @@ describe('Azure OpenAI Mapper (V2)', () => {
     it('[Hard] mapFromProviderResponse should delegate to base mapper', () => {
       const result = mapper.mapFromProviderResponse(mockResponse, 'my-deploy-id')
       expect(mockMapFromOpenAIBaseResponse).toHaveBeenCalledTimes(1)
-      expect(mockMapFromOpenAIBaseResponse).toHaveBeenCalledWith(mockResponse, 'my-deploy-id')
+      expect(mockMapFromOpenAIBaseResponse).toHaveBeenCalledWith(mockResponse, 'my-deploy-id', undefined)
       expect(result).toEqual({ content: 'Delegated Response', finishReason: 'stop', model: 'delegated-model' })
     })
 
     it('[Hard] mapProviderStream should delegate to base stream mapper', async () => {
-      const stream = mapper.mapProviderStream(mockStream)
+      // Need originalParams for deployment ID and tools
+      const mockTools: any[] = [] // Define mock tools if needed, or use existing if available
+      const azureChatDeploymentId = 'test-stream-deploy'
+      const originalParams: GenerateParams = {
+        provider: Provider.OpenAI, // Still OpenAI when using Azure client for params
+        model: 'ignored-model',
+        messages: [{ role: 'user', content: 'Stream test' }],
+        providerOptions: { azureChatDeploymentId }, // Example deployment
+        tools: mockTools
+      }
+
+      // Pass originalParams to mapProviderStream
+      const streamResult = mapper.mapProviderStream(mockStream, originalParams) // Pass originalParams
       const results: StreamChunk[] = []
-      for await (const chunk of stream) {
+      for await (const chunk of streamResult) {
         results.push(chunk)
       }
-      // FIX: Check the correct mock function
+
+      // Check the correct mock function with correct arguments
       expect(mockMapOpenAIStream).toHaveBeenCalledTimes(1)
-      expect(mockMapOpenAIStream).toHaveBeenCalledWith(mockStream, Provider.OpenAI) // Pass provider
-      expect(results).toHaveLength(4)
+      // The Azure mapper implementation passes Provider.AzureOpenAI here
+      expect(mockMapOpenAIStream).toHaveBeenCalledWith(
+        mockStream,
+        Provider.OpenAI, // Should be OpenAI as passed by AzureOpenAIMapper's implementation
+        azureChatDeploymentId, // Expected deployment name
+        mockTools // Pass the tools from originalParams
+      )
+      // Keep original assertions about the stream content if they are still valid
+      expect(results).toHaveLength(4) // Assuming mockBaseStreamGenerator yields 4 chunks
       expect(results[0].type).toBe('message_start')
       expect(results[3].type).toBe('message_stop')
     })

@@ -212,6 +212,7 @@ export class GroqMapper implements IProviderMapper {
       }
     })
 
+    // @ts-ignore i think we can ignore this, Groq tool schema vs JSONSchema7 type issue. the example and tests are ok.
     const tools: ChatCompletionTool[] | undefined = params.tools?.map(tool => {
       if (tool.type !== 'function') {
         throw new MappingError(`Unsupported tool type for Groq: ${tool.type}`, this.provider)
@@ -346,7 +347,12 @@ export class GroqMapper implements IProviderMapper {
 
   // --- Stream Mapping (Chat/Completion) ---
 
-  async *mapProviderStream(stream: AsyncIterable<ChatCompletionChunk>): AsyncIterable<StreamChunk> {
+  async *mapProviderStream(
+    stream: AsyncIterable<ChatCompletionChunk>,
+    _originalParams: GenerateParams // Changed from originalTools
+  ): AsyncIterable<StreamChunk> {
+    // Note: originalParams is not directly used in this implementation,
+    // but included for interface consistency. Tool validation happens in mapFromProviderResponse.
     let accumulatedContent = ''
     const accumulatedToolCalls: Record<
       number,

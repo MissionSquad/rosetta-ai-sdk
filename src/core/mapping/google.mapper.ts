@@ -12,7 +12,8 @@ import {
   TextPart,
   Part as GooglePart,
   EmbedContentRequest,
-  BatchEmbedContentsRequest
+  BatchEmbedContentsRequest,
+  FinishReason
 } from '@google/generative-ai'
 import {
   GenerateParams,
@@ -435,7 +436,12 @@ export class GoogleMapper implements IProviderMapper {
 
   // --- Stream Mapping ---
 
-  async *mapProviderStream(stream: AsyncIterable<GenerateContentResponse>): AsyncIterable<StreamChunk> {
+  async *mapProviderStream(
+    stream: AsyncIterable<GenerateContentResponse>,
+    _originalParams: GenerateParams // Changed from originalTools
+  ): AsyncIterable<StreamChunk> {
+    // Note: originalParams is not directly used in this implementation,
+    // but included for interface consistency. Tool validation happens in mapFromProviderResponse.
     let currentUsage: TokenUsage | undefined
     let finalFinishReason: string | null = null
     let aggregatedText = ''
@@ -450,133 +456,173 @@ export class GoogleMapper implements IProviderMapper {
       yield { type: 'message_start', data: { provider: this.provider, model: model } }
 
       for await (const chunk of stream) {
-        // Aggregate usage metadata if present
-        if (chunk.usageMetadata) {
-          currentUsage = mapTokenUsage(chunk.usageMetadata) // Use common utility
-          if (aggregatedResult) aggregatedResult.usage = currentUsage
-        }
-
-        // Process candidate data
-        const candidate = chunk.candidates?.[0]
-        if (!candidate) continue // Skip chunks without candidates
-
-        // Initialize aggregated result on first valid candidate
-        if (!aggregatedResult) {
-          aggregatedResult = {
-            content: '',
-            toolCalls: [],
-            finishReason: null,
-            usage: currentUsage,
-            model: model, // Will be empty initially, maybe update later if possible?
-            thinkingSteps: null,
-            citations: [],
-            parsedContent: null,
-            rawResponse: undefined
+        try {
+          // Aggregate usage metadata if present
+          if (chunk.usageMetadata) {
+            currentUsage = mapTokenUsage(chunk.usageMetadata) // Use common utility
+            if (aggregatedResult) aggregatedResult.usage = currentUsage
           }
-        }
 
-        // --- Text Delta ---
-        const textDelta =
-          safeGet<GooglePart[]>(candidate, 'content', 'parts')
-            ?.filter((p): p is TextPart => p && 'text' in p)
-            .map(p => p.text)
-            .join('') ?? ''
-
-        if (textDelta) {
-          if (!isPotentiallyJson && aggregatedText === '' && textDelta.trim().match(/^[{[]/)) {
-            isPotentiallyJson = true
+          // --- FIX: Add check for candidates ---
+          if (!chunk.candidates || !Array.isArray(chunk.candidates) || chunk.candidates.length === 0) {
+            // console.warn('Google stream chunk missing candidates, skipping.') // Optional warning
+            continue // Skip this chunk
           }
-          aggregatedText += textDelta
-          if (aggregatedResult) aggregatedResult.content = aggregatedText
+          // --- End FIX ---
 
-          if (isPotentiallyJson) {
-            let partialParsed = undefined
-            try {
-              partialParsed = JSON.parse(aggregatedText)
-            } catch {}
-            yield { type: 'json_delta', data: { delta: textDelta, parsed: partialParsed, snapshot: aggregatedText } }
-          } else {
-            yield { type: 'content_delta', data: { delta: textDelta } }
+          const candidate = chunk.candidates[0] // Safe to access index 0 now
+          if (!candidate) continue // Should be redundant due to above check, but keep for safety
+
+          // Initialize aggregated result on first valid candidate
+          if (!aggregatedResult) {
+            aggregatedResult = {
+              content: '',
+              toolCalls: [],
+              finishReason: null,
+              usage: currentUsage,
+              model: model, // Will be empty initially, maybe update later if possible?
+              thinkingSteps: null,
+              citations: [],
+              parsedContent: null,
+              rawResponse: undefined
+            }
           }
-        }
 
-        // --- Function Call Delta ---
-        const functionCallParts = safeGet<GooglePart[]>(candidate, 'content', 'parts')?.filter(
-          (p): p is FunctionCallPart => p && 'functionCall' in p
-        )
+          // --- FIX: Wrap part processing in try-catch ---
+          try {
+            // --- Text Delta ---
+            const textDelta =
+              safeGet<GooglePart[]>(candidate, 'content', 'parts') // Use safeGet
+                ?.filter((p): p is TextPart => p && 'text' in p)
+                .map(p => p.text)
+                .join('') ?? ''
 
-        if (functionCallParts && functionCallParts.length > 0) {
-          const newCalls = this.mapToolCallsFromGoogle(functionCallParts.map(p => p.functionCall))
-          if (newCalls) {
-            for (const tc of newCalls) {
-              // Check if this specific tool call ID has already been fully processed and added
-              if (!aggregatedToolCalls.some(existing => existing.id === tc.id)) {
-                const overallIndex = aggregatedToolCalls.length
-                aggregatedToolCalls.push(tc) // Add the fully formed call
-                if (aggregatedResult && aggregatedResult.toolCalls) aggregatedResult.toolCalls.push(tc)
+            if (textDelta) {
+              if (!isPotentiallyJson && aggregatedText === '' && textDelta.trim().match(/^[{[]/)) {
+                isPotentiallyJson = true
+              }
+              aggregatedText += textDelta
+              if (aggregatedResult) aggregatedResult.content = aggregatedText
 
-                // Yield start, delta (full args), and done for this new call
+              if (isPotentiallyJson) {
+                let partialParsed = undefined
+                try {
+                  partialParsed = JSON.parse(aggregatedText)
+                } catch {}
                 yield {
-                  type: 'tool_call_start',
-                  data: {
-                    index: overallIndex,
-                    toolCall: { id: tc.id, type: 'function', function: { name: tc.function.name } }
-                  }
+                  type: 'json_delta',
+                  data: { delta: textDelta, parsed: partialParsed, snapshot: aggregatedText }
                 }
-                yield {
-                  type: 'tool_call_delta',
-                  data: { index: overallIndex, id: tc.id, functionArgumentChunk: tc.function.arguments }
-                }
-                yield { type: 'tool_call_done', data: { index: overallIndex, id: tc.id } }
-                finalFinishReason = 'tool_calls' // Set finish reason if a tool call occurred
+              } else {
+                yield { type: 'content_delta', data: { delta: textDelta } }
               }
             }
-          }
-        }
 
-        // --- Citation Delta ---
-        const citationsChunk = this.mapCitationsFromGoogle(candidate.citationMetadata)
-        if (citationsChunk) {
-          for (const citation of citationsChunk) {
-            // Check if this citation has already been processed
-            if (
-              !aggregatedCitations.some(
-                existing => existing.sourceId === citation.sourceId && existing.startIndex === citation.startIndex
-              )
-            ) {
-              const overallIndex = aggregatedCitations.length
-              aggregatedCitations.push(citation)
-              if (aggregatedResult && aggregatedResult.citations) aggregatedResult.citations.push(citation)
+            // --- Function Call Delta ---
+            const functionCallParts = safeGet<GooglePart[]>(candidate, 'content', 'parts')?.filter(
+              (p): p is FunctionCallPart => p && 'functionCall' in p
+            )
 
-              // Yield delta and done for this new citation
-              yield { type: 'citation_delta', data: { index: overallIndex, citation } }
-              yield { type: 'citation_done', data: { index: overallIndex, citation } }
+            if (functionCallParts && functionCallParts.length > 0) {
+              const newCalls = this.mapToolCallsFromGoogle(functionCallParts.map(p => p.functionCall))
+              if (newCalls) {
+                for (const tc of newCalls) {
+                  // Check if this specific tool call ID has already been fully processed and added
+                  if (!aggregatedToolCalls.some(existing => existing.id === tc.id)) {
+                    const overallIndex = aggregatedToolCalls.length
+                    aggregatedToolCalls.push(tc) // Add the fully formed call
+                    if (aggregatedResult && aggregatedResult.toolCalls) aggregatedResult.toolCalls.push(tc)
+
+                    // Yield start, delta (full args), and done for this new call
+                    yield {
+                      type: 'tool_call_start',
+                      data: {
+                        index: overallIndex,
+                        toolCall: { id: tc.id, type: 'function', function: { name: tc.function.name } }
+                      }
+                    }
+                    yield {
+                      type: 'tool_call_delta',
+                      data: { index: overallIndex, id: tc.id, functionArgumentChunk: tc.function.arguments }
+                    }
+                    yield { type: 'tool_call_done', data: { index: overallIndex, id: tc.id } }
+                    finalFinishReason = 'tool_calls' // Set finish reason if a tool call occurred
+                  }
+                }
+              }
             }
-          }
-        }
 
-        // --- Finish Reason ---
-        const reason = candidate.finishReason
-        // Only update finalFinishReason if it's not already 'tool_calls'
-        if (reason && reason !== 'FINISH_REASON_UNSPECIFIED' && finalFinishReason !== 'tool_calls') {
-          if (reason === 'SAFETY') finalFinishReason = 'content_filter'
-          else if (reason === 'RECITATION') finalFinishReason = 'recitation_filter'
-          else if (reason === 'MAX_TOKENS') finalFinishReason = 'length'
-          else if (reason === 'STOP') finalFinishReason = 'stop'
-          else finalFinishReason = reason.toLowerCase()
-          if (aggregatedResult) aggregatedResult.finishReason = finalFinishReason
+            // --- Citation Delta ---
+            const citationsChunk = this.mapCitationsFromGoogle(candidate.citationMetadata)
+            if (citationsChunk) {
+              for (const citation of citationsChunk) {
+                // Check if this citation has already been processed
+                if (
+                  !aggregatedCitations.some(
+                    existing => existing.sourceId === citation.sourceId && existing.startIndex === citation.startIndex
+                  )
+                ) {
+                  const overallIndex = aggregatedCitations.length
+                  aggregatedCitations.push(citation)
+                  if (aggregatedResult && aggregatedResult.citations) aggregatedResult.citations.push(citation)
+
+                  // Yield delta and done for this new citation
+                  yield { type: 'citation_delta', data: { index: overallIndex, citation } }
+                  yield { type: 'citation_done', data: { index: overallIndex, citation } }
+                }
+              }
+            }
+          } catch (partProcessingError) {
+            console.error(
+              'Error processing Google stream chunk parts:',
+              partProcessingError,
+              'Chunk:',
+              JSON.stringify(chunk)
+            )
+            // Decide whether to yield an error and stop, or just log and continue
+            // For now, let's yield an error chunk and let the main catch handle termination
+            throw new MappingError(
+              'Failed to process Google stream chunk content',
+              this.provider,
+              'mapProviderStream part processing',
+              partProcessingError
+            )
+          }
+          // --- End FIX ---
+
+          // --- Finish Reason ---
+          const reason = candidate.finishReason
+          // Only update finalFinishReason if it's not already 'tool_calls'
+          if (reason && reason !== FinishReason.FINISH_REASON_UNSPECIFIED && finalFinishReason !== 'tool_calls') {
+            if (reason === FinishReason.SAFETY) finalFinishReason = 'content_filter'
+            else if (reason === FinishReason.RECITATION) finalFinishReason = 'recitation_filter'
+            else if (reason === FinishReason.MAX_TOKENS) finalFinishReason = 'length'
+            else if (reason === FinishReason.STOP) finalFinishReason = 'stop'
+            else finalFinishReason = reason.toLowerCase() // Use lowercase for others
+            if (aggregatedResult) aggregatedResult.finishReason = finalFinishReason
+          }
+        } catch (streamProcessingError) {
+          // Catch errors during the loop itself (including the part processing error re-thrown above)
+          console.error('Error during Google stream processing loop:', streamProcessingError)
+          const mappedError = this.wrapProviderError(streamProcessingError, this.provider)
+          yield { type: 'error', data: { error: mappedError } }
+          return // Stop the generator on error
         }
       } // End main stream loop (for await...)
 
       // --- End of Stream ---
-      // Determine final reason if still null
+      // --- FIX: Ensure finalFinishReason is set ---
       if (finalFinishReason === null) {
         if (aggregatedText || aggregatedToolCalls.length > 0 || aggregatedCitations.length > 0) {
           finalFinishReason = 'stop' // Assume normal stop if content/tools/citations were generated
         } else {
-          finalFinishReason = 'unknown' // Otherwise, unknown reason
+          // If nothing was generated and no specific reason given, it might be an error or unknown state
+          console.warn('Google stream finished without generating content or providing a finish reason.')
+          finalFinishReason = 'unknown'
         }
       }
+      // --- End FIX ---
+
       if (aggregatedResult) aggregatedResult.finishReason = finalFinishReason
 
       if (isPotentiallyJson) {
@@ -603,6 +649,7 @@ export class GoogleMapper implements IProviderMapper {
         console.warn('Google stream finished, but no aggregated result was built.')
       }
     } catch (error) {
+      // Catch setup errors or errors re-thrown from the loop's catch block
       const mappedError = this.wrapProviderError(error, this.provider)
       yield { type: 'error', data: { error: mappedError } }
     }

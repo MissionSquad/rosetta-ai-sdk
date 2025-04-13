@@ -6,12 +6,17 @@ import {
   StreamChunk,
   EmbedParams,
   TranscribeParams,
-  TranslateParams,
-  GenerateResult // Import result type
+  TranslateParams
 } from '../../../../src/types'
-import { MappingError, ProviderAPIError, RosettaAIError, UnsupportedFeatureError } from '../../../../src/errors'
+import {
+  InvalidToolDefinitionError,
+  MappingError,
+  ProviderAPIError,
+  UnsupportedFeatureError
+} from '../../../../src/errors'
 import Anthropic from '@anthropic-ai/sdk'
-import { RawMessageStreamEvent } from '@anthropic-ai/sdk/resources/messages'
+import { RawMessageStreamEvent, ThinkingBlock } from '@anthropic-ai/sdk/resources/messages'
+import { z } from 'zod' // Import Zod
 
 // Helper to create mock Anthropic Message with required fields
 const createMockAnthropicMessage = (
@@ -38,7 +43,7 @@ const createMockAnthropicMessage = (
 const createMockTextBlock = (text: string): Anthropic.TextBlock => ({
   type: 'text',
   text: text,
-  citations: null
+  citations: null // maybe citations should be optional? technically it's Anthropic.Messages.TextCitation[] | null, and null is not undefined
 })
 
 // Helper to create mock ToolUseBlock
@@ -53,7 +58,7 @@ const createMockToolUseBlock = (id: string, name: string, input: any): Anthropic
 const createMockThinkingBlock = (thinking: string): Anthropic.ThinkingBlock => ({
   type: 'thinking',
   thinking: thinking,
-  signature: null
+  signature: '' // think this will always be a string? if it can be null or undefined, we might just want to make it optional
 })
 
 // Helper async generator for stream tests
@@ -188,7 +193,8 @@ describe('Anthropic Mapper', () => {
             function: {
               name: 'get_weather',
               description: 'Gets weather',
-              parameters: { type: 'object', properties: { location: { type: 'string' } }, required: ['location'] }
+              parameters: { type: 'object', properties: { location: { type: 'string' } }, required: ['location'] },
+              zodSchema: z.object({ location: z.string() })
             }
           }
         ]
@@ -309,14 +315,15 @@ describe('Anthropic Mapper', () => {
             function: {
               name: 'get_weather',
               description: 'Gets weather',
-              parameters: { properties: { location: { type: 'string' } } } // Missing type: object
+              parameters: { properties: { location: { type: 'string' } } }, // Missing type: object
+              zodSchema: z.object({}) // Add dummy schema
             }
           }
         ]
       }
-      expect(() => mapper.mapToProviderParams(params)).toThrow(MappingError)
+      expect(() => mapper.mapToProviderParams(params)).toThrow(InvalidToolDefinitionError)
       expect(() => mapper.mapToProviderParams(params)).toThrow(
-        "Invalid parameters schema for tool 'get_weather'. Anthropic requires a JSON Schema object with top-level 'type: \"object\"'."
+        "Invalid Tool Definition for 'get_weather': Invalid parameters schema for tool 'get_weather'. Anthropic requires the top-level 'type' property to be exactly 'object'. Received: type='undefined'"
       )
     })
 
@@ -530,6 +537,14 @@ describe('Anthropic Mapper', () => {
 
   describe('mapProviderStream', () => {
     const modelId = 'claude-3-stream-test'
+    // Add a base originalParams for stream tests
+    const baseOriginalParams: GenerateParams = {
+      provider: Provider.Anthropic,
+      model: modelId,
+      messages: [], // Not strictly needed by mapProviderStream, but good practice
+      tools: [] // Include tools for potential validation logic
+    }
+
     const baseMessageStart: Anthropic.Messages.MessageStartEvent = {
       type: 'message_start',
       message: {
@@ -555,7 +570,8 @@ describe('Anthropic Mapper', () => {
         { type: 'message_stop' }
       ]
 
-      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events))
+      // Add baseOriginalParams as the second argument
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), baseOriginalParams)
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(6) // start, delta, delta, stop, usage, final_result
@@ -596,7 +612,8 @@ describe('Anthropic Mapper', () => {
         { type: 'message_stop' }
       ]
 
-      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events))
+      // Add baseOriginalParams as the second argument
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), baseOriginalParams)
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(5) // start, delta, stop, usage, final_result
@@ -609,6 +626,20 @@ describe('Anthropic Mapper', () => {
     it('[Hard] should handle tool call streaming', async () => {
       const toolCallId = 'toolu_stream_abc'
       const toolName = 'stream_tool'
+      // Define params with the tool for validation
+      const toolParams: GenerateParams = {
+        ...baseOriginalParams,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: toolName,
+              parameters: { type: 'object', properties: { arg: { type: 'number' } } },
+              zodSchema: z.object({ arg: z.number() })
+            }
+          }
+        ]
+      }
       const events: RawMessageStreamEvent[] = [
         baseMessageStart,
         {
@@ -623,7 +654,8 @@ describe('Anthropic Mapper', () => {
         { type: 'message_stop' }
       ]
 
-      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events))
+      // Add toolParams as the second argument
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), toolParams)
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(8) // start, tool_start, delta, delta, tool_done, stop, usage, final_result
@@ -653,7 +685,7 @@ describe('Anthropic Mapper', () => {
     it('[Hard] should handle thinking steps streaming', async () => {
       const events: RawMessageStreamEvent[] = [
         baseMessageStart,
-        { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: null } },
+        { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } as ThinkingBlock },
         { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Step 1...' } },
         { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Step 2.' } },
         { type: 'content_block_stop', index: 0 },
@@ -664,7 +696,8 @@ describe('Anthropic Mapper', () => {
         { type: 'message_stop' }
       ]
 
-      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events))
+      // Add baseOriginalParams as the second argument
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), baseOriginalParams)
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(9) // start, thinking_start, delta, delta, thinking_stop, delta, stop, usage, final
@@ -694,7 +727,8 @@ describe('Anthropic Mapper', () => {
         { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello' } }
       ]
 
-      const stream = mapper.mapProviderStream(mockAnthropicErrorStreamGenerator(events, apiError))
+      // Add baseOriginalParams as the second argument
+      const stream = mapper.mapProviderStream(mockAnthropicErrorStreamGenerator(events, apiError), baseOriginalParams)
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(3) // start, delta, error
@@ -773,32 +807,38 @@ describe('Anthropic Mapper', () => {
       )
       const wrapped = mapper.wrapProviderError(underlying, Provider.Anthropic)
       expect(wrapped).toBeInstanceOf(ProviderAPIError)
-      expect(wrapped.provider).toBe(Provider.Anthropic)
-      expect(wrapped.statusCode).toBe(429)
-      expect(wrapped.errorCode).toBe('rate_limit_error')
-      expect(wrapped.errorType).toBe('rate_limit_error')
-      expect(wrapped.message).toContain('Limit exceeded')
-      expect(wrapped.underlyingError).toBe(underlying)
+      // Add type assertion to satisfy TypeScript
+      const providerError = wrapped as ProviderAPIError
+      expect(providerError.provider).toBe(Provider.Anthropic)
+      expect(providerError.statusCode).toBe(429)
+      expect(providerError.errorCode).toBe('rate_limit_error')
+      expect(providerError.errorType).toBe('rate_limit_error')
+      expect(providerError.message).toContain('Limit exceeded')
+      expect(providerError.underlyingError).toBe(underlying)
     })
 
     it('[Easy] should wrap generic Error', () => {
       const underlying = new Error('Generic network failure')
       const wrapped = mapper.wrapProviderError(underlying, Provider.Anthropic)
       expect(wrapped).toBeInstanceOf(ProviderAPIError)
-      expect(wrapped.provider).toBe(Provider.Anthropic)
-      expect(wrapped.statusCode).toBeUndefined()
-      expect(wrapped.message).toContain('Generic network failure')
-      expect(wrapped.underlyingError).toBe(underlying)
+      // Add type assertion to satisfy TypeScript
+      const providerError = wrapped as ProviderAPIError
+      expect(providerError.provider).toBe(Provider.Anthropic)
+      expect(providerError.statusCode).toBeUndefined()
+      expect(providerError.message).toContain('Generic network failure')
+      expect(providerError.underlyingError).toBe(underlying)
     })
 
     it('[Easy] should wrap unknown/string error', () => {
       const underlying = 'Something went wrong'
       const wrapped = mapper.wrapProviderError(underlying, Provider.Anthropic)
       expect(wrapped).toBeInstanceOf(ProviderAPIError)
-      expect(wrapped.provider).toBe(Provider.Anthropic)
-      expect(wrapped.statusCode).toBeUndefined()
-      expect(wrapped.message).toContain('Something went wrong')
-      expect(wrapped.underlyingError).toBe(underlying)
+      // Add type assertion to satisfy TypeScript
+      const providerError = wrapped as ProviderAPIError
+      expect(providerError.provider).toBe(Provider.Anthropic)
+      expect(providerError.statusCode).toBeUndefined()
+      expect(providerError.message).toContain('Something went wrong')
+      expect(providerError.underlyingError).toBe(underlying)
     })
 
     it('[Easy] should not re-wrap RosettaAIError', () => {

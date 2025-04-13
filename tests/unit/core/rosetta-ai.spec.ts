@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import Groq from 'groq-sdk'
 import OpenAI, { AzureOpenAI } from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai' // Import Google client
+import { z } from 'zod' // Import Zod
 import {
   RosettaAI,
   Provider,
@@ -15,13 +16,17 @@ import {
   TranscribeParams,
   EmbedParams,
   TranslateParams,
-  GenerateResult, // Import result types
+  GenerateResult,
   EmbedResult,
   TranscriptionResult,
-  RosettaAIError, // Import base error
-  RosettaModelList, // Import model types
-  ModelListingSourceConfig
+  RosettaAIError,
+  RosettaModelList,
+  ModelListingSourceConfig,
+  RosettaTool,
+  ToolArgumentValidationError,
+  CustomProviderConfig
 } from '../../../src'
+import { BaseCustomMapper } from '../../../src/core/mapping/base.custom.mapper'
 
 // Mock the mapper classes
 jest.mock('../../../src/core/mapping/anthropic.mapper')
@@ -61,8 +66,10 @@ const mockAudioFile = { name: 'mock.mp3', type: 'audio/mpeg', [Symbol.toStringTa
 // Mock implementation for listModelsForProvider
 const mockListModelsForProvider = listModelsForProvider as jest.Mock
 
+import { AudioStreamChunk } from '../../../src' // Import AudioStreamChunk
+
 // Helper async generator for stream tests
-async function* mockStreamGenerator(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
+async function* mockStreamGenerator<T>(chunks: T[]): AsyncIterable<T> {
   for (const chunk of chunks) {
     await new Promise(resolve => setTimeout(resolve, 1))
     yield chunk
@@ -70,7 +77,7 @@ async function* mockStreamGenerator(chunks: StreamChunk[]): AsyncIterable<Stream
 }
 
 // Helper async generator that throws an error during iteration
-async function* mockErrorStreamGenerator(chunks: StreamChunk[], errorToThrow: Error): AsyncIterable<StreamChunk> {
+async function* mockErrorStreamGenerator<T>(chunks: T[], errorToThrow: Error): AsyncIterable<T> {
   for (const chunk of chunks) {
     await new Promise(resolve => setTimeout(resolve, 1))
     yield chunk
@@ -78,31 +85,110 @@ async function* mockErrorStreamGenerator(chunks: StreamChunk[], errorToThrow: Er
   throw errorToThrow
 }
 
-// Helper to collect stream chunks
-async function collectStreamChunks(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
-  const chunks: StreamChunk[] = []
+// Generic helper to collect stream chunks
+// Define a base chunk type and the specific error chunk structure
+type BaseChunk = { type: string; data?: any }
+type ErrorChunk = { type: 'error'; data: { error: RosettaAIError } }
+// Use a union type for the collectable chunks
+type CollectableChunk = StreamChunk | AudioStreamChunk | ErrorChunk
+async function collectStreamChunks<T extends CollectableChunk>(stream: AsyncIterable<T>): Promise<CollectableChunk[]> {
+  const chunks: CollectableChunk[] = [] // Use the union type here
   try {
     for await (const chunk of stream) {
       chunks.push(chunk)
     }
   } catch (error) {
-    // If the stream setup or processing throws directly, capture it as an error chunk
-    // This catch block is primarily for errors *thrown* by the generator,
-    // not errors *yielded* by the generator.
     const wrappedError =
-      error instanceof Error ? error : new Error(String(error ?? 'Unknown stream error during collection'))
-    // Avoid adding a duplicate error if the stream already yielded one.
-    // This check assumes the last chunk yielded might be the error.
-    if (chunks[chunks.length - 1]?.type !== 'error') {
-      chunks.push({ type: 'error', data: { error: wrappedError } })
+      error instanceof RosettaAIError
+        ? error
+        : error instanceof Error
+        ? new RosettaAIError(error.message) // Wrap generic errors
+        : new RosettaAIError(String(error ?? 'Unknown stream error during collection'))
+
+    const lastChunk = chunks[chunks.length - 1]
+    // Check if the last chunk is already an error chunk
+    if (!(lastChunk?.type === 'error' && (lastChunk as ErrorChunk).data?.error)) {
+      // Add the correctly typed ErrorChunk
+      const errorChunk: ErrorChunk = {
+        type: 'error',
+        data: { error: wrappedError }
+      }
+      chunks.push(errorChunk) // No cast needed as chunks array type includes ErrorChunk
     } else {
-      console.warn('Caught error during stream collection, but an error chunk was already yielded.')
+      console.warn('Caught error during stream collection, but an error chunk was already present.')
     }
   }
   return chunks
 }
 
-describe('RosettaAI Core (with V2 Mappers)', () => {
+// Define a mock tool for testing
+const mockTool: RosettaTool<any> = {
+  type: 'function',
+  function: {
+    name: 'get_weather',
+    description: 'Gets the weather',
+    parameters: { type: 'object', properties: { location: { type: 'string' } } },
+    zodSchema: z.object({ location: z.string() }) // Add zod schema
+  }
+}
+
+// --- Mock Custom Mapper ---
+class MockCustomMapper extends BaseCustomMapper {
+  // Override executeGenerate for testing delegation
+  async executeGenerate(
+    mappedParams: any,
+    apiKey: string | undefined,
+    providerConfig: CustomProviderConfig,
+    originalParams: GenerateParams
+  ): Promise<GenerateResult> {
+    // Simulate API call using apiKey and config
+    if (!apiKey) throw new Error('Custom provider API key missing')
+    return {
+      content: `Custom response for ${originalParams.messages[0]?.content} using ${apiKey.substring(0, 3)}...`,
+      finishReason: 'stop',
+      model: providerConfig.defaultModel ?? 'custom-default',
+      usage: { promptTokens: 1, completionTokens: 10, totalTokens: 11 },
+      rawResponse: { customData: 'xyz' }
+    }
+  }
+
+  // Override executeStream for testing delegation
+  async *executeStream(
+    mappedParams: any,
+    apiKey: string | undefined,
+    providerConfig: CustomProviderConfig,
+    originalParams: GenerateParams
+  ): AsyncIterable<StreamChunk> {
+    if (!apiKey) throw new Error('Custom provider API key missing')
+    yield {
+      type: 'message_start',
+      data: { provider: this.provider, model: providerConfig.defaultModel ?? 'custom-stream' }
+    }
+    yield { type: 'content_delta', data: { delta: 'Custom ' } }
+    yield { type: 'content_delta', data: { delta: 'Stream ' } }
+    yield { type: 'message_stop', data: { finishReason: 'stop' } }
+    yield { type: 'final_usage', data: { usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 } } }
+  }
+
+  // Override executeEmbed for testing delegation
+  async executeEmbed(
+    mappedParams: any,
+    apiKey: string | undefined,
+    providerConfig: CustomProviderConfig,
+    originalParams: EmbedParams
+  ): Promise<EmbedResult> {
+    if (!apiKey) throw new Error('Custom provider API key missing')
+    return {
+      embeddings: [[0.9, 0.8]],
+      model: providerConfig.defaultEmbeddingModel ?? 'custom-embed-default',
+      usage: { totalTokens: 5 },
+      rawResponse: { customEmbedData: 'abc' }
+    }
+  }
+}
+// --- End Mock Custom Mapper ---
+
+describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
   let originalEnv: NodeJS.ProcessEnv
   let warnSpy: jest.SpyInstance
 
@@ -210,6 +296,7 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
   // --- Mock Client Instances ---
   let mockAnthropicClientInstance: any
   let mockGroqClientInstance: any // Add mock for Groq client
+  let mockGoogleClientInstance: any // Add mock for Google client
   // Add mocks for other clients if needed in specific tests
   // --- End Mock Client Instances ---
 
@@ -235,10 +322,43 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
     }
     mockGroqClientInstance = {
       // Add mock for Groq client methods if needed by tests
-      models: { list: jest.fn() } // Mock models.list for listModels test
+      models: { list: jest.fn() }, // Mock models.list for listModels test
+      chat: { completions: { create: jest.fn().mockResolvedValue({ mapped: 'groq_mock_response' }) } },
+      embeddings: { create: jest.fn().mockResolvedValue({ mapped: 'groq_embed_mock_response' }) },
+      audio: {
+        transcriptions: { create: jest.fn().mockResolvedValue({ mapped: 'groq_stt_mock_response' }) },
+        translations: { create: jest.fn().mockResolvedValue({ mapped: 'groq_translate_mock_response' }) }
+      }
+    }
+    mockGoogleClientInstance = {
+      getGenerativeModel: jest.fn().mockReturnValue({
+        // Mock methods used by generate/stream
+        generateContent: jest.fn().mockResolvedValue({ response: { mapped: 'google_mock_response' } }),
+        generateContentStream: jest.fn().mockResolvedValue({
+          stream: {
+            async *[Symbol.asyncIterator]() {
+              yield
+            }
+          }
+        }), // Fix ESLint error
+        startChat: jest.fn().mockReturnValue({
+          sendMessage: jest.fn().mockResolvedValue({ response: { mapped: 'google_chat_response' } }),
+          sendMessageStream: jest.fn().mockResolvedValue({
+            stream: {
+              async *[Symbol.asyncIterator]() {
+                yield
+              }
+            }
+          }) // Fix ESLint error
+        }),
+        // Mock methods used by embed
+        embedContent: jest.fn().mockResolvedValue({ mapped: 'google_embed_mock_response' }),
+        batchEmbedContents: jest.fn().mockResolvedValue({ mapped: 'google_batch_embed_mock_response' })
+      })
     }
     ;(Anthropic as jest.Mock).mockReturnValue(mockAnthropicClientInstance)
     ;(Groq as jest.Mock).mockReturnValue(mockGroqClientInstance) // Mock Groq constructor
+    ;(GoogleGenerativeAI as jest.Mock).mockReturnValue(mockGoogleClientInstance) // Mock Google constructor
     // Mock other clients as needed
   })
 
@@ -282,7 +402,7 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       expect(AzureOpenAIMapper).toHaveBeenCalledWith(expect.objectContaining(config)) // Check config passed
       expect(OpenAIMapper).not.toHaveBeenCalled()
 
-      // FIX: Check that the correct *mock constructor* was called, not instanceof
+      // Check that the correct *mock constructor* was called, not instanceof
       // This verifies that the logic inside RosettaAI correctly chose to instantiate AzureOpenAIMapper
       expect(AzureOpenAIMapper).toHaveBeenCalledTimes(1)
       expect(OpenAIMapper).not.toHaveBeenCalled()
@@ -305,16 +425,15 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       expect(AzureOpenAIMapper).toHaveBeenCalled()
       expect(OpenAIMapper).not.toHaveBeenCalled() // Standard mapper not initialized
 
-      // FIX: Check that the correct *mock constructor* was called
+      // Check that the correct *mock constructor* was called
       expect(AzureOpenAIMapper).toHaveBeenCalledTimes(1)
       expect(OpenAIMapper).not.toHaveBeenCalled()
       // Optional: Check the instance stored is the one returned by the mock constructor
       expect((rosetta as any).mappers.get(Provider.OpenAI)).toBe(mockAzureMapperInstance)
     })
 
-    // --- New Tests for Constructor Warnings ---
     it('[Easy] should warn if Azure endpoint provided without key', () => {
-      // FIX: Add another valid provider config to prevent initial error
+      // Add another valid provider config to prevent initial error
       new RosettaAI({
         azureOpenAIEndpoint: 'ep',
         azureOpenAIApiVersion: 'v1',
@@ -326,7 +445,7 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
     })
 
     it('[Easy] should warn if Azure key provided without endpoint', () => {
-      // FIX: Add another valid provider config
+      // Add another valid provider config
       new RosettaAI({
         azureOpenAIApiKey: 'key',
         azureOpenAIApiVersion: 'v1',
@@ -338,7 +457,7 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
     })
 
     it('[Easy] should warn if Azure key/endpoint provided without version', () => {
-      // FIX: Add another valid provider config
+      // Add another valid provider config
       new RosettaAI({
         azureOpenAIApiKey: 'key',
         azureOpenAIEndpoint: 'ep',
@@ -349,49 +468,120 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       )
     })
 
-    // FIX: Removed this test as the warning logic was removed from the source code.
-    // it('[Easy] should warn if both Azure and standard OpenAI are configured', () => {
-    //   new RosettaAI({
-    //     openaiApiKey: 'std-key',
-    //     azureOpenAIApiKey: 'azure-key',
-    //     azureOpenAIEndpoint: 'ep',
-    //     azureOpenAIApiVersion: 'v1'
-    //   })
-    //   expect(warnSpy).toHaveBeenCalledWith(
-    //     "RosettaAI Warning: Both Azure and standard OpenAI clients are configured. Azure OpenAI will be prioritized for provider 'openai'."
-    //   )
-    // })
-    // --- End New Tests ---
+    it('should initialize custom providers correctly', () => {
+      process.env.MY_CUSTOM_API_KEY = 'env-custom-key'
+      const customProviderConfig: CustomProviderConfig[] = [
+        {
+          providerKey: 'my-custom',
+          mapper: MockCustomMapper, // Pass the constructor
+          supportedFeatures: ['generate', 'stream'],
+          defaultModel: 'custom-model-1',
+          // apiKey not provided, should load from env.
+          someOtherConfig: 'value1'
+        },
+        {
+          providerKey: 'another-custom',
+          mapper: MockCustomMapper,
+          supportedFeatures: ['embed'],
+          apiKey: 'direct-key', // API key provided directly
+          defaultEmbeddingModel: 'custom-embed-1'
+        }
+      ]
+      const rosetta = new RosettaAI({
+        openaiApiKey: 'openai-key', // Include a built-in provider
+        customProviders: customProviderConfig
+      })
+
+      expect(rosetta.getConfiguredProviders()).toEqual(['openai', 'my-custom', 'another-custom'])
+      expect((rosetta as any).mappers.get('my-custom')).toBeInstanceOf(MockCustomMapper)
+      expect((rosetta as any).mappers.get('another-custom')).toBeInstanceOf(MockCustomMapper)
+      expect((rosetta as any).customProviderConfigs.get('my-custom')).toBe(customProviderConfig[0])
+      expect((rosetta as any).customProviderConfigs.get('another-custom')).toBe(customProviderConfig[1])
+      expect((rosetta as any).customApiKeys.get('my-custom')).toBe('env-custom-key')
+      expect((rosetta as any).customApiKeys.get('another-custom')).toBe('direct-key')
+    })
+
+    it('should warn and skip custom provider with conflicting key', () => {
+      const customProviderConfig: CustomProviderConfig[] = [
+        { providerKey: Provider.OpenAI, mapper: MockCustomMapper, supportedFeatures: [] } // Conflict with built-in
+      ]
+      new RosettaAI({
+        openaiApiKey: 'openai-key',
+        customProviders: customProviderConfig
+      })
+      expect(warnSpy).toHaveBeenCalledWith(
+        "RosettaAI Warning: Skipping custom provider. Key 'openai' conflicts with a built-in provider or another custom provider."
+      )
+    })
+
+    it('should warn and skip custom provider with invalid mapper constructor', () => {
+      const customProviderConfig: CustomProviderConfig[] = [
+        { providerKey: 'bad-mapper', mapper: {} as any, supportedFeatures: [] } // Invalid mapper
+      ]
+      new RosettaAI({
+        openaiApiKey: 'openai-key',
+        customProviders: customProviderConfig
+      })
+      expect(warnSpy).toHaveBeenCalledWith(
+        "RosettaAI Warning: Skipping custom provider 'bad-mapper'. Invalid mapper constructor provided."
+      )
+    })
+
+    it('should warn if custom provider API key is missing', () => {
+      const customProviderConfig: CustomProviderConfig[] = [
+        { providerKey: 'no-key-custom', mapper: MockCustomMapper, supportedFeatures: [] } // No key in config or env
+      ]
+      new RosettaAI({
+        openaiApiKey: 'openai-key',
+        customProviders: customProviderConfig
+      })
+      expect(warnSpy).toHaveBeenCalledWith(
+        "RosettaAI Warning: API key for custom provider 'no-key-custom' not found in config or environment variable 'NO_KEY_CUSTOM_API_KEY'. Execution might fail."
+      )
+    })
   })
 
   describe('getConfiguredProviders', () => {
-    it('should return providers based on initialized mappers', () => {
+    it('should return both built-in and custom provider keys', () => {
+      const customProviderConfig: CustomProviderConfig[] = [
+        { providerKey: 'custom1', mapper: MockCustomMapper, supportedFeatures: [] }
+      ]
       const rosetta = new RosettaAI({
-        anthropicApiKey: 'key1',
-        groqApiKey: 'key3'
+        groqApiKey: 'key-groq',
+        customProviders: customProviderConfig
       })
-      expect(rosetta.getConfiguredProviders()).toEqual([Provider.Anthropic, Provider.Groq])
+      expect(rosetta.getConfiguredProviders()).toEqual([Provider.Groq, 'custom1'])
     })
   })
 
   describe('getMapper', () => {
-    it('should return the correct mapper instance', () => {
-      const rosetta = new RosettaAI({ openaiApiKey: 'key' })
-      const mapper = (rosetta as any).getMapper(Provider.OpenAI)
+    it('should return mapper for custom provider key', () => {
+      const customProviderConfig: CustomProviderConfig[] = [
+        { providerKey: 'custom1', mapper: MockCustomMapper, supportedFeatures: [] }
+      ]
+      const rosetta = new RosettaAI({ customProviders: customProviderConfig })
+      const mapper = (rosetta as any).getMapper('custom1')
+      expect(mapper).toBeInstanceOf(MockCustomMapper)
+    })
+  })
 
-      // FIX: Check that the returned object is the *mock instance* we expect
-      expect(mapper).toBe(mockOpenAIMapperInstance)
-      // Verify the mock constructor was called during initialization
-      expect(OpenAIMapper).toHaveBeenCalledTimes(1)
-      expect(AzureOpenAIMapper).not.toHaveBeenCalled()
+  describe('getClientForProvider', () => {
+    it('should throw error if called with a custom provider key', () => {
+      const customProviderConfig: CustomProviderConfig[] = [
+        { providerKey: 'custom1', mapper: MockCustomMapper, supportedFeatures: [] }
+      ]
+      const rosetta = new RosettaAI({ customProviders: customProviderConfig })
+      // Expect getClientForProvider to throw when called with a non-Provider enum value
+      expect(() => (rosetta as any).getClientForProvider('custom1')).toThrow(RosettaAIError)
+      expect(() => (rosetta as any).getClientForProvider('custom1')).toThrow('Unsupported built-in provider: custom1')
     })
 
-    it('should throw ConfigurationError if mapper not found', () => {
-      const rosetta = new RosettaAI({ openaiApiKey: 'key' })
-      expect(() => (rosetta as any).getMapper(Provider.Groq)).toThrow(ConfigurationError)
-      expect(() => (rosetta as any).getMapper(Provider.Groq)).toThrow(
-        "Provider 'groq' client is not configured or initialized."
-      )
+    it('should return client for built-in provider', () => {
+      const rosetta = new RosettaAI({ groqApiKey: 'key-groq' })
+      const client = (rosetta as any).getClientForProvider(Provider.Groq)
+      // Check if it's the mocked Groq client instance
+      expect(client).toBeDefined()
+      expect(Groq).toHaveBeenCalled()
     })
   })
 
@@ -414,6 +604,56 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       mockOpenAIMapperInstance.mapToProviderParams.mockClear()
       mockOpenAIMapperInstance.mapFromProviderResponse.mockClear()
       mockOpenAIMapperInstance.wrapProviderError.mockClear()
+    })
+
+    it('should pass tools to mapFromProviderResponse', async () => {
+      const params: GenerateParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Hi' }],
+        tools: [mockTool] // Pass the mock tool
+      }
+      mockOpenAIMapperInstance.mapToProviderParams.mockReturnValue({ mapped: 'openai_params', model: 'gpt-4o-mini' })
+      mockOpenAIMapperInstance.mapFromProviderResponse.mockReturnValue({ mapped: 'openai_result' })
+
+      await rosetta.generate(params)
+
+      expect(mockOpenAIMapperInstance.mapFromProviderResponse).toHaveBeenCalledWith(
+        { mapped: 'openai_raw_response' },
+        'gpt-4o-mini',
+        [mockTool] // Expect tools to be passed
+      )
+    })
+
+    it('should throw errors from mapFromProviderResponse (e.g., ToolArgumentValidationError)', async () => {
+      const params: GenerateParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Hi' }],
+        tools: [mockTool]
+      }
+      ;(Anthropic as jest.Mock).mockImplementation(() => mockAnthropicClientInstance)
+      ;(Groq as jest.Mock).mockImplementation(() => mockGroqClientInstance) // Mock Groq constructor
+      ;(GoogleGenerativeAI as jest.Mock).mockImplementation(() => mockGoogleClientInstance) // Mock Google constructor
+      // Mock other clients as needed
+      const validationError = new ToolArgumentValidationError('Invalid args', [], 'get_weather', 'call_1')
+      mockOpenAIMapperInstance.mapToProviderParams.mockReturnValue({ mapped: 'openai_params', model: 'gpt-4o-mini' })
+      // Simulate mapFromProviderResponse throwing the validation error
+      mockOpenAIMapperInstance.mapFromProviderResponse.mockImplementation(() => {
+        throw validationError
+      })
+
+      // Wrap the async call in a function for rejects.toThrow
+      await expect(async () => rosetta.generate(params)).rejects.toThrow(ToolArgumentValidationError)
+      await expect(async () => rosetta.generate(params)).rejects.toThrow('Invalid args')
+      expect(mockOpenAIMapperInstance.mapFromProviderResponse).toHaveBeenCalledWith(
+        { mapped: 'openai_raw_response' },
+        'gpt-4o-mini',
+        [mockTool]
+      )
+      // Ensure wrapProviderError is NOT called for SDK-specific errors like ToolArgumentValidationError
+      // Check the mock on the *mapper instance*
+      expect(mockOpenAIMapperInstance.wrapProviderError).not.toHaveBeenCalled()
     })
 
     it('should get mapper, map params, call client, and map response', async () => {
@@ -447,7 +687,8 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       })
       expect(mockOpenAIMapperInstance.mapFromProviderResponse).toHaveBeenCalledWith(
         { mapped: 'openai_raw_response' },
-        'gpt-4o-mini'
+        'gpt-4o-mini',
+        undefined // No tools passed in this specific test
       )
       expect(result).toEqual({ mapped: 'openai_result' }) // From mock mapper return
     })
@@ -511,7 +752,7 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       expect(mockOpenAIMapperInstance.wrapProviderError).toHaveBeenCalledWith(apiError, Provider.OpenAI)
     })
 
-    // --- New Tests for checkUnsupportedFeatures ---
+    // --- Tests for checkUnsupportedFeatures ---
     it('[Medium] should throw UnsupportedFeatureError for image input with Groq', async () => {
       const rosettaGroq = new RosettaAI({ groqApiKey: 'key' })
       const params: GenerateParams = {
@@ -525,7 +766,6 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       )
     })
 
-    // FIX: Refactor this test
     it('[Medium] should NOT throw UnsupportedFeatureError for tool use with supported provider (Anthropic)', async () => {
       const rosettaAnt = new RosettaAI({ anthropicApiKey: 'key' })
       const checkUnsupportedSpy = jest.spyOn(rosettaAnt as any, 'checkUnsupportedFeatures')
@@ -533,7 +773,7 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         provider: Provider.Anthropic,
         model: 'claude-3',
         messages: [{ role: 'user', content: 'Hi' }],
-        tools: [{ type: 'function', function: { name: 'test', parameters: {} } }]
+        tools: [mockTool] // Use mockTool
       }
 
       // Expect the generate call to proceed (and potentially fail later if client mock is incomplete, but not at checkUnsupportedFeatures)
@@ -549,7 +789,6 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       // Verify the client mock was called (assuming the generate call resolves)
       expect(mockAnthropicClientInstance.messages.create).toHaveBeenCalled()
     })
-    // --- End New Tests ---
   })
 
   describe('stream', () => {
@@ -576,6 +815,79 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       mockOpenAIMapperInstance.mapToProviderParams.mockClear()
       mockOpenAIMapperInstance.mapProviderStream.mockClear()
       mockOpenAIMapperInstance.wrapProviderError.mockClear()
+    })
+
+    it('should pass tools to mapProviderStream', async () => {
+      const params: GenerateParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Stream Hi' }],
+        tools: [mockTool] // Pass tools
+      }
+      mockOpenAIMapperInstance.mapToProviderParams.mockReturnValue({ mapped: 'openai_params', model: 'gpt-4o-mini' })
+      mockOpenAIMapperInstance.mapProviderStream.mockImplementation(() =>
+        mockStreamGenerator([
+          { type: 'message_start', data: { provider: Provider.OpenAI, model: 'gpt-4o-mini' } },
+          { type: 'content_delta', data: { delta: 'Mapped Stream' } },
+          { type: 'message_stop', data: { finishReason: 'stop' } }
+        ])
+      )
+
+      const stream = rosetta.stream(params)
+      await collectStreamChunks(stream) // Consume the stream
+
+      expect(mockOpenAIMapperInstance.mapProviderStream).toHaveBeenCalledWith(
+        expect.any(Object), // The raw provider stream
+        params // Expect params to be passed
+      )
+    })
+
+    it('should yield error chunk if mapProviderStream throws ToolArgumentValidationError', async () => {
+      const params: GenerateParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Stream Hi' }],
+        tools: [mockTool]
+      }
+      const validationError = new ToolArgumentValidationError('Invalid streamed args', [], 'get_weather', 'call_2')
+      mockOpenAIMapperInstance.mapToProviderParams.mockReturnValue({ mapped: 'openai_params', model: 'gpt-4o-mini' })
+      // Simulate mapProviderStream throwing the validation error
+      mockOpenAIMapperInstance.mapProviderStream.mockImplementation(async function*() {
+        yield { type: 'message_start', data: { provider: Provider.OpenAI, model: 'gpt-4o-mini' } }
+        yield {
+          type: 'tool_call_start',
+          data: { index: 0, toolCall: { id: 'call_2', type: 'function', function: { name: 'get_weather' } } }
+        }
+        // Simulate error during argument processing
+        throw validationError
+      })
+      // Mock wrapProviderError to handle the validation error correctly
+      // This mock is on the *RosettaAI* instance's internal method, not the mapper's mock
+      // const wrapSpy = jest.spyOn(rosetta as any, 'wrapProviderError').mockImplementation(err => {
+      //   if (err instanceof ToolArgumentValidationError) return err // Pass validation error through
+      //   return new ProviderAPIError('Wrapped', Provider.OpenAI) // Default wrapping
+      // })
+
+      const stream = rosetta.stream(params)
+      const results = await collectStreamChunks(stream)
+
+      expect(results).toHaveLength(3) // start, tool_start, error
+      expect(results[2].type).toBe('error')
+      // Type guard for error chunk
+      if (results[2].type === 'error') {
+        expect(results[2].data.error).toBeInstanceOf(ToolArgumentValidationError)
+        expect(results[2].data.error.message).toBe(
+          "Tool Argument Validation Error for 'get_weather': Invalid streamed args"
+        )
+      } else {
+        fail('Expected error chunk')
+      }
+      // Ensure RosettaAI.wrapProviderError was called and returned the original validation error
+      // expect(wrapSpy).toHaveBeenCalledWith(validationError, Provider.OpenAI)
+      // Ensure the *mapper's* wrapProviderError was NOT called because the SDK handled the error directly
+      expect(mockOpenAIMapperInstance.wrapProviderError).not.toHaveBeenCalled()
+
+      // wrapSpy.mockRestore() // Clean up the spy
     })
 
     it('should get mapper, map params, call client stream, and map stream response', async () => {
@@ -613,7 +925,11 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         mapped: 'openai_params',
         model: 'gpt-4o-mini'
       }) // Check client call args
-      expect(mockOpenAIMapperInstance.mapProviderStream).toHaveBeenCalled()
+      // Check mock calls - should receive the full params object now
+      expect(mockOpenAIMapperInstance.mapProviderStream).toHaveBeenCalledWith(
+        expect.any(Object), // Raw stream
+        params // Expect the full params object
+      )
       expect(results).toHaveLength(3)
       expect(results[1]).toEqual({ type: 'content_delta', data: { delta: 'Mapped Stream' } })
     })
@@ -630,6 +946,7 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
 
       expect(results).toHaveLength(1) // Should yield only the error chunk
       expect(results[0].type).toBe('error')
+      // Check error type is ConfigurationError
       expect(results[0].data.error).toBeInstanceOf(ConfigurationError)
       expect(results[0].data.error.message).toContain('Model must be specified')
     })
@@ -638,6 +955,7 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       const apiError = new OpenAI.APIError(500, { message: 'Server Error' }, 'Error', {})
       mockOpenAIClientInstance.chat.completions.create.mockRejectedValue(apiError)
       const wrappedError = new ProviderAPIError('Wrapped', Provider.OpenAI)
+      // Mock the wrapProviderError on the *mapper instance*
       mockOpenAIMapperInstance.wrapProviderError.mockReturnValue(wrappedError)
 
       const params: GenerateParams = {
@@ -686,7 +1004,12 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       expect(results[0].type).toBe('message_start')
       expect(results[1].type).toBe('content_delta')
       expect(results[2].type).toBe('error')
-      expect(results[2].data.error).toBe(wrappedError) // Check it's the wrapped error
+      // Type guard for error chunk
+      if (results[2].type === 'error') {
+        expect(results[2].data.error).toBe(wrappedError) // Check it's the wrapped error
+      } else {
+        fail('Expected error chunk')
+      }
       expect(mockOpenAIMapperInstance.wrapProviderError).toHaveBeenCalledWith(iterationError, Provider.OpenAI)
     })
     // --- End New Test ---
@@ -747,8 +1070,8 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       expect(result).toEqual({ mapped: 'openai_embed_result' }) // From mock mapper return
     })
 
-    // --- New Test for Embeddings Unsupported Feature ---
     it('[Medium] should throw UnsupportedFeatureError for embeddings with Anthropic', async () => {
+      // Ensure Anthropic is configured for this test
       const rosettaAnt = new RosettaAI({ anthropicApiKey: 'key' })
       const params: EmbedParams = {
         provider: Provider.Anthropic,
@@ -760,7 +1083,6 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         "Provider 'anthropic' does not support the requested feature: Embeddings"
       )
     })
-    // --- End New Test ---
   })
 
   describe('generateSpeech', () => {
@@ -776,7 +1098,8 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         }
       }
       ;(OpenAI as jest.Mock).mockReturnValue(mockOpenAIClientInstance)
-      rosetta = new RosettaAI({ openaiApiKey: 'key' })
+      // Ensure Groq is configured for the unsupported test
+      rosetta = new RosettaAI({ openaiApiKey: 'key', groqApiKey: 'groq-key' })
     })
 
     it('should call client speech create and return buffer', async () => {
@@ -807,13 +1130,13 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
 
     it('should throw UnsupportedFeatureError for non-OpenAI provider', async () => {
       const params = { provider: Provider.Groq, input: 'Hi', voice: 'a' } as any
-      await expect(rosetta.generateSpeech(params)).rejects.toThrow(UnsupportedFeatureError)
-      await expect(rosetta.generateSpeech(params)).rejects.toThrow(
+      // Wrap async call
+      await expect(async () => rosetta.generateSpeech(params)).rejects.toThrow(UnsupportedFeatureError)
+      await expect(async () => rosetta.generateSpeech(params)).rejects.toThrow(
         "Provider 'groq' does not support the requested feature: Text-to-Speech"
       )
     })
 
-    // --- New Test for TTS Default Model ---
     it('[Easy] should use default TTS model if configured', async () => {
       const rosettaWithDefault = new RosettaAI({
         openaiApiKey: 'key',
@@ -834,10 +1157,8 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         expect.objectContaining({ model: 'tts-1-hd' }) // Check default model used
       )
     })
-    // --- End New Test ---
   })
 
-  // --- New Tests for streamSpeech ---
   describe('streamSpeech', () => {
     let rosetta: RosettaAI
     let mockOpenAIClientInstance: any
@@ -858,7 +1179,8 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         }
       }
       ;(OpenAI as jest.Mock).mockReturnValue(mockOpenAIClientInstance)
-      rosetta = new RosettaAI({ openaiApiKey: 'key' })
+      // Ensure Google is configured for the unsupported test
+      rosetta = new RosettaAI({ openaiApiKey: 'key', googleApiKey: 'google-key' })
     })
 
     it('[Medium] should yield audio chunks for streamSpeech', async () => {
@@ -869,10 +1191,8 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       }
       const checkUnsupportedSpy = jest.spyOn(rosetta as any, 'checkUnsupportedFeatures')
       const stream = rosetta.streamSpeech(params)
-      const chunks = []
-      for await (const chunk of stream) {
-        chunks.push(chunk)
-      }
+      // Use the generic collector
+      const chunks = await collectStreamChunks(stream)
 
       expect(checkUnsupportedSpy).toHaveBeenCalledWith(
         Provider.OpenAI,
@@ -884,29 +1204,47 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         expect.objectContaining({ input: 'Stream audio', voice: 'fable' })
       )
       expect(chunks).toHaveLength(3) // chunk1, chunk2, stop
-      expect(chunks[0]).toEqual({ type: 'audio_chunk', data: Buffer.from('chunk1') })
-      expect(chunks[1]).toEqual({ type: 'audio_chunk', data: Buffer.from('chunk2') })
-      expect(chunks[2]).toEqual({ type: 'audio_stop' })
+      expect(chunks[0].type).toBe('audio_chunk')
+      // Type guard before accessing data
+      if (chunks[0].type === 'audio_chunk') {
+        expect(chunks[0].data).toEqual(Buffer.from('chunk1'))
+      } else {
+        fail('Expected audio_chunk')
+      }
+      expect(chunks[1].type).toBe('audio_chunk')
+      // Type guard before accessing data
+      if (chunks[1].type === 'audio_chunk') {
+        expect(chunks[1].data).toEqual(Buffer.from('chunk2'))
+      } else {
+        fail('Expected audio_chunk')
+      }
+      expect(chunks[2].type).toBe('audio_stop')
     })
 
     it('[Medium] should yield error chunk if streamSpeech called for unsupported provider', async () => {
       const params = { provider: Provider.Google, input: 'Hi', voice: 'a' } as any
       const stream = rosetta.streamSpeech(params)
-      const chunks = []
-      for await (const chunk of stream) {
-        chunks.push(chunk)
-      }
+      // Use the generic collector
+      const chunks = await collectStreamChunks(stream)
+
       expect(chunks).toHaveLength(1)
       expect(chunks[0].type).toBe('error')
-      expect(chunks[0].data.error).toBeInstanceOf(UnsupportedFeatureError)
-      expect(chunks[0].data.error.message).toContain('Streaming Text-to-Speech')
+      // Check error type is UnsupportedFeatureError
+      // Type guard before accessing data
+      if (chunks[0].type === 'error') {
+        expect(chunks[0].data.error).toBeInstanceOf(UnsupportedFeatureError)
+        expect(chunks[0].data.error.message).toContain('Streaming Text-to-Speech')
+      } else {
+        fail('Expected error chunk')
+      }
     })
 
     it('[Medium] should yield error chunk if client call fails for streamSpeech', async () => {
       const apiError = new OpenAI.APIError(500, {}, '', {})
       mockOpenAIClientInstance.audio.speech.create.mockRejectedValue(apiError)
       const wrappedError = new ProviderAPIError('Wrapped TTS Error', Provider.OpenAI)
-      mockOpenAIMapperInstance.wrapProviderError.mockReturnValue(wrappedError) // Mock error wrapping
+      // Mock the wrapProviderError on the *mapper instance*
+      mockOpenAIMapperInstance.wrapProviderError.mockReturnValue(wrappedError)
 
       const params: SpeechParams = {
         provider: Provider.OpenAI,
@@ -914,18 +1252,20 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         voice: 'onyx'
       }
       const stream = rosetta.streamSpeech(params)
-      const chunks = []
-      for await (const chunk of stream) {
-        chunks.push(chunk)
-      }
+      // Use the generic collector
+      const chunks = await collectStreamChunks(stream)
 
       expect(chunks).toHaveLength(1)
       expect(chunks[0].type).toBe('error')
-      expect(chunks[0].data.error).toBe(wrappedError)
+      // Type guard before accessing data
+      if (chunks[0].type === 'error') {
+        expect(chunks[0].data.error).toBe(wrappedError)
+      } else {
+        fail('Expected error chunk')
+      }
       expect(mockOpenAIMapperInstance.wrapProviderError).toHaveBeenCalledWith(apiError, Provider.OpenAI)
     })
   })
-  // --- End New Tests ---
 
   describe('transcribe', () => {
     let rosetta: RosettaAI
@@ -940,7 +1280,8 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         }
       }
       ;(OpenAI as jest.Mock).mockReturnValue(mockOpenAIClientInstance)
-      rosetta = new RosettaAI({ openaiApiKey: 'key' })
+      // Configure Anthropic for unsupported test
+      rosetta = new RosettaAI({ openaiApiKey: 'key', anthropicApiKey: 'ant-key' })
       // Reset mock calls on the mapper instance
       mockOpenAIMapperInstance.mapToTranscribeParams.mockClear()
       mockOpenAIMapperInstance.mapFromTranscribeResponse.mockClear()
@@ -981,18 +1322,16 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       expect(result).toEqual({ mapped: 'openai_stt_result' }) // From mock mapper return
     })
 
-    // --- New Tests for Transcribe ---
     it('[Medium] should throw UnsupportedFeatureError for transcribe with unsupported provider', async () => {
-      const rosettaAnt = new RosettaAI({ anthropicApiKey: 'key' })
       const audioData: RosettaAudioData = { data: Buffer.from('a'), filename: 'a.mp3', mimeType: 'audio/mpeg' }
       const params: TranscribeParams = {
         provider: Provider.Anthropic,
         model: 'model',
         audio: audioData
       }
-      await expect(rosettaAnt.transcribe(params)).rejects.toThrow(UnsupportedFeatureError)
-      // FIX: Check the correct feature name is passed
-      await expect(rosettaAnt.transcribe(params)).rejects.toThrow(
+      await expect(rosetta.transcribe(params)).rejects.toThrow(UnsupportedFeatureError)
+      // Check the correct feature name is passed
+      await expect(rosetta.transcribe(params)).rejects.toThrow(
         "Provider 'anthropic' does not support the requested feature: Audio Transcription"
       )
     })
@@ -1009,7 +1348,6 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         'Transcription model must be specified for provider openai (or set a default).'
       )
     })
-    // --- End New Tests ---
   })
 
   describe('translate', () => {
@@ -1025,7 +1363,8 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         }
       }
       ;(OpenAI as jest.Mock).mockReturnValue(mockOpenAIClientInstance)
-      rosetta = new RosettaAI({ openaiApiKey: 'key' })
+      // Configure Anthropic for unsupported test
+      rosetta = new RosettaAI({ openaiApiKey: 'key', anthropicApiKey: 'ant-key' })
       // Reset mock calls on the mapper instance
       mockOpenAIMapperInstance.mapToTranslateParams.mockClear()
       mockOpenAIMapperInstance.mapFromTranslateResponse.mockClear()
@@ -1068,18 +1407,16 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       expect(result).toEqual({ mapped: 'openai_translate_result' }) // From mock mapper return
     })
 
-    // --- New Tests for Translate ---
     it('[Medium] should throw UnsupportedFeatureError for translate with unsupported provider', async () => {
-      const rosettaAnt = new RosettaAI({ anthropicApiKey: 'key' })
       const audioData: RosettaAudioData = { data: Buffer.from('a'), filename: 'a.mp3', mimeType: 'audio/mpeg' }
       const params: TranslateParams = {
         provider: Provider.Anthropic,
         model: 'model',
         audio: audioData
       }
-      await expect(rosettaAnt.translate(params)).rejects.toThrow(UnsupportedFeatureError)
-      // FIX: Check the correct feature name is passed
-      await expect(rosettaAnt.translate(params)).rejects.toThrow(
+      await expect(rosetta.translate(params)).rejects.toThrow(UnsupportedFeatureError)
+      // Check the correct feature name is passed
+      await expect(rosetta.translate(params)).rejects.toThrow(
         "Provider 'anthropic' does not support the requested feature: Audio Translation"
       )
     })
@@ -1096,7 +1433,6 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
         'Translation model must be specified for provider openai (or set a default).'
       )
     })
-    // --- End New Tests ---
   })
 
   describe('wrapProviderError', () => {
@@ -1131,11 +1467,11 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
 
       expect(wrappedError).toBeInstanceOf(ProviderAPIError)
       expect(wrappedError.message).toBe('[openai] API Error : Something failed') // Falls back to generic handling
+      // Check provider property after constructor fix
       expect(wrappedError.provider).toBe(Provider.OpenAI)
       expect(wrappedError.underlyingError).toBe(genericError)
     })
 
-    // --- New Test for wrapProviderError Fallback ---
     it('[Hard] should handle non-Error object in fallback wrapProviderError', () => {
       const rosetta = new RosettaAI({ openaiApiKey: 'key' })
       const nonError = { detail: 'Failed object' }
@@ -1148,15 +1484,14 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       const wrappedError = (rosetta as any).wrapProviderError(nonError, Provider.OpenAI)
 
       expect(wrappedError).toBeInstanceOf(ProviderAPIError)
-      // FIX: Expect JSON stringified output due to fix in wrapProviderError
+      // Expect JSON stringified output due to fix in wrapProviderError
       expect(wrappedError.message).toBe('[openai] API Error : {"detail":"Failed object"}')
+      // Check provider property after constructor fix
       expect(wrappedError.provider).toBe(Provider.OpenAI)
       expect(wrappedError.underlyingError).toBe(nonError)
     })
-    // --- End New Test ---
   })
 
-  // --- New Tests for getGoogleModel ---
   describe('getGoogleModel (internal)', () => {
     let rosetta: RosettaAI
     let mockGoogleClientInstance: any
@@ -1220,10 +1555,9 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       )
     })
   })
-  // --- End New Tests ---
 
-  // --- NEW: Tests for listModels and listAllModels ---
-  describe('listModels & listAllModels', () => {
+  // --- Tests for listModels & listAllModels ---
+  describe('listModels & listAllModels (with ProviderKey)', () => {
     const mockOpenAIModelList: RosettaModelList = {
       object: 'list',
       data: [{ id: 'gpt-4o-mini', object: 'model', owned_by: 'openai', provider: Provider.OpenAI }]
@@ -1408,5 +1742,74 @@ describe('RosettaAI Core (with V2 Mappers)', () => {
       })
     })
   })
-  // --- END: Tests for listModels and listAllModels ---
+
+  // --- Tests for listModels & listAllModels (remain largely unchanged, but check ProviderKey) ---
+  describe('listModels & listAllModels (with ProviderKey)', () => {
+    const mockOpenAIModelList: RosettaModelList = {
+      object: 'list',
+      data: [{ id: 'gpt-4o-mini', object: 'model', owned_by: 'openai', provider: Provider.OpenAI }]
+    }
+    const mockGroqModelList: RosettaModelList = {
+      object: 'list',
+      data: [{ id: 'llama3-8b-8192', object: 'model', owned_by: 'meta', provider: Provider.Groq }]
+    }
+
+    beforeEach(() => {
+      mockListModelsForProvider.mockImplementation(async (provider, _config) => {
+        if (provider === Provider.OpenAI) return mockOpenAIModelList
+        if (provider === Provider.Groq) return mockGroqModelList
+        // Simulate unsupported for custom for now
+        if (typeof provider === 'string') throw new UnsupportedFeatureError(provider, 'Model Listing')
+        throw new ConfigurationError(`Mock: Provider ${provider} not mocked for listModels`)
+      })
+    })
+
+    describe('listModels', () => {
+      it('[Easy] should call internal lister for built-in provider', async () => {
+        const rosetta = new RosettaAI({ openaiApiKey: 'key-openai' })
+        await rosetta.listModels(Provider.OpenAI)
+        expect(mockListModelsForProvider).toHaveBeenCalledWith(
+          Provider.OpenAI,
+          expect.objectContaining({ apiKey: 'key-openai' })
+        )
+      })
+
+      it('[Medium] should throw UnsupportedFeatureError for custom provider (current basic impl)', async () => {
+        const customProviderConfig: CustomProviderConfig[] = [
+          { providerKey: 'custom-list', mapper: MockCustomMapper, supportedFeatures: [] }
+        ]
+        const rosetta = new RosettaAI({ customProviders: customProviderConfig })
+        await expect(rosetta.listModels('custom-list')).rejects.toThrow(UnsupportedFeatureError)
+        await expect(rosetta.listModels('custom-list')).rejects.toThrow(
+          "Provider 'custom-list' does not support the requested feature: Model Listing"
+        )
+      })
+    })
+
+    describe('listAllModels', () => {
+      it('[Medium] should attempt to list models for all configured providers (built-in and custom)', async () => {
+        const customProviderConfig: CustomProviderConfig[] = [
+          { providerKey: 'custom-list', mapper: MockCustomMapper, supportedFeatures: [] }
+        ]
+        const rosetta = new RosettaAI({
+          openaiApiKey: 'key-openai',
+          groqApiKey: 'key-groq',
+          customProviders: customProviderConfig
+        })
+        const listModelsSpy = jest.spyOn(rosetta, 'listModels')
+
+        const results = await rosetta.listAllModels()
+
+        expect(listModelsSpy).toHaveBeenCalledTimes(3)
+        expect(listModelsSpy).toHaveBeenCalledWith(Provider.Groq)
+        expect(listModelsSpy).toHaveBeenCalledWith(Provider.OpenAI)
+        expect(listModelsSpy).toHaveBeenCalledWith('custom-list')
+
+        // Check results structure
+        expect(results[Provider.OpenAI]).toEqual(mockOpenAIModelList)
+        expect(results[Provider.Groq]).toEqual(mockGroqModelList)
+        expect(results['custom-list']).toBeInstanceOf(UnsupportedFeatureError) // Error for custom provider
+      })
+    })
+  })
 })

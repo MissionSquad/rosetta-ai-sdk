@@ -4,7 +4,7 @@ import {
   ChatCompletionContentPart as OpenAIContentPart,
   ChatCompletionContentPartText,
   ChatCompletionContentPartRefusal,
-  ChatCompletionTool as OpenAITool,
+  ChatCompletionTool as OpenAIToolParam, // Renamed import for clarity
   ChatCompletionMessageParam as OpenAIMessageParam,
   ChatCompletionSystemMessageParam,
   ChatCompletionUserMessageParam,
@@ -28,9 +28,10 @@ import {
   EmbedResult,
   TranscribeParams,
   TranslateParams,
-  TranscriptionResult
+  TranscriptionResult,
+  RosettaTool
 } from '../../types'
-import { MappingError, UnsupportedFeatureError, RosettaAIError } from '../../errors'
+import { MappingError, UnsupportedFeatureError, RosettaAIError, InvalidToolDefinitionError } from '../../errors'
 import { IProviderMapper } from './base.mapper'
 import { mapBaseParams, mapBaseToolChoice } from './common.utils'
 import * as OpenAIEmbedMapper from './openai.embed.mapper'
@@ -109,26 +110,35 @@ export class OpenAIMapper implements IProviderMapper {
               this.provider
             )
           }
+          // Allow empty string for tool content
+          // if (content === '') {
+          //   throw new MappingError(`Role 'tool' requires non-empty string content.`, this.provider)
+          // }
           return {
             role: 'tool',
             tool_call_id: msg.toolCallId,
-            content: content // content is non-empty string here
+            content: content // content could be empty string here (see commented condition above)
           } as ChatCompletionToolMessageParam
         default:
           throw new MappingError(`Unhandled role type during message construction: ${role}`, this.provider)
       }
     })
 
-    const tools: OpenAITool[] | undefined = params.tools?.map(tool => {
+    // Map RosettaTool definitions to OpenAIToolParam
+    const tools: OpenAIToolParam[] | undefined = params.tools?.map(tool => {
       if (tool.type !== 'function') {
-        throw new MappingError(`Unsupported tool type for OpenAI: ${tool.type}`, this.provider)
+        throw new InvalidToolDefinitionError(`Unsupported tool type: ${tool.type}`, tool.function.name)
       }
       const parameters = tool.function.parameters as OpenAIFunctionDef['parameters']
       if (typeof parameters !== 'object' || parameters === null) {
-        throw new MappingError(
-          `Invalid parameters schema for tool ${tool.function.name}. Expected JSON Schema object.`,
-          this.provider
+        throw new InvalidToolDefinitionError(
+          `Invalid parameters schema. Expected JSON Schema object.`,
+          tool.function.name
         )
+      }
+      // Ensure zodSchema exists
+      if (!tool.function.zodSchema) {
+        throw new InvalidToolDefinitionError(`Missing zodSchema for validation.`, tool.function.name)
       }
       return {
         type: tool.type,
@@ -193,14 +203,21 @@ export class OpenAIMapper implements IProviderMapper {
     }
   }
 
-  mapFromProviderResponse(response: ChatCompletion, modelUsed: string): GenerateResult {
-    // Delegate to the base OpenAI mapper function
-    return mapFromOpenAIResponse(response, modelUsed)
+  mapFromProviderResponse(
+    response: ChatCompletion,
+    modelUsed: string,
+    originalTools?: RosettaTool<any>[] // Accept original tools
+  ): GenerateResult {
+    // Delegate to the base OpenAI mapper function, passing originalTools
+    return mapFromOpenAIResponse(response, modelUsed, originalTools)
   }
 
-  async *mapProviderStream(stream: Stream<ChatCompletionChunk>): AsyncIterable<StreamChunk> {
-    // Delegate to the base OpenAI stream mapper function
-    yield* mapOpenAIStream(stream, this.provider)
+  async *mapProviderStream(
+    stream: Stream<ChatCompletionChunk>,
+    originalParams: GenerateParams // Accept original params to get modelId
+  ): AsyncIterable<StreamChunk> {
+    // Delegate to the base OpenAI stream mapper function, passing modelId and originalTools
+    yield* mapOpenAIStream(stream, this.provider, originalParams.model!, originalParams.tools)
   }
 
   // --- Embedding Mapping ---
@@ -237,6 +254,7 @@ export class OpenAIMapper implements IProviderMapper {
 
   // --- Error Handling ---
   wrapProviderError(error: unknown, provider: Provider): RosettaAIError {
+    // Delegate to common error wrapper
     return wrapOpenAIError(error, provider)
   }
 }

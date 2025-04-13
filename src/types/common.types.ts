@@ -1,3 +1,6 @@
+import { z } from 'zod'
+import { JSONSchema7 } from 'json-schema'
+
 /**
  * Enumeration of supported AI providers.
  */
@@ -7,6 +10,11 @@ export enum Provider {
   Groq = 'groq',
   OpenAI = 'openai' // Represents both OpenAI standard and Azure OpenAI
 }
+
+/**
+ * Represents either a built-in provider enum value or a custom provider key string.
+ */
+export type ProviderKey = Provider | string
 
 export type ImageMimeType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 /**
@@ -47,31 +55,39 @@ export type RosettaContentPart = { type: 'text'; text: string } | { type: 'image
  */
 export interface RosettaMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | RosettaContentPart[] | null // FIX: Allow content to be potentially null
+  content: string | RosettaContentPart[] | null
   toolCalls?: RosettaToolCallRequest[]
   toolCallId?: string
+  /** Optional flag for tool messages indicating an error during execution. */
+  isError?: boolean
 }
 
 /**
  * Defines a tool (currently only functions) that the model can be instructed to use.
- * Based on the OpenAI function tool definition.
+ * Includes both the JSON schema for provider communication and a Zod schema for validation.
+ *
+ * @template T - The Zod type representing the structure of the function's arguments. Defaults to `z.ZodTypeAny`.
  * @property type - The type of the tool (currently 'function').
  * @property function - Details of the function.
  * @property function.name - The name of the function to be called.
  * @property function.description - A description of what the function does, used by the model.
- * @property function.parameters - A JSON Schema object describing the expected arguments for the function.
+ * @property function.parameters - A JSON Schema object describing the expected arguments for the function (used for provider API).
+ * @property function.zodSchema - A Zod schema defining the structure and types of the function's arguments (used for validation).
  */
-export interface RosettaTool {
+export interface RosettaTool<T extends z.ZodTypeAny = z.ZodTypeAny> {
   type: 'function'
   function: {
     name: string
     description?: string
-    parameters: Record<string, unknown> // JSON Schema definition
+    parameters: JSONSchema7 // Keep JSON Schema for provider mapping
+    zodSchema: T // Add Zod schema for validation
   }
 }
 
 /**
  * Represents a tool call requested by the model in its response.
+ * Contains the raw arguments string as received from the provider.
+ *
  * @property id - A unique identifier for this specific tool call instance.
  * @property type - The type of tool called (currently 'function').
  * @property function - Details of the function call.
@@ -88,6 +104,29 @@ export interface RosettaToolCallRequest {
 }
 
 /**
+ * Represents a tool call received from the provider *after* successful argument validation
+ * against the corresponding `RosettaTool`'s `zodSchema`.
+ * This type is defined for clarity but is not directly returned by the SDK in Phase 1.
+ *
+ * @template T - The Zod type used for validation, inferred from the corresponding `RosettaTool`.
+ * @property id - The unique identifier for the tool call instance.
+ * @property type - The type of tool called (currently 'function').
+ * @property function - Details of the validated function call.
+ * @property function.name - The name of the function called.
+ * @property function.arguments - The parsed and validated arguments, matching the structure defined by `T`.
+ * @property function.rawArguments - The original, unparsed arguments string received from the provider.
+ */
+export interface ValidatedRosettaToolCall<T extends z.ZodTypeAny = z.ZodTypeAny> {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: z.infer<T> // Parsed and validated arguments
+    rawArguments: string // Original arguments string from provider
+  }
+}
+
+/**
  * Represents the result of executing a tool, to be sent back to the model.
  * This data will typically be formatted into a `RosettaMessage` with `role: 'tool'`.
  * @property toolCallId - The ID of the tool call this result corresponds to.
@@ -96,8 +135,8 @@ export interface RosettaToolCallRequest {
  */
 export interface RosettaToolResult {
   toolCallId: string
-  content: string
-  isError?: boolean
+  content: string // Stringified result from tool execution
+  isError?: boolean // Optional flag
 }
 
 /**

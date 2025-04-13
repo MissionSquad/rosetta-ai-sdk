@@ -16,7 +16,13 @@ import {
   TranscribeParams,
   TranslateParams
 } from '../../../../src/types'
-import { MappingError, UnsupportedFeatureError, ProviderAPIError } from '../../../../src/errors'
+import {
+  MappingError,
+  UnsupportedFeatureError,
+  ProviderAPIError,
+  InvalidToolDefinitionError
+} from '../../../../src/errors'
+import { z } from 'zod' // Import Zod
 
 // Mock the sub-mappers used by OpenAIMapper
 jest.mock('../../../../src/core/mapping/openai.embed.mapper')
@@ -223,7 +229,11 @@ describe('OpenAI Mapper', () => {
         tools: [
           {
             type: 'function',
-            function: { name: 'myFunc', parameters: { type: 'object', properties: {} } }
+            function: {
+              name: 'myFunc',
+              parameters: { type: 'object', properties: {} },
+              zodSchema: z.object({})
+            }
           }
         ],
         toolChoice: { type: 'function', function: { name: 'myFunc' } }
@@ -402,13 +412,16 @@ describe('OpenAI Mapper', () => {
             type: 'function',
             function: {
               name: 'bad_tool',
-              parameters: 'not an object' as any
+              parameters: 'not an object' as any,
+              zodSchema: z.object({})
             }
           }
         ]
       }
-      expect(() => mapper.mapToProviderParams(params)).toThrow(MappingError)
-      expect(() => mapper.mapToProviderParams(params)).toThrow('Invalid parameters schema for tool bad_tool.')
+      expect(() => mapper.mapToProviderParams(params)).toThrow(InvalidToolDefinitionError)
+      expect(() => mapper.mapToProviderParams(params)).toThrow(
+        "Invalid Tool Definition for 'bad_tool': Invalid parameters schema. Expected JSON Schema object."
+      )
     })
 
     it('[Hard] should throw MappingError for empty string system message', () => {
@@ -469,18 +482,31 @@ describe('OpenAI Mapper', () => {
       const mockResponse = {} as OpenAI.Chat.Completions.ChatCompletion
       mapper.mapFromProviderResponse(mockResponse, 'model')
       // Use the spy to check the call
-      expect(spyMapFromOpenAIResponse).toHaveBeenCalledWith(mockResponse, 'model')
+      // Undefined as the third argument because it expects 3 args
+      expect(spyMapFromOpenAIResponse).toHaveBeenCalledWith(mockResponse, 'model', undefined)
     })
   })
 
   describe('mapProviderStream (Generate)', () => {
     it('[Easy] should delegate to common function', async () => {
       const mockStream = (mockOpenAIStreamGenerator([]) as any) as Stream<ChatCompletionChunk>
-      // Consume the stream to trigger the delegation
-      for await (const _ of mapper.mapProviderStream(mockStream)) {
+      const mockOriginalParams: GenerateParams = {
+        provider: Provider.OpenAI,
+        model: 'test-model-id',
+        messages: [],
+        tools: [] // Explicitly pass empty tools array
       }
-      // Use the spy to check the call
-      expect(spyMapOpenAIStream).toHaveBeenCalledWith(mockStream, Provider.OpenAI)
+      // Consume the stream to trigger the delegation, passing originalParams
+      for await (const _ of mapper.mapProviderStream(mockStream, mockOriginalParams)) {
+        // No-op, just consume
+      }
+      // Use the spy to check the call, expecting modelId and tools from originalParams
+      expect(spyMapOpenAIStream).toHaveBeenCalledWith(
+        mockStream,
+        Provider.OpenAI,
+        'test-model-id', // Expect modelId from originalParams
+        [] // Expect tools array from originalParams
+      )
     })
   })
 

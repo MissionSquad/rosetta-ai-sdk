@@ -1,4 +1,5 @@
-import { Provider } from '../types'
+import { Provider, ProviderKey } from '../types'
+import { z } from 'zod'
 
 /**
  * Base error class for all errors originating from the RosettaAI SDK.
@@ -34,13 +35,17 @@ export class ConfigurationError extends RosettaAIError {
  * is not supported by the selected AI provider or the specific model being used.
  */
 export class UnsupportedFeatureError extends RosettaAIError {
-  public readonly provider: Provider
+  public readonly provider?: Provider
+  public readonly customProvider?: string
   public readonly feature: string
 
-  constructor(provider: Provider, feature: string) {
+  constructor(provider: ProviderKey, feature: string) {
     super(`Provider '${provider}' does not support the requested feature: ${feature}`)
     this.name = 'UnsupportedFeatureError'
-    this.provider = provider
+    // Check if provider is a value within the Provider enum
+    const isBuiltIn = Object.values(Provider).includes(provider as Provider)
+    this.provider = isBuiltIn ? (provider as Provider) : undefined
+    this.customProvider = !isBuiltIn ? provider : undefined
     this.feature = feature
   }
 }
@@ -53,7 +58,9 @@ export class UnsupportedFeatureError extends RosettaAIError {
  */
 export class ProviderAPIError extends RosettaAIError {
   /** The provider that generated the error. */
-  public readonly provider: Provider
+  public readonly provider?: Provider
+  /** The custom provider key that generated the error */
+  public readonly customProvider?: string
   /** The HTTP status code returned by the API (e.g., 429, 401, 500), if available. */
   public readonly statusCode?: number
   /** A provider-specific error code string (e.g., 'invalid_api_key', 'rate_limit_exceeded'), if available. */
@@ -65,7 +72,7 @@ export class ProviderAPIError extends RosettaAIError {
 
   constructor(
     message: string,
-    provider: Provider,
+    provider: ProviderKey,
     statusCode?: number,
     errorCode?: string | null,
     errorType?: string | null,
@@ -76,7 +83,10 @@ export class ProviderAPIError extends RosettaAIError {
     super(`[${provider}] API Error ${statusString}${codeString}: ${message}`)
 
     this.name = 'ProviderAPIError'
-    this.provider = provider
+    // Correctly assign provider/customProvider based on whether the key is in the Provider enum
+    const isBuiltIn = Object.values(Provider).includes(provider as Provider)
+    this.provider = isBuiltIn ? (provider as Provider) : undefined
+    this.customProvider = !isBuiltIn ? provider : undefined
     this.statusCode = statusCode
     this.errorCode = errorCode
     this.errorType = errorType
@@ -96,18 +106,79 @@ export class ProviderAPIError extends RosettaAIError {
 export class MappingError extends RosettaAIError {
   /** The provider involved in the mapping, if applicable. */
   public readonly provider?: Provider
+  /** The custom provider key that generated the error */
+  public readonly customProvider?: string
   /** Contextual information about where the mapping error occurred (e.g., function name). */
   public readonly context?: string
 
-  constructor(message: string, provider?: Provider, context?: string, cause?: unknown) {
+  constructor(message: string, provider?: ProviderKey, context?: string, cause?: unknown) {
     const providerString = provider ? `[${provider}]` : ''
     const ctxString = context ? ` [Context: ${context}]` : ''
     super(`Mapping Error ${providerString}${ctxString}: ${message}`)
     this.name = 'MappingError'
-    this.provider = provider
+    const isBuiltIn = Object.values(Provider).includes(provider as Provider)
+    this.provider = isBuiltIn ? (provider as Provider) : undefined
+    this.customProvider = !isBuiltIn ? provider : undefined
     this.context = context
     if (cause instanceof Error && cause.stack) {
       this.stack = `${this.name}: ${this.message}\nCaused by: ${cause.stack}`
+    }
+  }
+}
+
+/**
+ * Error indicating an issue with a tool definition provided to the SDK.
+ * This could be an invalid JSON schema for `parameters` or an invalid `zodSchema`.
+ */
+export class InvalidToolDefinitionError extends RosettaAIError {
+  constructor(message: string, toolName?: string) {
+    super(`Invalid Tool Definition${toolName ? ` for '${toolName}'` : ''}: ${message}`)
+    this.name = 'InvalidToolDefinitionError'
+  }
+}
+
+/**
+ * Error indicating that the arguments provided by the LLM for a tool call
+ * failed validation against the tool's `zodSchema`.
+ */
+export class ToolArgumentValidationError extends RosettaAIError {
+  /** The Zod validation issues. */
+  public readonly issues: z.ZodIssue[]
+  /** The name of the tool whose arguments failed validation. */
+  public readonly toolName?: string
+  /** The ID of the specific tool call that failed validation. */
+  public readonly toolCallId?: string
+
+  constructor(message: string, issues: z.ZodIssue[], toolName?: string, toolCallId?: string) {
+    super(`Tool Argument Validation Error${toolName ? ` for '${toolName}'` : ''}: ${message}`)
+    this.name = 'ToolArgumentValidationError'
+    this.issues = issues
+    this.toolName = toolName
+    this.toolCallId = toolCallId
+  }
+}
+
+/**
+ * Error indicating a failure during the *user's* execution of a tool function.
+ * This error is defined for completeness but is typically thrown by the user's
+ * tool implementation, not directly by the SDK in Phase 1.
+ */
+export class ToolExecutionError extends RosettaAIError {
+  /** The name of the tool that failed during execution. */
+  public readonly toolName?: string
+  /** The ID of the specific tool call that failed execution. */
+  public readonly toolCallId?: string
+  /** The original error thrown by the tool's execution logic. */
+  public readonly underlyingError?: unknown
+
+  constructor(message: string, toolName?: string, toolCallId?: string, underlyingError?: unknown) {
+    super(`Tool Execution Error${toolName ? ` for '${toolName}'` : ''}: ${message}`)
+    this.name = 'ToolExecutionError'
+    this.toolName = toolName
+    this.toolCallId = toolCallId
+    this.underlyingError = underlyingError
+    if (underlyingError instanceof Error && underlyingError.stack) {
+      this.stack = `${this.name}: ${this.message}\nCaused by: ${underlyingError.stack}`
     }
   }
 }

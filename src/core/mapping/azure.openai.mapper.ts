@@ -4,7 +4,7 @@ import {
   ChatCompletionContentPart as OpenAIContentPart,
   ChatCompletionContentPartText,
   ChatCompletionContentPartRefusal,
-  ChatCompletionTool as OpenAITool,
+  ChatCompletionTool as OpenAIToolParam, // Renamed import for clarity
   ChatCompletionMessageParam as OpenAIMessageParam,
   ChatCompletionSystemMessageParam,
   ChatCompletionUserMessageParam,
@@ -35,9 +35,16 @@ import {
   TranscriptionResult,
   StreamChunk,
   Provider,
-  RosettaAIConfig
+  RosettaAIConfig,
+  RosettaTool // Import RosettaTool
 } from '../../types'
-import { MappingError, UnsupportedFeatureError, ConfigurationError, RosettaAIError } from '../../errors'
+import {
+  MappingError,
+  UnsupportedFeatureError,
+  ConfigurationError,
+  RosettaAIError,
+  InvalidToolDefinitionError
+} from '../../errors'
 import { IProviderMapper } from './base.mapper'
 import { mapBaseParams, mapBaseToolChoice } from './common.utils'
 import {
@@ -144,12 +151,22 @@ export class AzureOpenAIMapper implements IProviderMapper {
       }
     })
 
-    const tools: OpenAITool[] | undefined = params.tools?.map(tool => {
-      if (tool.type !== 'function')
-        throw new MappingError(`Unsupported tool type for Azure OpenAI: ${tool.type}`, this.provider)
+    // Map RosettaTool definitions to OpenAIToolParam
+    const tools: OpenAIToolParam[] | undefined = params.tools?.map(tool => {
+      if (tool.type !== 'function') {
+        throw new InvalidToolDefinitionError(`Unsupported tool type: ${tool.type}`, tool.function.name)
+      }
       const parameters = tool.function.parameters as OpenAIFunctionDef['parameters']
-      if (typeof parameters !== 'object' || parameters === null)
-        throw new MappingError(`Invalid parameters schema for tool ${tool.function.name}.`, this.provider)
+      if (typeof parameters !== 'object' || parameters === null) {
+        throw new InvalidToolDefinitionError(
+          `Invalid parameters schema. Expected JSON Schema object.`,
+          tool.function.name
+        )
+      }
+      // Ensure zodSchema exists
+      if (!tool.function.zodSchema) {
+        throw new InvalidToolDefinitionError(`Missing zodSchema for validation.`, tool.function.name)
+      }
       return {
         type: tool.type,
         function: { name: tool.function.name, description: tool.function.description, parameters }
@@ -207,14 +224,31 @@ export class AzureOpenAIMapper implements IProviderMapper {
     }
   }
 
-  mapFromProviderResponse(response: ChatCompletion, modelUsed: string): GenerateResult {
-    // Delegate to the base OpenAI mapper function
-    return mapFromOpenAIResponse(response, modelUsed)
+  mapFromProviderResponse(
+    response: ChatCompletion,
+    modelUsed: string,
+    originalTools?: RosettaTool<any>[]
+  ): GenerateResult {
+    // Delegate to the base OpenAI mapper function, passing originalTools
+    return mapFromOpenAIResponse(response, modelUsed, originalTools)
   }
 
-  async *mapProviderStream(stream: Stream<ChatCompletionChunk>): AsyncIterable<StreamChunk> {
-    // Delegate to the base OpenAI stream mapper function
-    yield* mapOpenAIStream(stream, this.provider)
+  async *mapProviderStream(
+    stream: Stream<ChatCompletionChunk>,
+    originalParams: GenerateParams // Accept original params to get modelId
+  ): AsyncIterable<StreamChunk> {
+    // Delegate to the base OpenAI stream mapper function, passing modelId and originalTools
+    const deploymentId =
+      originalParams.providerOptions?.azureChatDeploymentId ??
+      this.config.providerOptions?.[Provider.OpenAI]?.azureChatDeploymentId ??
+      this.config.azureOpenAIDefaultChatDeploymentName ??
+      originalParams.model! // Fallback to model from params if needed
+
+    if (!deploymentId) {
+      // This should ideally be caught earlier, but handle defensively
+      throw new ConfigurationError('Azure chat deployment ID/name must be configured for streaming.')
+    }
+    yield* mapOpenAIStream(stream, this.provider, deploymentId, originalParams.tools)
   }
 
   // --- Embedding Mapping ---

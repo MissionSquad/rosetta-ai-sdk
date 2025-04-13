@@ -3,6 +3,7 @@ import cors from 'cors'
 import multer from 'multer'
 import dotenv from 'dotenv'
 import path from 'path'
+import { z } from 'zod'
 import {
   RosettaAI,
   Provider,
@@ -80,7 +81,15 @@ const getWeatherTool: RosettaTool = {
         }
       },
       required: ['location'] // Location is required
-    }
+    },
+    // Zod Schema is required
+    zodSchema: z.object({
+      location: z.string().describe('The city and state/country, e.g., San Francisco, CA or London, UK'),
+      unit: z
+        .enum(['celsius', 'fahrenheit'])
+        .optional()
+        .describe('The temperature unit to use.')
+    })
   }
 }
 
@@ -149,7 +158,7 @@ app.post('/api/tool-use', async (req: Request, res: Response, next: NextFunction
         provider,
         model: model || undefined, // Use provided model or let SDK handle default
         messages: history,
-        tools: [getWeatherTool], // Use the hardcoded tool
+        tools: [getWeatherTool], // Use the hardcoded tool (with zodSchema)
         toolChoice: 'auto'
       })
 
@@ -170,11 +179,15 @@ app.post('/api/tool-use', async (req: Request, res: Response, next: NextFunction
           response.toolCalls.map(async call => {
             if (call.type === 'function' && call.function.name === 'getCurrentWeather') {
               let toolResultContent: string
+              let isError = false // Flag for tool execution error
               try {
+                // Arguments are already validated by the SDK before returning the response
+                // if the mapper throws ToolArgumentValidationError
                 const args = JSON.parse(call.function.arguments)
                 toolResultContent = await getCurrentWeather(args.location, args.unit)
                 console.log(`[Tool Use API] -> Tool Result OK for call ${call.id}`)
               } catch (e) {
+                isError = true
                 const errorMessage = e instanceof Error ? e.message : String(e)
                 console.error(`[Tool Use API] -> Tool Error for call ${call.id}:`, errorMessage)
                 toolResultContent = JSON.stringify({ error: errorMessage })
@@ -182,7 +195,8 @@ app.post('/api/tool-use', async (req: Request, res: Response, next: NextFunction
               toolResultMessages.push({
                 role: 'tool',
                 toolCallId: call.id,
-                content: toolResultContent
+                content: toolResultContent,
+                isError // Pass the error status
               })
             } else {
               const toolName = call.function?.name ?? 'unknown tool'
@@ -190,7 +204,8 @@ app.post('/api/tool-use', async (req: Request, res: Response, next: NextFunction
               toolResultMessages.push({
                 role: 'tool',
                 toolCallId: call.id,
-                content: JSON.stringify({ error: `Tool '${toolName}' is not implemented.` })
+                content: JSON.stringify({ error: `Tool '${toolName}' is not implemented.` }),
+                isError: true
               })
             }
           })

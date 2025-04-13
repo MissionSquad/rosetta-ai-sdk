@@ -2,20 +2,21 @@ import Anthropic, { APIError } from '@anthropic-ai/sdk'
 import {
   RawMessageStreamEvent,
   MessageParam as AnthropicMessageParam,
-  Tool as AnthropicTool,
+  Tool as AnthropicToolParam, // Renamed import for clarity
   ThinkingConfigParam as AnthropicThinkingConfig,
   ContentBlockParam as AnthropicContentBlockParam,
   TextBlockParam as AnthropicTextBlockParam,
   ImageBlockParam as AnthropicImageBlockParam,
   RawContentBlockStopEvent,
-  ToolUseBlockParam // INPUT type for tool use
+  ToolUseBlockParam, // INPUT type for tool use
+  ToolResultBlockParam // INPUT type for tool result
 } from '@anthropic-ai/sdk/resources/messages'
 import { Tool as AnthropicToolType } from '@anthropic-ai/sdk/resources'
 import {
   Message as AnthropicMessage,
-  ContentBlock as AnthropicResponseContentBlock,
-  ToolUseBlock as AnthropicToolUseBlock
+  ContentBlock as AnthropicResponseContentBlock
 } from '@anthropic-ai/sdk/resources/messages'
+import { JSONSchema7 } from 'json-schema' // Import JSONSchema7
 
 import {
   GenerateParams,
@@ -29,9 +30,17 @@ import {
   EmbedResult,
   TranscribeParams,
   TranslateParams,
-  TranscriptionResult
+  TranscriptionResult,
+  RosettaTool // Import RosettaTool
 } from '../../types'
-import { MappingError, ProviderAPIError, RosettaAIError, UnsupportedFeatureError } from '../../errors'
+import {
+  MappingError,
+  ProviderAPIError,
+  RosettaAIError,
+  UnsupportedFeatureError,
+  InvalidToolDefinitionError, // Import new errors
+  ToolArgumentValidationError
+} from '../../errors'
 import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
 import { mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
@@ -50,6 +59,7 @@ export class AnthropicMapper implements IProviderMapper {
         return 'user'
       case 'assistant':
         return 'assistant'
+      // System and Tool roles are handled structurally, not directly mapped here.
       case 'system':
       case 'tool':
         throw new MappingError(
@@ -66,6 +76,8 @@ export class AnthropicMapper implements IProviderMapper {
 
   private mapContentToAnthropic(content: RosettaMessage['content']): string | Array<AnthropicContentBlockParam> {
     if (content === null) {
+      // Anthropic requires content for user/assistant messages unless it's purely tool calls/results.
+      // Returning empty string might be problematic depending on context. Handled in mapToProviderParams.
       console.warn('Mapping null content to empty string for Anthropic input.')
       return ''
     }
@@ -118,25 +130,28 @@ export class AnthropicMapper implements IProviderMapper {
             this.provider
           )
         }
+        // Map RosettaToolResult (role='tool') to Anthropic's user message with tool_result block
+        const toolResultBlock: ToolResultBlockParam = {
+          type: 'tool_result',
+          tool_use_id: msg.toolCallId,
+          content: msg.content, // Assuming content is already stringified JSON or simple string
+          is_error: msg.isError // Pass the error flag if present
+        }
         messages.push({
           role: 'user',
-          content: [
-            { type: 'tool_result', tool_use_id: msg.toolCallId, content: msg.content }
-          ] as AnthropicContentBlockParam[] // Explicit cast
+          content: [toolResultBlock]
         })
       } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
         const assistantContent = this.mapContentToAnthropic(msg.content)
         const contentBlocks: AnthropicContentBlockParam[] = []
 
-        // FIX: Only add text block if assistantContent is a non-empty string or a non-empty array containing text
+        // Add text block if assistantContent is a non-empty string or a non-empty array containing text
         if (typeof assistantContent === 'string' && assistantContent.length > 0) {
           contentBlocks.push({ type: 'text', text: assistantContent })
         } else if (Array.isArray(assistantContent)) {
-          // Add text/image blocks from assistant message
           assistantContent.forEach(block => {
             if (block.type === 'text' || block.type === 'image') {
-              // Include empty text blocks if they were explicitly provided
-              // @ts-ignore
+              // @ts-ignore - Assuming block.source.data exists for image block if type is image
               if (block.type === 'text' || (block.type === 'image' && block.source.data)) {
                 contentBlocks.push(block)
               }
@@ -155,7 +170,7 @@ export class AnthropicMapper implements IProviderMapper {
               type: 'tool_use',
               id: toolCall.id,
               name: toolCall.function.name,
-              input: JSON.parse(toolCall.function.arguments || '{}')
+              input: JSON.parse(toolCall.function.arguments || '{}') // Parse arguments string
             }
             contentBlocks.push(toolUseBlock)
           } catch (e) {
@@ -168,35 +183,36 @@ export class AnthropicMapper implements IProviderMapper {
           }
         })
 
-        // Ensure contentBlocks is not empty if assistant message exists
-        // If only tool_use blocks exist, that's valid.
         if (contentBlocks.length === 0) {
           // This case should only happen if toolCalls were present but msg.content was null/empty
-          // and resulted in an empty contentBlocks array.
-          console.warn('Assistant message with tool calls resulted in empty content blocks; this might be invalid.')
-          // Anthropic requires at least one block if the role is assistant.
-          // If only tool_use blocks exist, that's fine. If somehow both content and tool_calls
-          // resulted in nothing, this is an error state.
+          // and resulted in an empty contentBlocks array. Anthropic requires at least one block.
           if (msg.toolCalls.length === 0) {
+            // This sub-case should theoretically not be reachable if msg.toolCalls.length > 0 check passed
             throw new MappingError(
               'Assistant message resulted in empty content blocks without tool calls.',
               this.provider
             )
           }
+          // If only tool_use blocks exist, that's valid.
         }
 
         messages.push({ role: 'assistant', content: contentBlocks })
       } else {
         // Handle regular user/assistant messages
         const mappedContent = this.mapContentToAnthropic(msg.content)
-        // Ensure content is not empty array for user/assistant roles
-        if (Array.isArray(mappedContent) && mappedContent.length === 0) {
-          // If content was originally empty array or null, mapContentToAnthropic returns "".
-          // If it was non-empty but resulted in empty (e.g., only unsupported types), throw.
-          throw new MappingError(
-            `Role '${msg.role}' requires non-empty content for Anthropic. Received empty array after mapping.`,
-            this.provider
-          )
+        // Anthropic requires non-empty content for user/assistant roles unless it's purely tool calls/results
+        if (
+          (msg.role === 'user' || msg.role === 'assistant') &&
+          ((typeof mappedContent === 'string' && mappedContent === '') ||
+            (Array.isArray(mappedContent) && mappedContent.length === 0))
+        ) {
+          // Allow empty assistant message only if it contains tool calls (handled above)
+          if (msg.role !== 'assistant' || !msg.toolCalls || msg.toolCalls.length === 0) {
+            throw new MappingError(
+              `Role '${msg.role}' requires non-empty content for Anthropic. Received empty content after mapping.`,
+              this.provider
+            )
+          }
         }
         messages.push({
           role: this.mapRoleToAnthropic(msg.role as 'user' | 'assistant'),
@@ -205,44 +221,48 @@ export class AnthropicMapper implements IProviderMapper {
       }
     }
 
-    // Ensure messages array is not empty (Anthropic requires at least one message)
     if (messages.length === 0 && !systemPrompt) {
-      // Allow system prompt only requests? Check Anthropic docs. Assuming not for now.
+      // Anthropic requires at least one message.
       throw new MappingError('No user or assistant messages provided for Anthropic.', this.provider)
     }
 
-    const tools: AnthropicTool[] | undefined = params.tools?.map(tool => {
+    // Map RosettaTool definitions to AnthropicToolParam
+    const tools: AnthropicToolParam[] | undefined = params.tools?.map(tool => {
       if (tool.type !== 'function') {
-        throw new MappingError(`Unsupported tool type for Anthropic: ${tool.type}`, this.provider)
+        throw new InvalidToolDefinitionError(`Unsupported tool type: ${tool.type}`, tool.function.name)
       }
-      const inputSchemaSource = tool.function.parameters
-      if (
-        typeof inputSchemaSource !== 'object' ||
-        inputSchemaSource === null ||
-        Array.isArray(inputSchemaSource) ||
-        inputSchemaSource.type !== 'object'
-      ) {
-        throw new MappingError(
-          `Invalid parameters schema for tool '${
-            tool.function.name
-          }'. Anthropic requires a JSON Schema object with top-level 'type: "object"'. Received: ${JSON.stringify(
-            inputSchemaSource
-          )}`,
-          this.provider
+      const inputSchemaSource = tool.function.parameters as JSONSchema7
+
+      // Validate that the schema type is 'object' as required by Anthropic
+      if (inputSchemaSource.type !== 'object') {
+        throw new InvalidToolDefinitionError(
+          `Invalid parameters schema for tool '${tool.function.name}'. Anthropic requires the top-level 'type' property to be exactly 'object'. Received: type='${inputSchemaSource.type}'`,
+          tool.function.name
         )
       }
+
+      // Ensure zodSchema exists
+      if (!tool.function.zodSchema) {
+        throw new InvalidToolDefinitionError(`Missing zodSchema for validation.`, tool.function.name)
+      }
+
+      // Cast is now safe because we've checked inputSchemaSource.type === 'object'
       const inputSchema: AnthropicToolType.InputSchema = inputSchemaSource as AnthropicToolType.InputSchema
-      return { name: tool.function.name, description: tool.function.description, input_schema: inputSchema }
+
+      return {
+        name: tool.function.name,
+        description: tool.function.description,
+        input_schema: inputSchema // Assign the validated and asserted schema
+      }
     })
 
-    // Use common utility for base tool choice mapping
     const baseToolChoice = mapBaseToolChoice(params.toolChoice)
     let anthropicToolChoice: Anthropic.Messages.ToolChoice | undefined = undefined
     if (baseToolChoice) {
       if (baseToolChoice === 'auto' || baseToolChoice === 'none') {
         anthropicToolChoice = { type: baseToolChoice }
       } else if (baseToolChoice === 'required') {
-        anthropicToolChoice = { type: 'any' } // Map 'required' to Anthropic's 'any'
+        anthropicToolChoice = { type: 'any' }
       } else if (typeof baseToolChoice === 'object' && baseToolChoice.type === 'function') {
         anthropicToolChoice = { type: 'tool', name: baseToolChoice.function.name }
       } else {
@@ -252,7 +272,6 @@ export class AnthropicMapper implements IProviderMapper {
 
     let thinkingParam: AnthropicThinkingConfig | undefined = undefined
     if (params.thinking) {
-      // Corrected: budget_tokens is part of the thinking object
       thinkingParam = { type: 'enabled', budget_tokens: 1024 }
     }
 
@@ -263,20 +282,19 @@ export class AnthropicMapper implements IProviderMapper {
       systemParam = undefined
     }
 
-    // Use common utility for base parameters
     const baseMappedParams = mapBaseParams(params)
 
     const basePayload = {
       model: params.model!,
       messages: messages,
       system: systemParam,
-      max_tokens: baseMappedParams.maxTokens ?? 4096, // Use mapped value or default
-      temperature: baseMappedParams.temperature, // Use mapped value
-      top_p: baseMappedParams.topP, // Use mapped value
-      stop_sequences: baseMappedParams.stopSequences, // Use mapped value
+      max_tokens: baseMappedParams.maxTokens ?? 4096,
+      temperature: baseMappedParams.temperature,
+      top_p: baseMappedParams.topP,
+      stop_sequences: baseMappedParams.stopSequences,
       tools: tools,
       tool_choice: anthropicToolChoice,
-      ...(thinkingParam && { thinking: thinkingParam }) // Correctly add thinking param
+      ...(thinkingParam && { thinking: thinkingParam })
     }
 
     if (params.stream) {
@@ -290,21 +308,54 @@ export class AnthropicMapper implements IProviderMapper {
 
   // --- Result Mapping ---
 
-  private mapToolCallsFromAnthropic(
-    contentBlocks: AnthropicResponseContentBlock[] | undefined
+  private mapAndValidateToolCallsFromAnthropic(
+    contentBlocks: AnthropicResponseContentBlock[] | undefined,
+    originalTools?: RosettaTool<any>[]
   ): RosettaToolCallRequest[] | undefined {
     if (!Array.isArray(contentBlocks)) return undefined
-    const toolCalls: RosettaToolCallRequest[] = contentBlocks
-      .filter((block): block is AnthropicToolUseBlock => block.type === 'tool_use')
-      .map(block => ({
-        id: block.id,
-        type: 'function',
-        function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) }
-      }))
+
+    const toolCalls: RosettaToolCallRequest[] = []
+    for (const block of contentBlocks) {
+      if (block.type === 'tool_use') {
+        const toolDefinition = originalTools?.find(t => t.function.name === block.name)
+        if (!toolDefinition) {
+          console.warn(`Received tool call for unknown tool '${block.name}'. Skipping validation.`)
+          toolCalls.push({
+            id: block.id,
+            type: 'function',
+            function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) }
+          })
+          continue
+        }
+
+        // Validate arguments using Zod schema
+        const validationResult = toolDefinition.function.zodSchema.safeParse(block.input)
+        if (!validationResult.success) {
+          throw new ToolArgumentValidationError(
+            `Arguments failed validation for tool '${block.name}'.`,
+            validationResult.error.issues,
+            block.name,
+            block.id
+          )
+        }
+
+        // Arguments are valid, add the raw tool call request
+        toolCalls.push({
+          id: block.id,
+          type: 'function',
+          function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) } // Return raw string args
+        })
+      }
+    }
+
     return toolCalls.length > 0 ? toolCalls : undefined
   }
 
-  mapFromProviderResponse(response: AnthropicMessage, model: string): GenerateResult {
+  mapFromProviderResponse(
+    response: AnthropicMessage,
+    model: string,
+    originalTools?: RosettaTool<any>[]
+  ): GenerateResult {
     let combinedTextContent: string | null = null
     let thinkingText: string | null = null
     const responseContent = response.content as AnthropicResponseContentBlock[]
@@ -317,14 +368,15 @@ export class AnthropicMapper implements IProviderMapper {
         } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
           thinkingText = block.thinking
         }
-        // Ignore tool_use blocks for combined text content
       })
       if (textParts.length > 0) {
         combinedTextContent = textParts.join('')
       }
     }
 
-    const toolCalls = this.mapToolCallsFromAnthropic(responseContent)
+    // Map and validate tool calls
+    const toolCalls = this.mapAndValidateToolCallsFromAnthropic(responseContent, originalTools)
+
     const finishReason =
       response.stop_reason === 'tool_use'
         ? 'tool_calls'
@@ -336,14 +388,13 @@ export class AnthropicMapper implements IProviderMapper {
         ? 'stop'
         : response.stop_reason ?? 'unknown'
 
-    // Use common utility for usage mapping
     const usage = mapTokenUsage(response.usage)
 
     return {
       content: combinedTextContent,
-      toolCalls: toolCalls,
+      toolCalls: toolCalls, // Raw tool calls
       finishReason: finishReason,
-      usage: usage, // Use mapped usage
+      usage: usage,
       thinkingSteps: thinkingText,
       citations: undefined,
       parsedContent: null,
@@ -354,7 +405,11 @@ export class AnthropicMapper implements IProviderMapper {
 
   // --- Stream Mapping ---
 
-  async *mapProviderStream(stream: AnthropicMessageStream): AsyncIterable<StreamChunk> {
+  async *mapProviderStream(
+    stream: AnthropicMessageStream,
+    originalParams: GenerateParams // Changed from originalTools
+  ): AsyncIterable<StreamChunk> {
+    const originalTools = originalParams.tools // Extract tools for validation
     let currentUsage: TokenUsage | undefined
     let finalFinishReason: string | null = null
     let thinkingStarted = false
@@ -374,7 +429,6 @@ export class AnthropicMapper implements IProviderMapper {
           case 'message_start':
             model = safeGet<string>(event.message, 'model') ?? ''
             yield { type: 'message_start', data: { provider: this.provider, model: model } }
-            // Use common utility for usage mapping
             currentUsage = mapTokenUsage(safeGet<Anthropic.Usage>(event.message, 'usage'))
             aggregatedResult = {
               content: '',
@@ -436,13 +490,43 @@ export class AnthropicMapper implements IProviderMapper {
 
             if (finishedToolCallId && toolCallArgAccumulators[finishedToolCallId]) {
               const toolData = toolCallArgAccumulators[finishedToolCallId]
+              const toolDefinition = originalTools?.find(t => t.function.name === toolData.name)
+
+              if (toolDefinition) {
+                let parsedArgs: any
+                try {
+                  parsedArgs = JSON.parse(toolData.args || '{}')
+                } catch (parseError) {
+                  throw new MappingError(
+                    `Failed to parse arguments for tool '${toolData.name}' (ID: ${toolData.id})`,
+                    this.provider,
+                    'mapProviderStream validation',
+                    parseError
+                  )
+                }
+                const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
+                if (!validationResult.success) {
+                  throw new ToolArgumentValidationError(
+                    `Streamed arguments failed validation for tool '${toolData.name}'.`,
+                    validationResult.error.issues,
+                    toolData.name,
+                    toolData.id
+                  )
+                }
+              } else {
+                console.warn(`Skipping validation for unknown streamed tool '${toolData.name}'.`)
+              }
+
+              // Yield done chunk after validation (or skipping)
               yield { type: 'tool_call_done', data: { index: stoppedBlockIndex, id: finishedToolCallId } }
+
+              // Add raw tool call to aggregated result
               if (aggregatedResult) {
                 aggregatedResult.toolCalls = aggregatedResult.toolCalls ?? []
                 aggregatedResult.toolCalls.push({
                   id: toolData.id,
                   type: 'function',
-                  function: { name: toolData.name, arguments: toolData.args }
+                  function: { name: toolData.name, arguments: toolData.args } // Store raw args
                 })
               }
               delete toolCallArgAccumulators[finishedToolCallId]
@@ -454,18 +538,15 @@ export class AnthropicMapper implements IProviderMapper {
             }
             break
           case 'message_delta':
-            // Use common utility for usage mapping
             const deltaUsage = mapTokenUsage(event.usage)
             if (deltaUsage?.completionTokens !== undefined) {
-              // Update currentUsage, preserving prompt tokens if already set
               currentUsage = {
-                promptTokens: currentUsage?.promptTokens, // Keep existing prompt tokens
+                promptTokens: currentUsage?.promptTokens,
                 completionTokens: deltaUsage.completionTokens,
-                // FIX: Calculate totalTokens correctly
                 totalTokens:
                   currentUsage?.promptTokens !== undefined
                     ? currentUsage.promptTokens + deltaUsage.completionTokens
-                    : deltaUsage.completionTokens // If prompt tokens unknown, total is just completion
+                    : deltaUsage.completionTokens
               }
             }
             if (event.delta.stop_reason) {
@@ -482,7 +563,6 @@ export class AnthropicMapper implements IProviderMapper {
             }
             break
           case 'message_stop':
-            // Ensure finalFinishReason is set if it was null
             finalFinishReason = finalFinishReason ?? 'stop'
             yield { type: 'message_stop', data: { finishReason: finalFinishReason } }
             if (currentUsage) {
@@ -501,6 +581,7 @@ export class AnthropicMapper implements IProviderMapper {
         }
       }
     } catch (error) {
+      // Wrap and yield errors, including ToolArgumentValidationError
       const mappedError = this.wrapProviderError(error, this.provider)
       yield { type: 'error', data: { error: mappedError } }
     }
@@ -540,27 +621,26 @@ export class AnthropicMapper implements IProviderMapper {
 
   // --- Error Handling ---
   wrapProviderError(error: unknown, provider: Provider): RosettaAIError {
+    // Handle specific validation errors first
+    if (error instanceof ToolArgumentValidationError || error instanceof InvalidToolDefinitionError) {
+      return error
+    }
     if (error instanceof RosettaAIError) {
       return error
     }
 
-    // Add structural check for Anthropic APIError-like objects
     const isAnthropicAPIErrorLike = (e: any): e is APIError =>
       typeof e === 'object' &&
       e !== null &&
       typeof e.status === 'number' &&
       typeof e.message === 'string' &&
-      'error' in e // Check for the nested 'error' property
+      'error' in e
 
     if (error instanceof Anthropic.APIError || isAnthropicAPIErrorLike(error)) {
-      const anthropicError = error as APIError // Cast after check
-      // FIX: Correctly access the nested error type using safeGet
-      const nestedErrorType = safeGet<string>(anthropicError, 'error', 'error', 'type')
-
-      // Use the nested type for both code and type if available
+      const anthropicError = error as APIError
+      const nestedErrorType = safeGet<string>(anthropicError, 'error', 'type') // Corrected path
       const finalCode = nestedErrorType
       const finalType = nestedErrorType
-
       return new ProviderAPIError(anthropicError.message, provider, anthropicError.status, finalCode, finalType, error)
     }
 

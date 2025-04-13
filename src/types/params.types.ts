@@ -1,12 +1,12 @@
-import { Provider, RosettaMessage, RosettaTool, RosettaAudioData } from './common.types'
+import { Provider, ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData } from './common.types'
 import { ProviderOptions } from './config.types'
 
 /**
  * Parameters for generating chat completions (streaming or non-streaming).
  */
 export interface GenerateParams {
-  /** The provider to use for this request (e.g., 'openai', 'anthropic'). */
-  provider: Provider
+  /** The provider to use for this request (e.g., 'openai', 'anthropic', or a custom string key). */
+  provider: ProviderKey
   /** The specific model ID for the chosen provider. Optional if a default is configured. */
   model?: string
   /** An array of messages forming the conversation history and the current prompt. */
@@ -19,8 +19,11 @@ export interface GenerateParams {
   topP?: number
   /** Sequence(s) where the API will stop generating further tokens. */
   stop?: string | string[] | null
-  /** An array of tools the model may call. Currently only 'function' type is broadly supported. */
-  tools?: RosettaTool[]
+  /**
+   * An array of tools the model may call.
+   * Each tool must include a `zodSchema` for argument validation.
+   */
+  tools?: RosettaTool<any>[] // Use RosettaTool<any> for flexibility
   /** Controls whether the model is forced to call a tool ('required' or specific function), allowed to choose ('auto'), or prevented ('none'). */
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
 

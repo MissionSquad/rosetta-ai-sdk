@@ -10,8 +10,22 @@ import {
   ChatCompletionChunk
 } from 'openai/resources/chat/completions'
 import { Stream } from 'openai/streaming'
-import { GenerateResult, Provider, RosettaMessage, RosettaToolCallRequest, StreamChunk, TokenUsage } from '../../types'
-import { MappingError, ProviderAPIError, RosettaAIError } from '../../errors'
+import {
+  GenerateResult,
+  Provider,
+  RosettaMessage,
+  RosettaToolCallRequest,
+  StreamChunk,
+  TokenUsage,
+  RosettaTool // Import RosettaTool
+} from '../../types'
+import {
+  InvalidToolDefinitionError,
+  MappingError,
+  ProviderAPIError,
+  RosettaAIError,
+  ToolArgumentValidationError
+} from '../../errors'
 import { safeGet } from '../utils'
 import { mapTokenUsage } from './common.utils'
 
@@ -36,13 +50,13 @@ export function mapContentForOpenAIRole(
   content: RosettaMessage['content'],
   role: OpenAIRole
 ): string | OpenAIContentPart[] | Array<ChatCompletionContentPartText | ChatCompletionContentPartRefusal> | null {
-  // --- FIX: Perform role-specific null/empty checks FIRST ---
+  // Perform role-specific null/empty checks FIRST
   if (content === null) {
     if (role === 'assistant' || role === 'tool') return null // Allowed for assistant/tool
     throw new MappingError(`Role '${role}' requires non-null content.`, Provider.OpenAI)
   }
   if (content === '') {
-    // FIX: Allow empty string for 'tool' role, only throw for 'system'
+    // Allow empty string for user, assistant, and tool roles
     if (role === 'system') {
       throw new MappingError(`Role '${role}' requires non-empty string content.`, Provider.OpenAI)
     }
@@ -54,7 +68,6 @@ export function mapContentForOpenAIRole(
     }
     // Allow empty array for user/assistant (maps to [] or null below)
   }
-  // --- End FIX ---
 
   if (typeof content === 'string') {
     // Allow empty string for roles that permit string content (user, assistant, tool)
@@ -117,19 +130,65 @@ export function mapContentForOpenAIRole(
   }
 }
 
-function mapToolCallsFromOpenAI(toolCalls: OpenAIToolCall[] | undefined): RosettaToolCallRequest[] | undefined {
+function mapAndValidateToolCallsFromOpenAI(
+  toolCalls: OpenAIToolCall[] | undefined,
+  originalTools?: RosettaTool<any>[]
+): RosettaToolCallRequest[] | undefined {
   if (!toolCalls || toolCalls.length === 0) return undefined
-  return toolCalls
-    .filter(tc => tc.type === 'function' && tc.function?.name && tc.id)
-    .map(tc => ({
-      id: tc.id!,
+
+  const mappedCalls: RosettaToolCallRequest[] = []
+  for (const tc of toolCalls) {
+    if (tc.type !== 'function' || !tc.function?.name || !tc.id) {
+      console.warn(`Skipping invalid tool call structure from OpenAI: ${JSON.stringify(tc)}`)
+      continue
+    }
+
+    const toolDefinition = originalTools?.find(t => t.function.name === tc.function.name)
+    const rawArguments = tc.function.arguments ?? '{}'
+
+    if (!toolDefinition) {
+      console.warn(`Received tool call for unknown tool '${tc.function.name}'. Skipping validation.`)
+    } else {
+      // Validate arguments using Zod schema
+      let parsedArgs: any
+      try {
+        parsedArgs = JSON.parse(rawArguments)
+      } catch (parseError) {
+        throw new MappingError(
+          `Failed to parse arguments for tool '${tc.function.name}' (ID: ${tc.id})`,
+          Provider.OpenAI,
+          'mapAndValidateToolCallsFromOpenAI validation',
+          parseError
+        )
+      }
+
+      const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
+      if (!validationResult.success) {
+        throw new ToolArgumentValidationError(
+          `Arguments failed validation for tool '${tc.function.name}'.`,
+          validationResult.error.issues,
+          tc.function.name,
+          tc.id
+        )
+      }
+    }
+
+    // Arguments are valid (or validation skipped), add the raw tool call request
+    mappedCalls.push({
+      id: tc.id,
       type: tc.type,
-      function: { name: tc.function!.name!, arguments: tc.function!.arguments ?? '{}' }
-    }))
+      function: { name: tc.function.name, arguments: rawArguments } // Return raw string args
+    })
+  }
+  return mappedCalls.length > 0 ? mappedCalls : undefined
 }
 
-export function mapFromOpenAIResponse(response: ChatCompletion, modelUsed: string): GenerateResult {
-  // FIX: Add null/undefined check for response.choices before accessing index 0
+export function mapFromOpenAIResponse(
+  response: ChatCompletion,
+  modelUsed: string,
+  originalTools?: RosettaTool<any>[] // Accept original tools for validation
+): GenerateResult {
+  // Add null/undefined check for response.choices before accessing index 0
   const choice = response?.choices?.[0]
   if (!choice) {
     console.warn('OpenAI response missing choices.')
@@ -160,10 +219,12 @@ export function mapFromOpenAIResponse(response: ChatCompletion, modelUsed: strin
         console.warn('Failed to auto-parse potential JSON from OpenAI:', e)
       }
   }
-  const mappedToolCalls = mapToolCallsFromOpenAI(choice.message?.tool_calls)
+
+  // Map and validate tool calls
+  const mappedToolCalls = mapAndValidateToolCallsFromOpenAI(choice.message?.tool_calls, originalTools)
   return {
     content: textContent,
-    toolCalls: mappedToolCalls,
+    toolCalls: mappedToolCalls, // Use validated (but still raw) tool calls
     finishReason: choice.finish_reason,
     usage: mapTokenUsage(response.usage), // Use common utility
     citations: undefined,
@@ -175,6 +236,10 @@ export function mapFromOpenAIResponse(response: ChatCompletion, modelUsed: strin
 }
 
 export function wrapOpenAIError(error: unknown, provider: Provider): RosettaAIError {
+  // Handle specific validation errors first
+  if (error instanceof ToolArgumentValidationError || error instanceof InvalidToolDefinitionError) {
+    return error
+  }
   if (error instanceof RosettaAIError) {
     return error
   }
@@ -194,7 +259,7 @@ export function wrapOpenAIError(error: unknown, provider: Provider): RosettaAIEr
     }
     return new ProviderAPIError(message, provider, error.status, error.code, error.type, error)
   }
-  // --- FIX: Handle non-Error objects better in this specific wrapper ---
+  // Handle non-Error objects better in this specific wrapper
   if (error instanceof Error) {
     return new ProviderAPIError(error.message, provider, undefined, undefined, undefined, error)
   }
@@ -210,12 +275,13 @@ export function wrapOpenAIError(error: unknown, provider: Provider): RosettaAIEr
     errorMessage = String(error ?? errorMessage)
   }
   return new ProviderAPIError(errorMessage, provider, undefined, undefined, undefined, error)
-  // --- End FIX ---
 }
 
 export async function* mapOpenAIStream(
   stream: Stream<ChatCompletionChunk>,
-  provider: Provider
+  provider: Provider,
+  modelId: string, // Accept modelId as argument
+  originalTools?: RosettaTool<any>[] // Accept original tools for validation
 ): AsyncIterable<StreamChunk> {
   let accumulatedContent = ''
   const accumulatedToolCalls: Record<
@@ -224,41 +290,58 @@ export async function* mapOpenAIStream(
   > = {}
   let finalUsage: TokenUsage | undefined
   let finalFinishReason: string | null = null
-  let model = ''
   let isJsonMode = false
-  let aggregatedResult: GenerateResult | null = null
+  let messageStartYielded = false // Track if message_start has been yielded
+
+  // Initialize aggregatedResult immediately using the passed modelId
+  const aggregatedResult: GenerateResult | null = {
+    content: '',
+    toolCalls: [],
+    finishReason: null,
+    usage: undefined,
+    model: modelId, // Use passed modelId initially
+    thinkingSteps: null,
+    citations: undefined,
+    parsedContent: null,
+    rawResponse: undefined // Raw response isn't available in stream aggregation
+  }
 
   try {
     for await (const chunk of stream) {
-      if (chunk.usage) {
-        finalUsage = mapTokenUsage(chunk.usage) // Use common utility
-        if (aggregatedResult) aggregatedResult.usage = finalUsage
-        continue
-      }
-      if (!model && chunk.model) {
-        model = chunk.model
-        yield { type: 'message_start', data: { provider, model } }
-        aggregatedResult = {
-          content: '',
-          toolCalls: [],
-          finishReason: null,
-          usage: undefined,
-          model: model,
-          thinkingSteps: null,
-          citations: undefined,
-          parsedContent: null,
-          rawResponse: undefined
+      // Yield message_start only once, when the first relevant chunk arrives
+      if (!messageStartYielded && (chunk.choices[0]?.delta || chunk.model)) {
+        // Update model in aggregatedResult if a more specific one arrives in the stream
+        if (aggregatedResult && chunk.model && aggregatedResult.model !== chunk.model) {
+          aggregatedResult.model = chunk.model
         }
+        yield { type: 'message_start', data: { provider, model: aggregatedResult?.model ?? modelId } }
+        messageStartYielded = true
       }
+
+      // Update usage if present and aggregatedResult exists
+      if (aggregatedResult && chunk.usage) {
+        finalUsage = mapTokenUsage(chunk.usage) // Use common utility
+        aggregatedResult.usage = finalUsage
+        // Allow loop to continue to check for other fields like delta.content
+        // in the same chunk, as some providers (like Novita) send them together.
+        // Removed: continue
+      }
+
+      // Check for choices AFTER processing potential usage in the same chunk
       const choice = chunk.choices[0]
       if (!choice) continue
-      if (!isJsonMode && accumulatedContent === '' && choice.delta?.content?.trim().match(/^[{[]/)) {
-        isJsonMode = true
-      }
+
+      // --- Content Processing ---
       if (choice.delta?.content) {
         const delta = choice.delta.content
         accumulatedContent += delta
-        if (aggregatedResult) aggregatedResult.content = accumulatedContent
+        if (aggregatedResult) aggregatedResult.content = accumulatedContent // Update aggregated content
+
+        // Detect JSON mode on the fly
+        if (!isJsonMode && accumulatedContent.trim().match(/^[{[]/)) {
+          isJsonMode = true
+        }
+
         if (isJsonMode) {
           let partialParsed = undefined
           try {
@@ -269,6 +352,8 @@ export async function* mapOpenAIStream(
           yield { type: 'content_delta', data: { delta } }
         }
       }
+
+      // --- Tool Call Processing ---
       if (choice.delta?.tool_calls) {
         for (const tcChunk of choice.delta.tool_calls) {
           const index = tcChunk.index
@@ -302,26 +387,55 @@ export async function* mapOpenAIStream(
           }
         }
       }
+
+      // --- Finish Reason Processing ---
       if (choice.finish_reason) {
         const reason = choice.finish_reason
         finalFinishReason = reason
-        if (aggregatedResult) aggregatedResult.finishReason = finalFinishReason
+        if (aggregatedResult) aggregatedResult.finishReason = finalFinishReason // Update aggregated reason
 
+        // Validate completed tool calls
         for (const tc of Object.values(accumulatedToolCalls)) {
-          if (!(tc as any).yieldedDone && tc.id && tc.index !== undefined) {
+          if (!(tc as any).yieldedDone && tc.id && tc.index !== undefined && tc.function?.name) {
+            const toolDefinition = originalTools?.find(t => t.function.name === tc.function!.name)
+            const rawArguments = tc.function.arguments ?? '{}'
+
+            if (toolDefinition) {
+              let parsedArgs: any
+              try {
+                parsedArgs = JSON.parse(rawArguments)
+              } catch (parseError) {
+                throw new MappingError(
+                  `Failed to parse arguments for tool '${tc.function!.name}' (ID: ${tc.id})`,
+                  provider,
+                  'mapOpenAIStream validation',
+                  parseError
+                )
+              }
+              const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
+              if (!validationResult.success) {
+                throw new ToolArgumentValidationError(
+                  `Streamed arguments failed validation for tool '${tc.function!.name}'.`,
+                  validationResult.error.issues,
+                  tc.function!.name,
+                  tc.id
+                )
+              }
+            } else {
+              console.warn(`Skipping validation for unknown streamed tool '${tc.function!.name}'.`)
+            }
+
+            // Yield done chunk after validation (or skipping)
             yield { type: 'tool_call_done', data: { index: tc.index, id: tc.id } }
             ;(tc as any).yieldedDone = true
-            if (
-              aggregatedResult &&
-              tc.type === 'function' &&
-              tc.function?.name &&
-              tc.function?.arguments !== undefined
-            ) {
+
+            // Add raw tool call to aggregated result
+            if (aggregatedResult) {
               aggregatedResult.toolCalls = aggregatedResult.toolCalls ?? []
               aggregatedResult.toolCalls.push({
                 id: tc.id,
-                type: tc.type,
-                function: { name: tc.function.name, arguments: tc.function.arguments }
+                type: tc.type as 'function',
+                function: { name: tc.function.name, arguments: rawArguments } // Store raw args
               })
             }
           }
@@ -333,24 +447,35 @@ export async function* mapOpenAIStream(
             finalParsedJson = JSON.parse(accumulatedContent ?? '')
           } catch {}
           yield { type: 'json_done', data: { parsed: finalParsedJson, snapshot: accumulatedContent ?? '' } }
-          if (aggregatedResult) aggregatedResult.parsedContent = finalParsedJson
+          if (aggregatedResult) aggregatedResult.parsedContent = finalParsedJson // Update aggregated parsed content
         }
       }
-    }
-    finalFinishReason = finalFinishReason ?? 'stop'
-    if (aggregatedResult) aggregatedResult.finishReason = finalFinishReason
+    } // End for await loop
+
+    // --- Stream End Logic ---
+    finalFinishReason = finalFinishReason ?? 'stop' // Default finish reason
+    if (aggregatedResult) aggregatedResult.finishReason = finalFinishReason // Ensure final reason is set
+
+    // Yield message_stop
     yield { type: 'message_stop', data: { finishReason: finalFinishReason } }
+
+    // Yield final_usage if available
     if (finalUsage) {
       yield { type: 'final_usage', data: { usage: finalUsage } }
     }
+
+    // Yield final_result if aggregation was successful
     if (aggregatedResult) {
+      // Final cleanup before yielding result
       if (!isJsonMode && aggregatedResult.content === '') aggregatedResult.content = null
       if (aggregatedResult.toolCalls?.length === 0) aggregatedResult.toolCalls = undefined
       yield { type: 'final_result', data: { result: aggregatedResult } }
     } else {
+      // This case should be less likely now, but keep the warning
       console.warn('OpenAI stream finished but no aggregated result was built.')
     }
   } catch (error) {
+    // Wrap and yield errors, including ToolArgumentValidationError
     const mappedError = wrapOpenAIError(error, provider)
     yield { type: 'error', data: { error: mappedError } }
   }
