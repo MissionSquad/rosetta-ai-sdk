@@ -1,5 +1,5 @@
 {
-  "name": "rosetta-ai-sdk",
+  "name": "@missionsquad/rosetta-ai",
   "version": "1.0.0",
   "description": "Unified TypeScript SDK for interacting with multiple AI providers (Anthropic, Google, Groq, OpenAI).",
   "main": "./dist/index.js",
