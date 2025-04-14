@@ -47,6 +47,7 @@ export interface CustomProviderConfig {
     | 'tool_use'
     | 'image_input'
     | 'json_mode'
+    | 'list_models' // Added feature flag for model listing
     // Add other potential features as needed
   >
 
@@ -117,9 +118,23 @@ export interface CustomProviderConfig {
 
   /**
    * Optional base URL for the custom provider's API endpoint.
-   * This might be used by the custom mapper's `execute*` methods.
+   * This might be used by the custom mapper's `execute*` methods and for default model listing.
    */
   baseURL?: string
+
+  /**
+   * Optional: The relative path from `baseURL` to the model listing endpoint.
+   * If not provided, defaults to `/models`. Ignored if `modelListUrl` is set.
+   * Example: `/openai/models` or `/v1/models`
+   */
+  modelListPath?: string
+
+  /**
+   * Optional: The absolute URL for the model listing endpoint.
+   * If provided, this overrides `baseURL` and `modelListPath` for model listing requests.
+   * Example: `https://api.customprovider.com/api/inventory/models`
+   */
+  modelListUrl?: string
 
   /**
    * Optional default maximum retries for API calls made by the custom mapper.

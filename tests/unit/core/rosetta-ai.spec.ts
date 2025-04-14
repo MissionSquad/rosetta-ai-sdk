@@ -536,7 +536,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
         customProviders: customProviderConfig
       })
       expect(warnSpy).toHaveBeenCalledWith(
-        "RosettaAI Warning: API key for custom provider 'no-key-custom' not found in config or environment variable 'NO_KEY_CUSTOM_API_KEY'. Execution might fail."
+        "RosettaAI Warning: Base URL for custom provider 'no-key-custom' not found in config or environment variable 'NO_KEY_CUSTOM_BASE_URL'. Default model listing will fail if modelListUrl is not also configured."
       )
     })
   })
@@ -1570,13 +1570,32 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       object: 'list',
       data: [{ id: 'claude-3-haiku', object: 'model', owned_by: 'anthropic', provider: Provider.Anthropic }]
     }
+    const mockCustomModelList: RosettaModelList = {
+      object: 'list',
+      data: [{ id: 'custom-model-x', object: 'model', owned_by: 'custom-org', provider: 'my-custom' }]
+    }
+
+    const customProviderConfig: CustomProviderConfig[] = [
+      {
+        providerKey: 'my-custom',
+        mapper: MockCustomMapper,
+        supportedFeatures: ['generate', 'list_models'], // Supports listing
+        modelListUrl: 'https://custom.api/models' // Define a source
+      }
+    ]
 
     beforeEach(() => {
       // Reset the mock implementation for listModelsForProvider
-      mockListModelsForProvider.mockImplementation(async (provider, _config) => {
+      mockListModelsForProvider.mockImplementation(async (provider, config) => {
         if (provider === Provider.OpenAI) return mockOpenAIModelList
         if (provider === Provider.Groq) return mockGroqModelList
         if (provider === Provider.Anthropic) return mockAnthropicModelList
+        if (provider === 'my-custom') {
+          // Check if customConfig was passed correctly
+          expect(config.customConfig).toBeDefined()
+          expect(config.customConfig?.providerKey).toBe('my-custom')
+          return mockCustomModelList
+        }
         throw new ConfigurationError(`Mock: Provider ${provider} not mocked for listModels`)
       })
     })
@@ -1655,6 +1674,42 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
           })
         )
       })
+
+      // --- New Custom Provider Tests for listModels ---
+      it('[Medium] should call internal lister for custom provider with custom config', async () => {
+        process.env.MY_CUSTOM_API_KEY = 'custom-env-key' // Set env key for this test
+        const rosetta = new RosettaAI({ customProviders: customProviderConfig })
+        const result = await rosetta.listModels('my-custom')
+
+        expect(mockListModelsForProvider).toHaveBeenCalledTimes(1)
+        expect(mockListModelsForProvider).toHaveBeenCalledWith(
+          'my-custom',
+          expect.objectContaining({
+            apiKey: 'custom-env-key', // Check correct API key resolution
+            customConfig: expect.objectContaining({
+              providerKey: 'my-custom',
+              modelListUrl: 'https://custom.api/models'
+            })
+          })
+        )
+        expect(result).toEqual(mockCustomModelList)
+      })
+
+      it('[Medium] should throw UnsupportedFeatureError if custom provider does not support list_models', async () => {
+        const customNoList: CustomProviderConfig[] = [
+          {
+            providerKey: 'custom-no-list',
+            mapper: MockCustomMapper,
+            supportedFeatures: ['generate'] // Does NOT include list_models
+          }
+        ]
+        const rosetta = new RosettaAI({ customProviders: customNoList })
+        await expect(rosetta.listModels('custom-no-list')).rejects.toThrow(UnsupportedFeatureError)
+        await expect(rosetta.listModels('custom-no-list')).rejects.toThrow(
+          "Provider 'custom-no-list' does not support the requested feature: Model Listing"
+        )
+      })
+      // --- End New Custom Provider Tests ---
     })
 
     describe('listAllModels', () => {
@@ -1740,76 +1795,26 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
         expect((results[Provider.Groq] as ProviderAPIError).message).toBe('[groq] API Error : Error: Generic failure')
         expect((results[Provider.Groq] as ProviderAPIError).underlyingError).toBe(genericError)
       })
-    })
-  })
 
-  // --- Tests for listModels & listAllModels (remain largely unchanged, but check ProviderKey) ---
-  describe('listModels & listAllModels (with ProviderKey)', () => {
-    const mockOpenAIModelList: RosettaModelList = {
-      object: 'list',
-      data: [{ id: 'gpt-4o-mini', object: 'model', owned_by: 'openai', provider: Provider.OpenAI }]
-    }
-    const mockGroqModelList: RosettaModelList = {
-      object: 'list',
-      data: [{ id: 'llama3-8b-8192', object: 'model', owned_by: 'meta', provider: Provider.Groq }]
-    }
-
-    beforeEach(() => {
-      mockListModelsForProvider.mockImplementation(async (provider, _config) => {
-        if (provider === Provider.OpenAI) return mockOpenAIModelList
-        if (provider === Provider.Groq) return mockGroqModelList
-        // Simulate unsupported for custom for now
-        if (typeof provider === 'string') throw new UnsupportedFeatureError(provider, 'Model Listing')
-        throw new ConfigurationError(`Mock: Provider ${provider} not mocked for listModels`)
-      })
-    })
-
-    describe('listModels', () => {
-      it('[Easy] should call internal lister for built-in provider', async () => {
-        const rosetta = new RosettaAI({ openaiApiKey: 'key-openai' })
-        await rosetta.listModels(Provider.OpenAI)
-        expect(mockListModelsForProvider).toHaveBeenCalledWith(
-          Provider.OpenAI,
-          expect.objectContaining({ apiKey: 'key-openai' })
-        )
-      })
-
-      it('[Medium] should throw UnsupportedFeatureError for custom provider (current basic impl)', async () => {
-        const customProviderConfig: CustomProviderConfig[] = [
-          { providerKey: 'custom-list', mapper: MockCustomMapper, supportedFeatures: [] }
-        ]
-        const rosetta = new RosettaAI({ customProviders: customProviderConfig })
-        await expect(rosetta.listModels('custom-list')).rejects.toThrow(UnsupportedFeatureError)
-        await expect(rosetta.listModels('custom-list')).rejects.toThrow(
-          "Provider 'custom-list' does not support the requested feature: Model Listing"
-        )
-      })
-    })
-
-    describe('listAllModels', () => {
-      it('[Medium] should attempt to list models for all configured providers (built-in and custom)', async () => {
-        const customProviderConfig: CustomProviderConfig[] = [
-          { providerKey: 'custom-list', mapper: MockCustomMapper, supportedFeatures: [] }
-        ]
+      // --- New Custom Provider Test for listAllModels ---
+      it('[Medium] should include custom provider results/errors in listAllModels', async () => {
+        process.env.MY_CUSTOM_API_KEY = 'custom-key'
         const rosetta = new RosettaAI({
           openaiApiKey: 'key-openai',
-          groqApiKey: 'key-groq',
-          customProviders: customProviderConfig
+          customProviders: customProviderConfig // Use the config that supports listing
         })
         const listModelsSpy = jest.spyOn(rosetta, 'listModels')
 
         const results = await rosetta.listAllModels()
 
-        expect(listModelsSpy).toHaveBeenCalledTimes(3)
-        expect(listModelsSpy).toHaveBeenCalledWith(Provider.Groq)
+        expect(listModelsSpy).toHaveBeenCalledTimes(2)
         expect(listModelsSpy).toHaveBeenCalledWith(Provider.OpenAI)
-        expect(listModelsSpy).toHaveBeenCalledWith('custom-list')
+        expect(listModelsSpy).toHaveBeenCalledWith('my-custom')
 
-        // Check results structure
         expect(results[Provider.OpenAI]).toEqual(mockOpenAIModelList)
-        expect(results[Provider.Groq]).toEqual(mockGroqModelList)
-        expect(results['custom-list']).toBeInstanceOf(UnsupportedFeatureError) // Error for custom provider
+        expect(results['my-custom']).toEqual(mockCustomModelList)
       })
+      // --- End New Custom Provider Test ---
     })
   })
 })

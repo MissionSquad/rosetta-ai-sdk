@@ -1,4 +1,4 @@
-import { Provider } from './common.types' // Assuming Provider enum exists in common.types.ts
+import { ProviderKey } from './common.types'
 
 /**
  * Optional properties specific to certain models, primarily seen in Anthropic/Groq responses.
@@ -51,7 +51,7 @@ export interface RosettaModel {
   /** Additional, often provider-specific, properties and capabilities of the model. */
   properties?: RosettaModelProperties
   /** The provider this model belongs to. Added by RosettaAI for context. */
-  readonly provider: Provider // Added by our SDK logic
+  readonly provider: ProviderKey // Added by our SDK logic
   /** Store the raw data from the provider for debugging or advanced use */
   readonly rawData?: Record<string, any> // Store the original object
 }
