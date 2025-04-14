@@ -7,3 +7,4 @@
 export { RosettaAI } from './core/rosetta-ai'
 export * from './types' // Export all types from the types module
 export * from './errors' // Export all custom errors
+export * from './core/mapping/openai-compatible.mapper' // Export OpenAICompatibleMapper
