@@ -80,7 +80,7 @@ async function runStructuredOutput() {
 
   // Filter providers that potentially support structured output
   // OpenAI has direct support; Google can be prompted.
-  const providers = rosetta.getConfiguredProviders().filter(p => [Provider.OpenAI, Provider.Google].includes(p))
+  const providers = rosetta.getConfiguredProviders().filter(p => ['openai', 'google'].includes(p as string))
 
   if (providers.length === 0) {
     console.error('No configured providers support JSON output (OpenAI, Google needed).')

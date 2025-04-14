@@ -2,6 +2,7 @@
 // Tool Use (Function Calling) Example - Non-Streaming
 import { RosettaAI, Provider, RosettaTool, RosettaMessage, RosettaAIError } from '../src'
 import dotenv from 'dotenv'
+import { z } from 'zod'
 
 dotenv.config()
 
@@ -25,7 +26,15 @@ const getWeatherTool: RosettaTool = {
         }
       },
       required: ['location'] // Location is required
-    }
+    },
+    // Add Zod schema for validation
+    zodSchema: z.object({
+      location: z.string().describe('The city and state/country, e.g., San Francisco, CA or London, UK'),
+      unit: z
+        .enum(['celsius', 'fahrenheit'])
+        .optional()
+        .describe('The temperature unit to use.')
+    })
   }
 }
 
@@ -61,7 +70,7 @@ async function runToolUseChat(initialPrompt: string) {
   // Filter providers that support tool use (adjust if needed)
   const providers = rosetta
     .getConfiguredProviders()
-    .filter(p => [Provider.OpenAI, Provider.Anthropic, Provider.Google, Provider.Groq].includes(p))
+    .filter(p => [Provider.OpenAI, Provider.Anthropic, Provider.Google, Provider.Groq].includes(p as Provider))
 
   if (providers.length === 0) {
     console.error('No configured providers support tool use (OpenAI, Anthropic, Google, Groq needed).')
@@ -69,7 +78,7 @@ async function runToolUseChat(initialPrompt: string) {
   }
 
   // Use the first available tool-supporting provider
-  const provider: Provider = providers[0]!
+  const provider = providers[0] as Provider
   console.log(`Using provider: ${provider}`)
 
   // Initial conversation message

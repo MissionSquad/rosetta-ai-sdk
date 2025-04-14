@@ -134,6 +134,8 @@ app.post('/api/generate', async (req: Request, res: Response, next: NextFunction
     if (!params.provider || !params.messages) {
       return res.status(400).json({ error: 'Missing required parameters: provider, messages' })
     }
+    // Add type assertion for provider
+    params.provider = params.provider as Provider
     const result = await rosetta.generate(params)
     res.json(result)
   } catch (error) {
@@ -155,7 +157,7 @@ app.post('/api/tool-use', async (req: Request, res: Response, next: NextFunction
     for (let i = 0; i < maxIterations; i++) {
       console.log(`[Tool Use API - Iteration ${i + 1}] Sending request...`)
       const response = await rosetta.generate({
-        provider,
+        provider: provider as Provider,
         model: model || undefined, // Use provided model or let SDK handle default
         messages: history,
         tools: [getWeatherTool], // Use the hardcoded tool (with zodSchema)
@@ -300,6 +302,9 @@ app.post('/api/stream', async (req: Request, res: Response, next: NextFunction) 
       return res.status(400).json({ error: 'Missing required parameters: provider, messages' })
     }
 
+    // Add type assertion for provider
+    params.provider = params.provider as Provider
+
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
@@ -355,6 +360,8 @@ app.post('/api/embed', async (req: Request, res: Response, next: NextFunction) =
     if (!params.provider || !params.input) {
       return res.status(400).json({ error: 'Missing required parameters: provider, input' })
     }
+    // Add type assertion for provider
+    params.provider = params.provider as Provider
     const result = await rosetta.embed(params)
     res.json(result)
   } catch (error) {
@@ -413,6 +420,9 @@ app.post('/api/transcribe', upload.single('audio'), async (req: Request, res: Re
       return res.status(400).json({ error: 'Missing required parameter: provider' })
     }
 
+    // Add type assertion for provider
+    params.provider = params.provider as Provider
+
     const audioData: RosettaAudioData = {
       data: req.file.buffer,
       filename: req.file.originalname,
@@ -437,6 +447,9 @@ app.post('/api/translate', upload.single('audio'), async (req: Request, res: Res
     if (!params.provider) {
       return res.status(400).json({ error: 'Missing required parameter: provider' })
     }
+
+    // Add type assertion for provider
+    params.provider = params.provider as Provider
 
     const audioData: RosettaAudioData = {
       data: req.file.buffer,

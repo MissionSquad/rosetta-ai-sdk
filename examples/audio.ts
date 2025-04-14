@@ -159,7 +159,7 @@ async function runAudioTests() {
   console.log(`Using audio file for STT/Translation: ${path.basename(inputAudioPath)}`)
 
   // Filter providers that support STT
-  const sttProviders = configuredProviders.filter(p => [Provider.OpenAI, Provider.Groq].includes(p))
+  const sttProviders = configuredProviders.filter(p => [Provider.OpenAI, Provider.Groq].includes(p as Provider))
 
   if (sttProviders.length === 0) {
     console.warn('Skipping STT/Translation tests: Neither OpenAI nor Groq provider configured.')
@@ -189,7 +189,7 @@ async function runAudioTests() {
       // --- Transcription ---
       console.log(`Transcribing audio...`)
       const transcribeParams: TranscribeParams = {
-        provider,
+        provider: provider as Provider,
         audio: audioData,
         responseFormat: 'text' // Request plain text output
         // language: 'en' // Optional: Provide language hint
@@ -203,7 +203,7 @@ async function runAudioTests() {
       // Both OpenAI and Groq whisper models typically support translation
       console.log(`\nTranslating audio to English...`)
       const translateParams: TranslateParams = {
-        provider,
+        provider: provider as Provider,
         audio: audioData,
         responseFormat: 'text'
         // model: 'whisper-1' // Optional: specify model
