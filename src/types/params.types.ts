@@ -59,7 +59,7 @@ export interface GenerateParams {
  */
 export interface EmbedParams {
   /** The provider to use for this request. */
-  provider: Provider
+  provider: ProviderKey
   /** The specific embedding model ID. Optional if a default is configured. */
   model?: string
   /** The input text(s) to embed. Can be a single string or an array for batching (if supported). */

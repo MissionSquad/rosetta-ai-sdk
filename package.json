@@ -1,6 +1,6 @@
 {
   "name": "@missionsquad/rosetta-ai",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Unified TypeScript SDK for interacting with multiple AI providers (Anthropic, Google, Groq, OpenAI).",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,7 +28,8 @@
     "build": "rm -rf dist && tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,md,yaml,yml,json}\"",
-    "test": "jest --config jest.config.json",
+    "test": "jest --config jest.config.json tests/unit",
+    "test:all": "jest --config jest.config.json",
     "test:unit": "jest --config jest.config.json tests/unit",
     "test:integration": "jest --config jest.config.json tests/integration",
     "prepack": "yarn build",

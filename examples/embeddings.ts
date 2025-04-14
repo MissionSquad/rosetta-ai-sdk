@@ -9,9 +9,7 @@ async function runEmbeddings() {
   const rosetta = new RosettaAI()
 
   // Filter providers that support embeddings
-  const providers = rosetta
-    .getConfiguredProviders()
-    .filter(p => [Provider.OpenAI, Provider.Google, Provider.Groq].includes(p))
+  const providers = rosetta.getConfiguredProviders().filter(p => ['openai', 'google', 'gpustack'].includes(p as string))
 
   if (providers.length === 0) {
     console.error('No configured providers support embeddings (OpenAI, Google, Groq needed).')
@@ -56,7 +54,7 @@ async function runEmbeddings() {
       }
 
       const params: EmbedParams = {
-        provider,
+        provider: Provider.OpenAI,
         model,
         input: inputData
         // Optionally add dimensions for OpenAI: dimensions: 256

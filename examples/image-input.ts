@@ -56,7 +56,7 @@ async function runImageInputChat() {
   // Filter providers that support image input (multimodal)
   const providers = rosetta
     .getConfiguredProviders()
-    .filter(p => [Provider.OpenAI, Provider.Anthropic, Provider.Google].includes(p))
+    .filter(p => [Provider.OpenAI, Provider.Anthropic, Provider.Google].includes(p as Provider))
 
   if (providers.length === 0) {
     console.error('No configured providers support image input (OpenAI, Anthropic, Google needed).')
