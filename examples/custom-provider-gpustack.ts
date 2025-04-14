@@ -24,7 +24,9 @@ import {
   CustomProviderConfig,
   ProviderAPIError,
   ToolArgumentValidationError,
-  Provider
+  Provider,
+  EmbedParams,
+  EmbedResult
 } from '../src'
 import { OpenAICompatibleMapper } from '../src/core/mapping/openai-compatible.mapper'
 
@@ -36,11 +38,13 @@ const gpustackProviderKey = 'gpustack' // Unique key for this provider
 const gpustackProviderConfig: CustomProviderConfig = {
   providerKey: gpustackProviderKey,
   mapper: OpenAICompatibleMapper, // Use the reusable OpenAI-compatible mapper
-  supportedFeatures: ['generate', 'stream', 'tool_use'], // Features supported by Gpustack's OpenAI endpoint
+  supportedFeatures: ['generate', 'stream', 'tool_use', 'embed'], // Features supported by Gpustack's OpenAI endpoint
   // baseURL: process.env.GPUSTACK_BASE_URL, // Gpustack's OpenAI-compatible endpoint, loaded from environment
   apiKey: process.env.GPUSTACK_API_KEY, // Loaded from environment
   // Define a default model for Gpustack
   defaultModel: process.env.ROSETTA_DEFAULT_GPUSTACK_MODEL ?? 'qwen2.5-coder-14b-instruct',
+  // Define a default embedding model for Gpustack
+  defaultEmbeddingModel: process.env.ROSETTA_DEFAULT_EMBEDDING_GPUSTACK_MODEL ?? 'nomic-embed-text-v1.5',
   // Tool configuration matching OpenAI's expected format (default for OpenAICompatibleMapper)
   toolConfig: {
     toolDefinitionFormat: 'jsonSchema',
@@ -233,6 +237,29 @@ async function runGpustackExamples() {
       )
     } else {
       console.error('[Tool Use Error]', error)
+    }
+  }
+
+  // --- 4. Embeddings ---
+  console.log('--- 4. Embeddings (Gpustack) ---')
+  try {
+    const embedParams: EmbedParams = {
+      provider: gpustackProviderKey as Provider, // Cast for EmbedParams type
+      input: ['This is the first text.', 'This is the second text to embed.']
+    }
+    const result: EmbedResult = await rosetta.embed(embedParams)
+
+    console.log(`[${result.model}] Generated ${result.embeddings.length} embeddings.`)
+    result.embeddings.forEach((vec, i) => {
+      console.log(`  Embedding ${i + 1} (Dim: ${vec.length}): [${vec.slice(0, 3).join(', ')}...]`)
+    })
+    console.log('Usage:', result.usage ? JSON.stringify(result.usage) : 'N/A')
+  } catch (error) {
+    console.error('[Embeddings Error]', error)
+    if (error instanceof ProviderAPIError && error.statusCode === 404) {
+      console.error(
+        `Hint: Ensure the embedding model ('nomic-embed-text-v1.5' or configured default) is available on your Gpustack endpoint.`
+      )
     }
   }
 

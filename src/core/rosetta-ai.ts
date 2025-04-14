@@ -230,7 +230,8 @@ export class RosettaAI {
       // Load API Key (prioritize config > env)
       const apiKeyEnvVarName = providerKey.replace(/-/g, '_').toUpperCase() + '_API_KEY'
       const apiKey = configApiKey ?? process.env[apiKeyEnvVarName]
-      if (!apiKey) {
+      if (!apiKey && customConfig.supportedFeatures.some(f => f !== 'list_models')) {
+        // Only warn if key is missing AND provider supports more than just listing models
         console.warn(
           `RosettaAI Warning: API key for custom provider '${providerKey}' not found in config or environment variable '${apiKeyEnvVarName}'. Execution might fail.`
         )
@@ -240,10 +241,10 @@ export class RosettaAI {
       const baseURLenvVarName = providerKey.replace(/-/g, '_').toUpperCase() + '_BASE_URL'
       const envBaseURL = process.env[baseURLenvVarName]
       const finalBaseURL = configBaseURL ?? envBaseURL
-      if (!finalBaseURL) {
-        // Base URL might be optional for some mappers, so only warn
+      if (!finalBaseURL && !customConfig.modelListUrl) {
+        // Base URL might be optional for some mappers, but required for default model listing if modelListUrl isn't set
         console.warn(
-          `RosettaAI Warning: Base URL for custom provider '${providerKey}' not found in config or environment variable '${baseURLenvVarName}'. Execution might fail if required by the mapper.`
+          `RosettaAI Warning: Base URL for custom provider '${providerKey}' not found in config or environment variable '${baseURLenvVarName}'. Default model listing will fail if modelListUrl is not also configured.`
         )
       }
 
@@ -883,8 +884,6 @@ export class RosettaAI {
 
   /**
    * Lists the models available for a specific configured provider (built-in or custom).
-   * For custom providers, this currently relies on the provider implementing model listing
-   * via a standard API endpoint or having a static list defined (not yet fully supported).
    *
    * @param providerKey The provider key (built-in or custom) for which to list models.
    * @param sourceConfig Optional configuration overriding the default listing source for this call.
@@ -892,6 +891,7 @@ export class RosettaAI {
    * @throws {ConfigurationError} If the provider is not configured or the listing source is invalid.
    * @throws {ProviderAPIError} If the API call fails (for API endpoints or SDK methods).
    * @throws {MappingError} If the response from the provider cannot be parsed or mapped correctly.
+   * @throws {UnsupportedFeatureError} If model listing is not supported for the provider.
    */
   public async listModels(
     providerKey: ProviderKey,
@@ -902,7 +902,7 @@ export class RosettaAI {
       throw new ConfigurationError(`Provider '${providerKey}' is not configured in this RosettaAI instance.`)
     }
 
-    // Handle built-in providers using the existing logic
+    // Handle built-in providers
     if (this.isBuiltInProvider(providerKey)) {
       const listConfig = {
         sourceConfig: sourceConfig ?? this.config.modelListingConfig?.[providerKey],
@@ -914,17 +914,34 @@ export class RosettaAI {
             : providerKey === Provider.Groq
             ? this.config.groqApiKey
             : providerKey === Provider.OpenAI
-            ? this.config.azureOpenAIApiKey ?? this.config.openaiApiKey
+            ? this.config.azureOpenAIApiKey ?? this.config.openaiApiKey // Prioritize Azure key
             : undefined,
         groqClient: this.groqClient
       }
       return listModelsForProvider(providerKey, listConfig)
     } else {
-      // --- Custom Provider Model Listing (Basic Implementation) ---
-      // TODO: Enhance this logic. Currently throws Unsupported.
-      // Future: Could check customProviderConfigs for a specific listing URL or method.
-      console.warn(`Model listing for custom provider '${providerKey}' is not fully implemented yet.`)
-      throw new UnsupportedFeatureError(providerKey, 'Model Listing')
+      // --- Custom Provider Model Listing ---
+      const customConfig = this.customProviderConfigs.get(providerKey)
+      const apiKey = this.customApiKeys.get(providerKey)
+
+      if (!customConfig) {
+        // Should not happen if mapper exists, but handle defensively
+        throw new ConfigurationError(`Configuration for custom provider '${providerKey}' not found.`)
+      }
+
+      // Check if the custom provider supports listing models
+      if (!customConfig.supportedFeatures.includes('list_models')) {
+        throw new UnsupportedFeatureError(providerKey, 'Model Listing')
+      }
+
+      // Pass custom config to the internal lister
+      const listConfig = {
+        sourceConfig: sourceConfig, // Pass override if provided
+        apiKey: apiKey,
+        customConfig: customConfig // Pass the full custom config
+      }
+      // Call the internal lister, which now needs to handle customConfig
+      return listModelsForProvider(providerKey, listConfig)
     }
   }
 
@@ -1028,6 +1045,9 @@ export class RosettaAI {
         case 'audio translation':
           featureKey = 'translate'
           break
+        case 'model listing': // Check for model listing
+          featureKey = 'list_models'
+          break
         // Add mappings for other features like tool_use, image_input, json_mode
       }
 
@@ -1058,6 +1078,14 @@ export class RosettaAI {
     // --- Built-in Provider Checks ---
     const provider = providerKey as Provider // Safe cast after isBuiltInProvider check
 
+    if (
+      featureName === 'Model Listing' &&
+      ![Provider.OpenAI, Provider.Groq, Provider.Google, Provider.Anthropic].includes(provider)
+    ) {
+      // Currently all built-in providers support some form of listing
+      // This check might be redundant unless a new built-in provider is added without listing support
+      throw new UnsupportedFeatureError(provider, featureName)
+    }
     if (
       (featureName === 'Audio Transcription' || featureName === 'Audio Translation') &&
       ![Provider.OpenAI, Provider.Groq].includes(provider)

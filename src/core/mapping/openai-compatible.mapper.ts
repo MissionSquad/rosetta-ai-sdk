@@ -16,9 +16,11 @@ import {
   Provider, // Import Provider enum for common functions
   ProviderKey,
   RosettaMessage,
-  RosettaTool
-} from '../../types' // Adjust path as needed
-import { BaseCustomMapper } from './base.custom.mapper' // Adjust path
+  RosettaTool,
+  EmbedParams,
+  EmbedResult
+} from '../../types'
+import { BaseCustomMapper } from './base.custom.mapper'
 import {
   mapFromOpenAIResponse,
   mapOpenAIStream,
@@ -26,8 +28,9 @@ import {
   mapRoleToOpenAI,
   wrapOpenAIError
 } from './openai.common' // Reuse common OpenAI mapping logic
-import { mapBaseToolChoice } from '../mapping/common.utils' // Import tool choice mapper
-import { MappingError, RosettaAIError } from '../../errors'
+import { mapBaseToolChoice } from '../mapping/common.utils'
+import { MappingError, RosettaAIError, ConfigurationError, UnsupportedFeatureError } from '../../errors'
+import { mapToOpenAIEmbedParams, mapFromOpenAIEmbedResponse } from './openai.embed.mapper'
 
 export class OpenAICompatibleMapper extends BaseCustomMapper {
   private openaiClient: OpenAI
@@ -140,9 +143,14 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     _providerConfig: CustomProviderConfig, // Use config passed to constructor (this.config)
     originalParams: GenerateParams
   ): Promise<GenerateResult> {
+    // Feature Check
+    if (!this.config.supportedFeatures.includes('generate')) {
+      throw new UnsupportedFeatureError(this.provider, 'generate')
+    }
+
     const model = originalParams.model ?? this.config.defaultModel // Use this.config
     if (!model) {
-      throw new Error(`Model must be specified for ${this.provider} (or set a default).`)
+      throw new ConfigurationError(`Model must be specified for ${this.provider} (or set a default).`)
     }
 
     // Map Rosetta messages/tools to OpenAI format using the helpers
@@ -182,11 +190,16 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     _providerConfig: CustomProviderConfig, // Use this.config
     originalParams: GenerateParams
   ): AsyncIterable<StreamChunk> {
+    // Feature Check
+    if (!this.config.supportedFeatures.includes('stream')) {
+      throw new UnsupportedFeatureError(this.provider, 'stream')
+    }
+
     const model = originalParams.model ?? this.config.defaultModel // Use this.config
     if (!model) {
       yield {
         type: 'error',
-        data: { error: new Error(`Model must be specified for ${this.provider} (or set a default).`) }
+        data: { error: new ConfigurationError(`Model must be specified for ${this.provider} (or set a default).`) }
       }
       return
     }
@@ -236,13 +249,54 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     }
   }
 
+  // --- NEW: Implement executeEmbed ---
+  override async executeEmbed(
+    _mappedParams: any, // Not used, we map from originalParams
+    _apiKey: string | undefined, // Already configured in internal client
+    providerConfig: CustomProviderConfig, // Use config passed to constructor (this.config)
+    originalParams: EmbedParams
+  ): Promise<EmbedResult> {
+    // Feature Check
+    if (!this.config.supportedFeatures.includes('embed')) {
+      throw new UnsupportedFeatureError(this.provider, 'embed')
+    }
+
+    // Model Determination
+    const modelId =
+      originalParams.model ?? providerConfig.defaultEmbeddingModel ?? 'nomic-embed-text-v1.5' // Use documented default
+
+    if (!modelId) {
+      // This case is less likely now with the default, but keep for robustness
+      throw new ConfigurationError(
+        `Embedding model must be specified for provider ${this.provider} (or set a defaultEmbeddingModel in config).`
+      )
+    }
+
+    try {
+      // Parameter Mapping (using helper from openai.embed.mapper)
+      const openAIEmbedParams = mapToOpenAIEmbedParams({ ...originalParams, model: modelId })
+
+      // API Call
+      console.log(`[${this.provider}] Calling Embeddings API (via OpenAI SDK)... Model: ${modelId}`)
+      const response = await this.openaiClient.embeddings.create(openAIEmbedParams)
+      console.log(`[${this.provider}] Received Embeddings response.`)
+
+      // Response Mapping (using helper from openai.embed.mapper)
+      return mapFromOpenAIEmbedResponse(response, modelId)
+    } catch (error) {
+      // Error Handling
+      throw this.wrapProviderError(error, this.provider)
+    }
+  }
+  // --- End NEW ---
+
   // Override wrapProviderError to delegate to the common OpenAI error wrapper
   override wrapProviderError(error: unknown, _provider: ProviderKey): RosettaAIError {
     // Delegate to the common wrapper, passing Provider.OpenAI as the expected type
     return wrapOpenAIError(error, Provider.OpenAI)
   }
 
-  // Note: executeEmbed, executeGenerateSpeech, executeStreamSpeech, executeTranscribe, executeTranslate
+  // Note: executeGenerateSpeech, executeStreamSpeech, executeTranscribe, executeTranslate
   // are not overridden here. If an OpenAI-compatible provider supports these,
   // this mapper would need to implement the corresponding `execute*` methods,
   // likely by calling the relevant methods on `this.openaiClient` and mapping

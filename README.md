@@ -4,7 +4,7 @@
 [![npm version](https://badge.fury.io/js/@missionsquad/RosettaAI.svg)](https://badge.fury.io/js/@missionsquad/RosettaAI)
 [![Node.js CI](https://github.com/MissionSquad/rosetta-ai-sdk/actions/workflows/node.js.yml/badge.svg)](https://github.com/MissionSquad/rosetta-ai-sdk/actions/workflows/node.js.yml)
 
-**RosettaAI** is a unified TypeScript SDK designed for seamless interaction with multiple Large Language Model (LLM) providers like OpenAI (including Azure), Anthropic, Google Generative AI, and Groq. It provides a consistent interface (`generate`, `stream`, `embed`, `generateSpeech`, `transcribe`, etc.) that abstracts away the provider-specific implementations, allowing you to switch between backends with minimal code changes.
+**RosettaAI** is a unified TypeScript SDK designed for seamless interaction with multiple Large Language Model (LLM) providers like OpenAI (including Azure), Anthropic, Google Generative AI, and Groq, as well as custom OpenAI-compatible providers. It provides a consistent interface (`generate`, `stream`, `embed`, `generateSpeech`, `transcribe`, `listModels`, etc.) that abstracts away the provider-specific implementations, allowing you to switch between backends with minimal code changes.
 
 Built with Node.js v20+ and TypeScript v5.5+ in mind, it emphasizes type safety, robustness, and adherence to modern backend development best practices.
 
@@ -16,6 +16,7 @@ Built with Node.js v20+ and TypeScript v5.5+ in mind, it emphasizes type safety,
   - Anthropic
   - Google Generative AI
   - Groq
+  - Custom OpenAI-Compatible Providers (e.g., LM Studio, Novita, GPUStack)
 - **Core Functionality:**
   - Chat Completions (Streaming & Non-Streaming)
   - Text Embeddings
@@ -24,6 +25,7 @@ Built with Node.js v20+ and TypeScript v5.5+ in mind, it emphasizes type safety,
   - Text-to-Speech (TTS) via OpenAI/Azure
   - Speech-to-Text (STT) via OpenAI/Azure & Groq
   - Audio Translation via OpenAI/Azure & Groq
+  - Model Listing (Built-in & Custom Providers)
 - **Advanced Features (Provider-dependent):**
   - JSON Mode / Structured Output (OpenAI/Azure direct support, others via prompting)
   - Grounding / Citations (Google)
@@ -34,34 +36,35 @@ Built with Node.js v20+ and TypeScript v5.5+ in mind, it emphasizes type safety,
 
 ## Supported Features Matrix
 
-This matrix provides a general guide to feature support across providers. Provider capabilities and model support change frequently, so always consult the official provider documentation for the latest details.
+This matrix provides a general guide to feature support across providers. Provider capabilities and model support change frequently, so always consult the official provider documentation for the latest details. Custom provider support depends on their specific API implementation.
 
-| Feature             | OpenAI (Azure) | Anthropic | Google | Groq | Notes                                  |
-| :------------------ | :------------: | :-------: | :----: | :--: | :------------------------------------- |
-| Chat (Generate)     |       ✅       |    ✅     |   ✅   |  ✅  |                                        |
-| Chat (Stream)       |       ✅       |    ✅     |   ✅   |  ✅  |                                        |
-| Image Input         |       ✅       |    ✅     |   ✅   |  ⚠️  | Groq support varies by model           |
-| Tool Use            |       ✅       |    ✅     |   ✅   |  ✅  | Implementation details differ slightly |
-| Embeddings          |       ✅       |    ❌     |   ✅   |  ✅  | Anthropic has no public embedding API  |
-| JSON Mode           |       ✅       |    ❌     |   ⚠️   |  ⚠️  | OpenAI/Azure best; others via prompt   |
-| Grounding/Citations |       ❌       |    ❌     |   ✅   |  ❌  | Via Google Search tool integration     |
-| Thinking Steps      |       ❌       |    ✅     |   ❌   |  ❌  | Anthropic specific feature             |
-| TTS                 |       ✅       |    ❌     |   ❌   |  ❌  | Via OpenAI/Azure Audio API             |
-| STT                 |       ✅       |    ❌     |   ⚠️   |  ✅  | Google requires separate Speech client |
-| STT (Translate)     |       ✅       |    ❌     |   ❌   |  ✅  | To English                             |
+| Feature             | OpenAI (Azure) | Anthropic | Google | Groq | Custom (OpenAI-Compat) | Notes                                  |
+| :------------------ | :------------: | :-------: | :----: | :--: | :--------------------: | :------------------------------------- |
+| Chat (Generate)     |       ✅       |    ✅     |   ✅   |  ✅  |           ✅           |                                        |
+| Chat (Stream)       |       ✅       |    ✅     |   ✅   |  ✅  |           ✅           |                                        |
+| Image Input         |       ✅       |    ✅     |   ✅   |  ⚠️  |           ⚠️           | Groq/Custom support varies by model    |
+| Tool Use            |       ✅       |    ✅     |   ✅   |  ✅  |           ✅           | Implementation details differ slightly |
+| Embeddings          |       ✅       |    ❌     |   ✅   |  ✅  |           ⚠️           | Custom support varies                  |
+| JSON Mode           |       ✅       |    ❌     |   ⚠️   |  ⚠️  |           ✅           | OpenAI/Azure best; others via prompt   |
+| Grounding/Citations |       ❌       |    ❌     |   ✅   |  ❌  |           ❌           | Via Google Search tool integration     |
+| Thinking Steps      |       ❌       |    ✅     |   ❌   |  ❌  |           ❌           | Anthropic specific feature             |
+| TTS                 |       ✅       |    ❌     |   ❌   |  ❌  |           ❌           | Via OpenAI/Azure Audio API             |
+| STT                 |       ✅       |    ❌     |   ⚠️   |  ✅  |           ❌           | Google requires separate Speech client |
+| STT (Translate)     |       ✅       |    ❌     |   ❌   |  ✅  |           ❌           | To English                             |
+| Model Listing       |       ✅       |    ✅     |   ✅   |  ✅  |           ✅           | Custom via OpenAI-compat `/models`     |
 
-✅ = Supported | ⚠️ = Partial/Limited/Via Prompting | ❌ = Not Supported
+✅ = Supported | ⚠️ = Partial/Limited/Via Prompting/Varies | ❌ = Not Supported
 
 **Note:** This SDK aims to provide a common interface but cannot enable features unsupported by the underlying provider API.
 
 ## Installation
 
 ```bash
-npm install rosetta-ai-sdk
+npm install @missionsquad/rosetta-ai
 # or
-yarn add rosetta-ai-sdk
+yarn add @missionsquad/rosetta-ai
 # or
-pnpm add rosetta-ai-sdk
+pnpm add @missionsquad/rosetta-ai
 ```
 
 Ensure you have **Node.js v20 or later** installed.
@@ -82,6 +85,11 @@ Create a `.env` file in your project root. See `.env.example` for all available 
   GOOGLE_API_KEY=AIza...
   GROQ_API_KEY=gsk_...
   OPENAI_API_KEY=sk-... # For standard OpenAI OR Azure if AZURE_OPENAI_API_KEY is not set
+
+  # Custom Provider Example Keys
+  NOVITA_API_KEY=your_novita_key
+  GPUSTACK_API_KEY=your_gpustack_key
+  # LMSTUDIO_API_KEY= # Often not needed for local
   ```
 
 - **Azure OpenAI (Alternative to Standard OpenAI):** If using Azure, provide these instead of/in addition to `OPENAI_API_KEY`. RosettaAI will prioritize Azure if its key and endpoint are set.
@@ -94,6 +102,14 @@ Create a `.env` file in your project root. See `.env.example` for all available 
   ROSETTA_AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=your-embedding-deployment-name # Default EMBEDDING deployment ID
   ```
 
+- **Custom Provider Base URLs (Optional):** Set base URLs if they differ from defaults or if not set in constructor config.
+
+  ```dotenv
+  # NOVITA_BASE_URL=https://api.novita.ai/v3/openai
+  # GPUSTACK_BASE_URL=https://gpu.crypto-tech.cloud/v1-openai
+  # LMSTUDIO_BASE_URL=http://localhost:1234/v1
+  ```
+
 - **Optional Defaults:** Set default models for each provider to avoid specifying them in every call.
 
   ```dotenv
@@ -102,11 +118,15 @@ Create a `.env` file in your project root. See `.env.example` for all available 
   ROSETTA_DEFAULT_GOOGLE_MODEL=gemini-1.5-flash-latest
   ROSETTA_DEFAULT_GROQ_MODEL=llama3-8b-8192
   ROSETTA_DEFAULT_OPENAI_MODEL=gpt-4o-mini
+  ROSETTA_DEFAULT_NOVITA_MODEL=meta-llama/llama-3.1-8b-instruct # Example custom default
+  ROSETTA_DEFAULT_GPUSTACK_MODEL=ibm-granite-3.2-8b-instruct # Example custom default
+  ROSETTA_DEFAULT_LMSTUDIO_MODEL=lmstudio-community/Meta-Llama-3-8B-Instruct-GGUF # Example custom default
 
   # Embedding Models
   ROSETTA_DEFAULT_EMBEDDING_GOOGLE_MODEL=text-embedding-004
   ROSETTA_DEFAULT_EMBEDDING_OPENAI_MODEL=text-embedding-3-small
   ROSETTA_DEFAULT_EMBEDDING_GROQ_MODEL=nomic-embed-text-v1.5
+  ROSETTA_DEFAULT_EMBEDDING_GPUSTACK_MODEL=nomic-embed-text-v1.5 # Example custom default
 
   # Audio Models
   ROSETTA_DEFAULT_TTS_OPENAI_MODEL=tts-1
@@ -119,8 +139,41 @@ Create a `.env` file in your project root. See `.env.example` for all available 
 Pass configuration options directly when creating the `RosettaAI` instance. Constructor arguments override environment variables.
 
 ```typescript
-import { RosettaAI, Provider, RosettaAIConfig } from 'rosetta-ai-sdk'
+import { RosettaAI, Provider, RosettaAIConfig, CustomProviderConfig } from 'rosetta-ai-sdk'
+import { OpenAICompatibleMapper } from 'rosetta-ai-sdk/dist/core/mapping/openai-compatible.mapper' // Adjust path if needed
 
+// Example Custom Provider Config
+const lmstudioConfig: CustomProviderConfig = {
+  providerKey: 'lmstudio',
+  mapper: OpenAICompatibleMapper,
+  supportedFeatures: ['generate', 'stream', 'tool_use', 'list_models'], // Supports listing
+  baseURL: process.env.LMSTUDIO_BASE_URL || 'http://localhost:1234/v1',
+  apiKey: process.env.LMSTUDIO_API_KEY || undefined,
+  defaultModel: process.env.ROSETTA_DEFAULT_LMSTUDIO_MODEL || 'local-model'
+  // modelListPath: '/models' // Default, can omit
+}
+
+const customWithPathConfig: CustomProviderConfig = {
+  providerKey: 'custom-path',
+  mapper: OpenAICompatibleMapper,
+  supportedFeatures: ['generate', 'list_models'],
+  baseURL: 'https://api.example.com/v2',
+  apiKey: 'key-123',
+  defaultModel: 'model-a',
+  modelListPath: '/openai-compat/models' // Custom path for model listing
+}
+
+const customWithUrlConfig: CustomProviderConfig = {
+  providerKey: 'custom-url',
+  mapper: OpenAICompatibleMapper,
+  supportedFeatures: ['generate', 'list_models'],
+  baseURL: 'https://api.example.com/v2', // Base for generate
+  apiKey: 'key-456',
+  defaultModel: 'model-b',
+  modelListUrl: 'https://models.example.org/all' // Absolute URL for listing
+}
+
+// Main Config
 const config: RosettaAIConfig = {
   openaiApiKey: 'sk-...',
   googleApiKey: 'AIza...',
@@ -128,7 +181,8 @@ const config: RosettaAIConfig = {
 
   defaultModels: {
     [Provider.OpenAI]: 'gpt-4o-mini',
-    [Provider.Google]: 'gemini-1.5-flash-latest'
+    [Provider.Google]: 'gemini-1.5-flash-latest',
+    lmstudio: 'local-model-override' // Override default for lmstudio
   },
 
   // Example: Explicit Azure configuration
@@ -137,6 +191,9 @@ const config: RosettaAIConfig = {
   azureOpenAIApiVersion: '2024-05-01-preview',
   azureOpenAIDefaultChatDeploymentName: 'my-gpt4-deployment',
   azureOpenAIDefaultEmbeddingDeploymentName: 'my-embedding-deployment',
+
+  // Register Custom Providers
+  customProviders: [lmstudioConfig, customWithPathConfig, customWithUrlConfig],
 
   // Optional: Override default retries/timeout
   defaultMaxRetries: 3,
@@ -168,7 +225,7 @@ async function main() {
     ]
 
     const result = await rosetta.generate({
-      provider: Provider.OpenAI, // Or Provider.Anthropic, Provider.Google, Provider.Groq
+      provider: Provider.OpenAI, // Or Provider.Anthropic, Provider.Google, Provider.Groq, 'lmstudio'
       // model: 'gpt-4o-mini', // Optional: uses configured default if not set
       messages: messages,
       maxTokens: 50
@@ -220,6 +277,22 @@ async function main() {
     // Errors during stream *setup* (e.g., invalid config) are caught here
     console.error(`Streaming setup failed: ${error.name} - ${error.message}`)
   }
+
+  // --- List Models ---
+  console.log('\n--- Model Listing ---')
+  try {
+    const providerToList = Provider.OpenAI // Or 'lmstudio', Provider.Groq, etc.
+    if (rosetta.getConfiguredProviders().includes(providerToList)) {
+      const models = await rosetta.listModels(providerToList)
+      console.log(`Models for ${providerToList}:`)
+      models.data.slice(0, 5).forEach(m => console.log(` - ${m.id} (Owned by: ${m.owned_by})`))
+      if (models.data.length > 5) console.log(' ... and more')
+    } else {
+      console.log(`Provider ${providerToList} not configured, skipping model list.`)
+    }
+  } catch (error) {
+    console.error(`Model listing failed: ${error.name} - ${error.message}`)
+  }
 }
 
 main().catch(console.error)
@@ -230,7 +303,8 @@ main().catch(console.error)
 ### Initialization
 
 ```typescript
-import { RosettaAI, Provider, RosettaAIConfig } from 'rosetta-ai-sdk'
+import { RosettaAI, Provider, RosettaAIConfig, CustomProviderConfig } from 'rosetta-ai-sdk'
+import { OpenAICompatibleMapper } from 'rosetta-ai-sdk/dist/core/mapping/openai-compatible.mapper'
 import dotenv from 'dotenv'
 
 dotenv.config() // Load .env
@@ -239,13 +313,23 @@ dotenv.config() // Load .env
 const rosettaAuto = new RosettaAI()
 
 // Option 2: Explicit configuration via constructor
+const customConfig: CustomProviderConfig = {
+  providerKey: 'my-custom',
+  mapper: OpenAICompatibleMapper,
+  supportedFeatures: ['generate', 'list_models'],
+  baseURL: 'http://localhost:11434/v1', // Example: Ollama endpoint
+  apiKey: 'ollama', // Example API key if needed
+  modelListPath: '/api/tags' // Example: Ollama model listing path (might need custom mapper logic)
+}
 const config: RosettaAIConfig = {
   openaiApiKey: 'sk-...',
   anthropicApiKey: 'sk-ant-...',
   defaultModels: {
     [Provider.OpenAI]: 'gpt-4o-mini',
-    [Provider.Anthropic]: 'claude-3-haiku-20240307'
-  }
+    [Provider.Anthropic]: 'claude-3-haiku-20240307',
+    'my-custom': 'llama3'
+  },
+  customProviders: [customConfig]
 }
 const rosettaManual = new RosettaAI(config)
 
@@ -260,7 +344,7 @@ console.log('Available Providers:', rosettaManual.getConfiguredProviders())
 Use `generate` for simple request-response interactions.
 
 ```typescript
-import { RosettaAI, Provider, RosettaMessage } from 'rosetta-ai-sdk'
+import { RosettaAI, Provider, RosettaMessage, ProviderKey } from 'rosetta-ai-sdk'
 // ... initialization ...
 
 const messages: RosettaMessage[] = [
@@ -269,9 +353,10 @@ const messages: RosettaMessage[] = [
 ]
 
 try {
+  const providerKey: ProviderKey = Provider.Anthropic // Or 'my-custom', Provider.OpenAI, etc.
   const result = await rosetta.generate({
-    provider: Provider.Anthropic,
-    model: 'claude-3-haiku-20240307', // Specify model
+    provider: providerKey,
+    model: 'claude-3-haiku-20240307', // Specify model or use default
     messages: messages,
     maxTokens: 30,
     temperature: 0.8
@@ -291,14 +376,15 @@ try {
 Use `stream` to process responses chunk-by-chunk, ideal for real-time applications.
 
 ```typescript
-import { RosettaAI, Provider, RosettaMessage, StreamChunk } from 'rosetta-ai-sdk'
+import { RosettaAI, Provider, RosettaMessage, StreamChunk, ProviderKey } from 'rosetta-ai-sdk'
 // ... initialization ...
 
 const messages: RosettaMessage[] = [{ role: 'user', content: 'Explain the concept of "event loop" in Node.js simply.' }]
 
 try {
+  const providerKey: ProviderKey = Provider.OpenAI // Or 'my-custom', Provider.Groq, etc.
   const stream = rosetta.stream({
-    provider: Provider.OpenAI,
+    provider: providerKey,
     model: 'gpt-4o-mini',
     messages: messages,
     maxTokens: 150
@@ -355,17 +441,18 @@ try {
 
 ### Embeddings
 
-Generate vector representations of text using `embed`. Supported by OpenAI/Azure, Google, and Groq.
+Generate vector representations of text using `embed`. Supported by OpenAI/Azure, Google, Groq, and potentially custom providers.
 
 ```typescript
-import { RosettaAI, Provider, EmbedParams } from 'rosetta-ai-sdk'
+import { RosettaAI, Provider, EmbedParams, ProviderKey } from 'rosetta-ai-sdk'
 // ... initialization ...
 
 const textsToEmbed = ['RosettaAI simplifies LLM interactions.', 'TypeScript adds static typing to JavaScript.']
 
 try {
+  const providerKey: ProviderKey = Provider.OpenAI // Or Provider.Google, Provider.Groq, 'my-custom-embed-provider'
   const params: EmbedParams = {
-    provider: Provider.OpenAI, // Or Provider.Google, Provider.Groq
+    provider: providerKey,
     model: 'text-embedding-3-small', // Use appropriate model
     input: textsToEmbed
     // dimensions: 256 // Optional: For OpenAI models supporting reduced dimensions
@@ -389,7 +476,7 @@ try {
 Instruct models to use predefined tools (functions) to interact with external systems or data.
 
 ```typescript
-import { RosettaAI, Provider, RosettaTool, RosettaMessage } from 'rosetta-ai-sdk'
+import { RosettaAI, Provider, RosettaTool, RosettaMessage, ProviderKey } from 'rosetta-ai-sdk'
 // ... initialization ...
 
 // 1. Define your tool
@@ -418,12 +505,13 @@ async function getCurrentWeather(location: string): Promise<string> {
 async function runToolConversation() {
   const messages: RosettaMessage[] = [{ role: 'user', content: "What's the weather in San Francisco?" }]
   const maxTurns = 5 // Prevent infinite loops
+  const providerKey: ProviderKey = Provider.OpenAI // Or 'my-custom', Provider.Anthropic, etc.
 
   for (let i = 0; i < maxTurns; i++) {
     console.log(`\nTurn ${i + 1}: Sending request...`)
     try {
       const response = await rosetta.generate({
-        provider: Provider.OpenAI, // Or Anthropic, Google, Groq
+        provider: providerKey,
         messages: messages,
         tools: [getWeatherTool],
         toolChoice: 'auto' // Let the model decide
@@ -467,7 +555,7 @@ runToolConversation()
 Send images along with text prompts to multimodal models (OpenAI, Anthropic, Google).
 
 ```typescript
-import { RosettaAI, Provider, RosettaMessage, RosettaImageData, ImageMimeType } from 'rosetta-ai-sdk'
+import { RosettaAI, Provider, RosettaMessage, RosettaImageData, ImageMimeType, ProviderKey } from 'rosetta-ai-sdk'
 import fs from 'fs/promises'
 import path from 'path'
 // ... initialization ...
@@ -494,8 +582,9 @@ async function describeImage(imagePath: string) {
     ]
 
     // 3. Generate response
+    const providerKey: ProviderKey = Provider.OpenAI // Or Provider.Anthropic, Provider.Google
     const result = await rosetta.generate({
-      provider: Provider.OpenAI, // Or Anthropic, Google
+      provider: providerKey,
       model: 'gpt-4o-mini', // Use a vision-capable model
       messages: messages,
       maxTokens: 150
@@ -563,7 +652,7 @@ generateAudio()
 Transcribe audio to text using `transcribe` or translate audio to English using `translate`. Supported by OpenAI/Azure and Groq.
 
 ```typescript
-import { RosettaAI, Provider, TranscribeParams, TranslateParams, RosettaAudioData } from 'rosetta-ai-sdk'
+import { RosettaAI, Provider, TranscribeParams, TranslateParams, RosettaAudioData, ProviderKey } from 'rosetta-ai-sdk'
 import fs from 'fs/promises'
 import path from 'path'
 // ... initialization ...
@@ -580,8 +669,9 @@ async function processAudio(audioPath: string) {
 
     // 2. Transcribe
     console.log('\n--- Transcription ---')
+    const transcribeProvider: ProviderKey = Provider.Groq // Or Provider.OpenAI
     const transcribeParams: TranscribeParams = {
-      provider: Provider.Groq, // Or Provider.OpenAI
+      provider: transcribeProvider,
       audio: audioData
       // model: 'whisper-large-v3', // Optional
       // language: 'en', // Optional language hint
@@ -591,8 +681,9 @@ async function processAudio(audioPath: string) {
 
     // 3. Translate (to English)
     console.log('\n--- Translation ---')
+    const translateProvider: ProviderKey = Provider.Groq // Or Provider.OpenAI
     const translateParams: TranslateParams = {
-      provider: Provider.Groq, // Or Provider.OpenAI
+      provider: translateProvider,
       audio: audioData
       // model: 'whisper-large-v3', // Optional
     }
@@ -605,6 +696,53 @@ async function processAudio(audioPath: string) {
 
 // Ensure you have an audio file (e.g., sample_audio.mp3) or use the TTS output
 processAudio(path.join(__dirname, 'sample_audio.mp3')) // Provide path to your audio file
+```
+
+### Model Listing
+
+List available models for configured providers (built-in and custom).
+
+```typescript
+import { RosettaAI, Provider, ProviderKey, RosettaModelList } from 'rosetta-ai-sdk'
+// ... initialization ...
+
+async function listProviderModels(providerKey: ProviderKey) {
+  console.log(`\n--- Listing Models for: ${providerKey} ---`)
+  try {
+    const models: RosettaModelList = await rosetta.listModels(providerKey)
+    console.log(`Found ${models.data.length} models:`)
+    models.data.slice(0, 5).forEach(m => console.log(`  - ${m.id} (Owned by: ${m.owned_by})`))
+    if (models.data.length > 5) console.log('  ...')
+  } catch (error) {
+    console.error(`Error listing models for ${providerKey}: ${error.message}`)
+  }
+}
+
+async function listAllProviderModels() {
+  console.log('\n--- Listing Models for ALL Configured Providers ---')
+  try {
+    const allResults = await rosetta.listAllModels()
+    for (const providerKey in allResults) {
+      console.log(`\nProvider: ${providerKey}`)
+      const result = allResults[providerKey]
+      if (result instanceof Error) {
+        // Check if it's an error object
+        console.error(`  Error: ${result.message}`)
+      } else if (result) {
+        console.log(`  Found ${result.data.length} models:`)
+        result.data.slice(0, 5).forEach(m => console.log(`    - ${m.id}`))
+        if (result.data.length > 5) console.log('    ...')
+      }
+    }
+  } catch (error) {
+    console.error(`Unexpected error during listAllModels: ${error.message}`)
+  }
+}
+
+// Example calls
+// listProviderModels(Provider.OpenAI);
+// listProviderModels('lmstudio'); // Example custom provider key
+// listAllProviderModels();
 ```
 
 ### Error Handling
@@ -637,13 +775,15 @@ async function safeGenerate() {
       // e.g., Missing API key, invalid deployment ID
     } else if (error instanceof ProviderAPIError) {
       console.error(
-        `Provider API Error (${error.provider}): Status ${error.statusCode ?? 'N/A'}, Code: ${error.errorCode ??
-          'N/A'} - ${error.message}`
+        `Provider API Error (${error.provider || error.customProvider}): Status ${error.statusCode ??
+          'N/A'}, Code: ${error.errorCode ?? 'N/A'} - ${error.message}`
       )
       // e.g., Rate limit, authentication error, invalid request to provider
       // console.error("Underlying error:", error.underlyingError); // Log original error if needed
     } else if (error instanceof UnsupportedFeatureError) {
-      console.error(`Unsupported Feature Error: ${error.provider} does not support ${error.feature}.`)
+      console.error(
+        `Unsupported Feature Error: ${error.provider || error.customProvider} does not support ${error.feature}.`
+      )
       // e.g., Trying TTS with Groq, Embeddings with Anthropic
     } else if (error instanceof MappingError) {
       console.error(`Internal SDK Mapping Error: ${error.message}`)
@@ -669,12 +809,12 @@ Key exports include:
 
 - **Client:** `RosettaAI`
 - **Enums:** `Provider`
-- **Configuration:** `RosettaAIConfig`, `ProviderOptions`
+- **Configuration:** `RosettaAIConfig`, `ProviderOptions`, `CustomProviderConfig`, `ModelListingSourceConfig`
 - **Core Parameters:** `GenerateParams`, `EmbedParams`, `SpeechParams`, `TranscribeParams`, `TranslateParams`
-- **Core Results:** `GenerateResult`, `EmbedResult`, `TranscriptionResult`
+- **Core Results:** `GenerateResult`, `EmbedResult`, `TranscriptionResult`, `RosettaModel`, `RosettaModelList`
 - **Streaming:** `StreamChunk`, `AudioStreamChunk`
-- **Common Types:** `RosettaMessage`, `RosettaContentPart`, `RosettaImageData`, `RosettaAudioData`, `RosettaTool`, `RosettaToolCallRequest`, `TokenUsage`, `Citation`
-- **Errors:** `RosettaAIError`, `ConfigurationError`, `ProviderAPIError`, `UnsupportedFeatureError`, `MappingError`
+- **Common Types:** `ProviderKey`, `RosettaMessage`, `RosettaContentPart`, `RosettaImageData`, `RosettaAudioData`, `RosettaTool`, `RosettaToolCallRequest`, `TokenUsage`, `Citation`
+- **Errors:** `RosettaAIError`, `ConfigurationError`, `ProviderAPIError`, `UnsupportedFeatureError`, `MappingError`, `InvalidToolDefinitionError`, `ToolArgumentValidationError`
 
 ## Examples
 
@@ -687,13 +827,15 @@ Runnable examples demonstrating various features can be found in the `/examples`
 - `embeddings.ts`: Generating text embeddings.
 - `audio.ts`: Text-to-Speech and Speech-to-Text/Translation.
 - `structured-output.ts`: Requesting and validating JSON output.
+- `list-models.ts`: Listing available models for configured providers.
+- `custom-provider-*.ts`: Examples for integrating custom OpenAI-compatible providers (Novita, GPUStack, LM Studio).
 
 **To run an example:**
 
 1.  Ensure you have configured your API keys in a `.env` file (see Configuration).
 2.  Make sure any required sample files (e.g., `logo.png`, `sample_audio.mp3`) exist in the `examples` directory if needed by the specific example.
 3.  Run the build command: `npm run build`
-4.  Execute the example using: `npm run example:<name>` (e.g., `npm run example:basic`, `npm run example:stream`).
+4.  Execute the example using: `npm run example:<name>` (e.g., `npm run example:basic`, `npm run example:stream`, `npm run example:listmodels`).
 
 ## Development
 

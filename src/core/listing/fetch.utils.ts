@@ -1,6 +1,6 @@
-// src/core/listing/fetch.utils.ts (Simplified Example)
+// src/core/listing/fetch.utils.ts
 import { z } from 'zod'
-import { RosettaModel, RosettaModelList, Provider } from '../../types'
+import { RosettaModel, RosettaModelList, ProviderKey, Provider } from '../../types'
 import { ProviderAPIError, MappingError, RosettaAIError } from '../../errors'
 
 // Zod schema for the MINIMUM expected API response structure
@@ -25,20 +25,41 @@ const BaseApiResponseSchema = z
  */
 export async function fetchAndValidateModelsFromApi(
   url: string,
-  provider: Provider,
+  providerKey: ProviderKey, // Accept ProviderKey (string or enum)
   apiKey: string | undefined
 ): Promise<RosettaModelList> {
-  if (!apiKey) {
-    throw new ProviderAPIError(`API key for ${provider} is required but missing for model listing.`, provider, 401)
+  // --- API Key Check for Built-in Providers ---
+  // Check if the providerKey is one of the built-in Provider enum values
+  const isBuiltIn = Object.values(Provider).includes(providerKey as Provider)
+  if (isBuiltIn && !apiKey) {
+    // Throw the specific error the test expects
+    throw new ProviderAPIError(
+      `API key for ${providerKey} is required but missing for model listing.`,
+      providerKey
+      // No status code here as the error happens before the request
+    )
+  }
+
+  // API key might be optional for custom providers (e.g., local servers)
+  const headers: HeadersInit = {
+    Accept: 'application/json'
+  }
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`
+  } else {
+    // Check if API key is actually required (e.g., not a local server)
+    // This is a basic check; more robust logic might be needed based on URL patterns
+    if (!url.startsWith('http://localhost') && !url.startsWith('http://127.0.0.1')) {
+      console.warn(`API key is missing for non-local API endpoint: ${url}. Request might fail.`)
+      // Warning for non-local custom providers without keys is still reasonable
+      console.warn(`API key is missing for non-local custom API endpoint: ${url}. Request might fail.`)
+    }
   }
 
   try {
     const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: 'application/json'
-      }
+      headers: headers
     })
 
     if (!response.ok) {
@@ -48,7 +69,11 @@ export async function fetchAndValidateModelsFromApi(
       } catch {
         /* Ignore body parsing errors */
       }
-      throw new ProviderAPIError(`Failed to fetch models from ${provider} API: ${errorBody}`, provider, response.status)
+      throw new ProviderAPIError(
+        `Failed to fetch models from ${providerKey} API: ${errorBody}`,
+        providerKey,
+        response.status
+      )
     }
 
     const rawJson = await response.json()
@@ -56,10 +81,10 @@ export async function fetchAndValidateModelsFromApi(
     // --- CRITICAL VALIDATION STEP ---
     const validationResult = BaseApiResponseSchema.safeParse(rawJson)
     if (!validationResult.success) {
-      console.error(`Validation Error for ${provider} API Response (${url}):`, validationResult.error.errors)
+      console.error(`Validation Error for ${providerKey} API Response (${url}):`, validationResult.error.errors)
       throw new MappingError(
-        `Invalid API response structure received from ${provider}.`,
-        provider,
+        `Invalid API response structure received from ${providerKey}.`,
+        providerKey,
         'fetchAndValidateModelsFromApi validation',
         validationResult.error // Include ZodError for details
       )
@@ -90,7 +115,7 @@ export async function fetchAndValidateModelsFromApi(
                 vision: rawModel.properties.vision
               }
             : undefined,
-          provider: provider,
+          provider: providerKey,
           rawData: rawModel // Store original
         }
       }
@@ -108,8 +133,8 @@ export async function fetchAndValidateModelsFromApi(
     // Wrap fetch/parsing errors
     const message = error instanceof Error ? error.message : String(error)
     throw new ProviderAPIError(
-      `Network or parsing error fetching models for ${provider}: ${message}`,
-      provider,
+      `Network or parsing error fetching models for ${providerKey}: ${message}`,
+      providerKey,
       undefined,
       undefined,
       undefined,
