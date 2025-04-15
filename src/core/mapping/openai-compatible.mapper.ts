@@ -171,9 +171,7 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     }
 
     try {
-      console.log(`[${this.provider}] Calling API (via OpenAI SDK)... Params:`, JSON.stringify(openAIParams))
       const response = await this.openaiClient.chat.completions.create(openAIParams)
-      console.log(`[${this.provider}] Received response.`)
 
       // Map the OpenAI SDK response back to GenerateResult using common helper
       // Pass original tools for validation within mapFromOpenAIResponse
@@ -231,9 +229,7 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     }
 
     try {
-      console.log(`[${this.provider}] Calling API for stream (via OpenAI SDK)... Params:`, JSON.stringify(openAIParams))
       const stream = await this.openaiClient.chat.completions.create(openAIParams)
-      console.log(`[${this.provider}] Received stream.`)
 
       // Reuse the common OpenAI stream mapping logic
       // Pass Provider.OpenAI as the provider type expected by the common helper
@@ -277,9 +273,7 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
       const openAIEmbedParams = mapToOpenAIEmbedParams({ ...originalParams, model: modelId })
 
       // API Call
-      console.log(`[${this.provider}] Calling Embeddings API (via OpenAI SDK)... Model: ${modelId}`)
       const response = await this.openaiClient.embeddings.create(openAIEmbedParams)
-      console.log(`[${this.provider}] Received Embeddings response.`)
 
       // Response Mapping (using helper from openai.embed.mapper)
       return mapFromOpenAIEmbedResponse(response, modelId)
