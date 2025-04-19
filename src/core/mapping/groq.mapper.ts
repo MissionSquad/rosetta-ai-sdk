@@ -542,7 +542,7 @@ export class GroqMapper implements IProviderMapper {
 
   // --- TTS Mapping ---
   executeGenerateSpeech(
-    params: SpeechParams,
+    _params: SpeechParams,
     _apiKey: string | undefined,
     _customConfig: CustomProviderConfig,
     _originalParams: SpeechParams
