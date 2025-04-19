@@ -2,9 +2,10 @@ import {
   mapToGroqSttParams,
   mapToGroqTranslateParams,
   mapFromGroqTranscriptionResponse,
-  mapFromGroqTranslationResponse
+  mapFromGroqTranslationResponse,
+  mapToGroqTtsParams
 } from '../../../../src/core/mapping/groq.audio.mapper'
-import { TranscribeParams, TranslateParams, Provider } from '../../../../src/types'
+import { TranscribeParams, TranslateParams, Provider, SpeechParams } from '../../../../src/types'
 import Groq from 'groq-sdk'
 import { Uploadable } from 'groq-sdk/core'
 
@@ -241,6 +242,48 @@ describe('Groq Audio Mapper', () => {
         42
       )
       // warnSpy is restored in afterEach
+    })
+  })
+
+  describe('mapToGroqTtsParams', () => {
+    it('[Easy] should map basic parameters', () => {
+      const params: SpeechParams = {
+        provider: Provider.Groq,
+        model: 'playai-tts',
+        input: 'Hello world',
+        voice: 'Fritz-PlayAI'
+      }
+      const result = mapToGroqTtsParams(params)
+      expect(result.model).toBe('playai-tts')
+      expect(result.input).toBe('Hello world')
+      expect(result.voice).toBe('Fritz-PlayAI')
+      expect(result.response_format).toBe('wav')
+      expect(warnSpy).not.toHaveBeenCalled()
+    })
+
+    it('[Medium] should warn for unsupported voice', () => {
+      const params: SpeechParams = {
+        provider: Provider.Groq,
+        model: 'playai-tts',
+        input: 'Hello world',
+        voice: 'unsupported-voice'
+      }
+      const result = mapToGroqTtsParams(params)
+      expect(result.voice).toBe('unsupported-voice') // Still uses provided voice
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Groq TTS voice 'unsupported-voice' not recognized"))
+    })
+
+    it('[Medium] should warn and force wav format', () => {
+      const params: SpeechParams = {
+        provider: Provider.Groq,
+        model: 'playai-tts',
+        input: 'Hello world',
+        voice: 'Fritz-PlayAI',
+        responseFormat: 'mp3' // Unsupported format
+      }
+      const result = mapToGroqTtsParams(params)
+      expect(result.response_format).toBe('wav') // Forces wav format
+      expect(warnSpy).toHaveBeenCalledWith("Groq TTS only supports 'wav' format. Ignoring requested format 'mp3'.")
     })
   })
 

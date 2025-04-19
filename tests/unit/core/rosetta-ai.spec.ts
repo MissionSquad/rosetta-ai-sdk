@@ -59,6 +59,10 @@ import { prepareAudioUpload } from '../../../src/core/utils'
 jest.mock('../../../src/core/listing/model.lister')
 import { listModelsForProvider } from '../../../src/core/listing/model.lister'
 
+// Mock the Groq audio mapper for TTS tests
+jest.mock('../../../src/core/mapping/groq.audio.mapper')
+import * as GroqAudioMapper from '../../../src/core/mapping/groq.audio.mapper'
+
 // Mock implementation for prepareAudioUpload
 const mockPrepareAudioUpload = prepareAudioUpload as jest.Mock
 const mockAudioFile = { name: 'mock.mp3', type: 'audio/mpeg', [Symbol.toStringTag]: 'File' }
@@ -1088,6 +1092,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
   describe('generateSpeech', () => {
     let rosetta: RosettaAI
     let mockOpenAIClientInstance: any
+    let mockGroqClientInstance: any
 
     beforeEach(() => {
       mockOpenAIClientInstance = {
@@ -1097,12 +1102,29 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
           }
         }
       }
+      mockGroqClientInstance = {
+        audio: {
+          speech: {
+            create: jest.fn().mockResolvedValue({ arrayBuffer: async () => Buffer.from('groq-speech') })
+          }
+        }
+      }
       ;(OpenAI as jest.Mock).mockReturnValue(mockOpenAIClientInstance)
-      // Ensure Groq is configured for the unsupported test
+      ;(Groq as jest.Mock).mockReturnValue(mockGroqClientInstance)
+
+      // Mock the mapToGroqTtsParams function
+      ;(GroqAudioMapper.mapToGroqTtsParams as jest.Mock).mockReturnValue({
+        model: 'playai-tts',
+        input: 'Speak this with Groq',
+        voice: 'Fritz-PlayAI',
+        response_format: 'wav'
+      })
+
+      // Ensure Groq is configured for the tests
       rosetta = new RosettaAI({ openaiApiKey: 'key', groqApiKey: 'groq-key' })
     })
 
-    it('should call client speech create and return buffer', async () => {
+    it('should call client speech create and return buffer for OpenAI', async () => {
       const params: SpeechParams = {
         provider: Provider.OpenAI,
         input: 'Speak this',
@@ -1128,16 +1150,70 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       expect(result.toString()).toBe('speech')
     })
 
-    it('should throw UnsupportedFeatureError for non-OpenAI provider', async () => {
-      const params = { provider: Provider.Groq, input: 'Hi', voice: 'a' } as any
-      // Wrap async call
-      await expect(async () => rosetta.generateSpeech(params)).rejects.toThrow(UnsupportedFeatureError)
-      await expect(async () => rosetta.generateSpeech(params)).rejects.toThrow(
-        "Provider 'groq' does not support the requested feature: Text-to-Speech"
+    it('should call Groq client speech create and return buffer', async () => {
+      const params: SpeechParams = {
+        provider: Provider.Groq,
+        model: 'playai-tts',
+        input: 'Speak this with Groq',
+        voice: 'Fritz-PlayAI'
+      }
+      const checkUnsupportedSpy = jest.spyOn(rosetta as any, 'checkUnsupportedFeatures')
+
+      const result = await rosetta.generateSpeech(params)
+
+      expect(checkUnsupportedSpy).toHaveBeenCalledWith(
+        Provider.Groq,
+        expect.objectContaining({ provider: Provider.Groq }),
+        'Text-to-Speech', // Feature name
+        false // isAzure
+      )
+      expect(GroqAudioMapper.mapToGroqTtsParams).toHaveBeenCalledWith(params)
+      expect(mockGroqClientInstance.audio.speech.create).toHaveBeenCalledWith({
+        model: 'playai-tts',
+        input: 'Speak this with Groq',
+        voice: 'Fritz-PlayAI',
+        response_format: 'wav'
+      })
+      expect(result).toBeInstanceOf(Buffer)
+      expect(result.toString()).toBe('groq-speech')
+    })
+
+    it('[Easy] should use default TTS model for Groq if configured', async () => {
+      const rosettaWithDefault = new RosettaAI({
+        groqApiKey: 'key-groq',
+        defaultTtsModels: { [Provider.Groq]: 'custom-playai-tts' }
+      })
+      const params: SpeechParams = {
+        provider: Provider.Groq,
+        input: 'Speak this with Groq default model',
+        voice: 'Fritz-PlayAI'
+      }
+
+      // Need to get the client instance associated with rosettaWithDefault
+      const clientInstance = (Groq as jest.Mock).mock.results[1].value
+      clientInstance.audio.speech.create.mockResolvedValue({
+        arrayBuffer: async () => Buffer.from('groq-speech-custom')
+      })
+
+      // Mock the mapToGroqTtsParams function for this test
+      ;(GroqAudioMapper.mapToGroqTtsParams as jest.Mock).mockReturnValue({
+        model: 'custom-playai-tts',
+        input: 'Speak this with Groq default model',
+        voice: 'Fritz-PlayAI',
+        response_format: 'wav'
+      })
+
+      await rosettaWithDefault.generateSpeech(params)
+
+      expect(GroqAudioMapper.mapToGroqTtsParams).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'custom-playai-tts' })
+      )
+      expect(clientInstance.audio.speech.create).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'custom-playai-tts' })
       )
     })
 
-    it('[Easy] should use default TTS model if configured', async () => {
+    it('[Easy] should use default TTS model for OpenAI if configured', async () => {
       const rosettaWithDefault = new RosettaAI({
         openaiApiKey: 'key',
         defaultTtsModels: { [Provider.OpenAI]: 'tts-1-hd' }
@@ -1155,6 +1231,15 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
 
       expect(clientInstance.audio.speech.create).toHaveBeenCalledWith(
         expect.objectContaining({ model: 'tts-1-hd' }) // Check default model used
+      )
+    })
+
+    it('should throw UnsupportedFeatureError for unsupported provider', async () => {
+      const params = { provider: Provider.Anthropic, input: 'Hi', voice: 'a' } as any
+      // Wrap async call
+      await expect(async () => rosetta.generateSpeech(params)).rejects.toThrow(UnsupportedFeatureError)
+      await expect(async () => rosetta.generateSpeech(params)).rejects.toThrow(
+        "Provider 'anthropic' does not support the requested feature: Text-to-Speech"
       )
     })
   })
@@ -1264,6 +1349,34 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
         fail('Expected error chunk')
       }
       expect(mockOpenAIMapperInstance.wrapProviderError).toHaveBeenCalledWith(apiError, Provider.OpenAI)
+    })
+
+    it('[Medium] should yield error chunk if streamSpeech called for Groq', async () => {
+      // Create RosettaAI instance with Groq
+      const rosettaGroq = new RosettaAI({ groqApiKey: 'key-groq' })
+
+      // Setup test parameters
+      const params: SpeechParams = {
+        provider: Provider.Groq,
+        input: 'Stream this with Groq',
+        voice: 'Fritz-PlayAI',
+        model: 'playai-tts'
+      }
+
+      // Call the method and collect chunks
+      const stream = rosettaGroq.streamSpeech(params)
+      const chunks = await collectStreamChunks(stream)
+
+      // Verify error chunk
+      expect(chunks).toHaveLength(1)
+      expect(chunks[0].type).toBe('error')
+      // Type guard before accessing data
+      if (chunks[0].type === 'error') {
+        expect(chunks[0].data.error).toBeInstanceOf(UnsupportedFeatureError)
+        expect(chunks[0].data.error.message).toContain('Streaming Text-to-Speech')
+      } else {
+        fail('Expected error chunk')
+      }
     })
   })
 

@@ -1,11 +1,58 @@
-// Mappers for Groq Audio features (STT, Translate)
+// Mappers for Groq Audio features (TTS, STT, Translate)
 
 import Groq from 'groq-sdk'
 import { Uploadable as GroqUploadable } from 'groq-sdk/core'
-import { TranscribeParams, TranslateParams, TranscriptionResult } from '../../types'
+import { TranscribeParams, TranslateParams, TranscriptionResult, SpeechParams } from '../../types'
 import { safeGet } from '../utils'
 
-// --- Parameter Mapping ---
+// --- TTS Parameter Mapping ---
+
+export function mapToGroqTtsParams(params: SpeechParams): Groq.Audio.SpeechCreateParams {
+  // Validate voice parameter against supported voices
+  const supportedVoices = [
+    'Arista-PlayAI',
+    'Atlas-PlayAI',
+    'Basil-PlayAI',
+    'Briggs-PlayAI',
+    'Calum-PlayAI',
+    'Celeste-PlayAI',
+    'Cheyenne-PlayAI',
+    'Chip-PlayAI',
+    'Cillian-PlayAI',
+    'Deedee-PlayAI',
+    'Fritz-PlayAI',
+    'Gail-PlayAI',
+    'Indigo-PlayAI',
+    'Mamaw-PlayAI',
+    'Mason-PlayAI',
+    'Mikail-PlayAI',
+    'Mitch-PlayAI',
+    'Quinn-PlayAI',
+    'Thunder-PlayAI'
+  ]
+
+  if (!supportedVoices.includes(params.voice)) {
+    console.warn(
+      `Groq TTS voice '${params.voice}' not recognized. Supported voices: ${supportedVoices.join(
+        ', '
+      )}. Using default 'Fritz-PlayAI'.`
+    )
+  }
+
+  // Only support 'wav' format for now
+  if (params.responseFormat && params.responseFormat !== 'wav') {
+    console.warn(`Groq TTS only supports 'wav' format. Ignoring requested format '${params.responseFormat}'.`)
+  }
+
+  return {
+    model: params.model!, // e.g., 'playai-tts'
+    voice: params.voice,
+    input: params.input,
+    response_format: 'wav' // Only wav is supported for now
+  }
+}
+
+// --- STT/Translation Parameter Mapping ---
 
 export function mapToGroqSttParams(
   params: TranscribeParams,

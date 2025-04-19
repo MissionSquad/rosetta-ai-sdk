@@ -76,16 +76,17 @@ export interface EmbedParams {
  * Parameters for generating speech (Text-to-Speech).
  */
 export interface SpeechParams {
-  /** The provider to use for this request (currently primarily OpenAI). */
-  provider: Provider.OpenAI // Restrict for now as it's the main provider with this
-  /** The specific TTS model ID. Optional if a default is configured (e.g., 'tts-1'). */
+  /** The provider to use for this request (currently OpenAI and Groq). */
+  provider: Provider.OpenAI | Provider.Groq
+  /** The specific TTS model ID. Optional if a default is configured (e.g., 'tts-1' for OpenAI, 'playai-tts' for Groq). */
   model?: string
   /** The text to synthesize into speech. */
   input: string
-  /** The voice to use (provider-specific options, e.g., 'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer' for OpenAI). */
+  /** The voice to use (provider-specific options, e.g., 'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer' for OpenAI,
+   * or 'Fritz-PlayAI', 'Arista-PlayAI', etc. for Groq). */
   voice: string
-  /** The desired audio output format (e.g., 'mp3', 'opus'). Defaults to 'mp3'. */
-  responseFormat?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm' // Check OpenAI specifics
+  /** The desired audio output format (e.g., 'mp3', 'opus', 'wav'). Defaults to 'mp3' for OpenAI, 'wav' for Groq. */
+  responseFormat?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm'
   /** Optional: Speed of the generated speech (0.25 to 4.0). Defaults to 1.0. */
   speed?: number
   /** Provider-specific options overriding global config for this call. */

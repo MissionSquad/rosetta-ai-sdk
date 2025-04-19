@@ -373,11 +373,20 @@ app.post('/api/embed', async (req: Request, res: Response, next: NextFunction) =
 app.post('/api/tts', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const params: SpeechParams = req.body
-    if (params.provider !== Provider.OpenAI) {
-      return res.status(400).json({ error: "TTS currently only supports the 'openai' provider." })
+    if (params.provider !== Provider.OpenAI && params.provider !== Provider.Groq) {
+      return res.status(400).json({ error: "TTS currently only supports the 'openai' and 'groq' providers." })
     }
     if (!params.input || !params.voice) {
       return res.status(400).json({ error: 'Missing required parameters: input, voice' })
+    }
+
+    // Validate format for Groq (only supports 'wav')
+    if (params.provider === Provider.Groq) {
+      if (params.responseFormat && params.responseFormat !== 'wav') {
+        return res.status(400).json({ error: "Groq TTS only supports 'wav' format." })
+      }
+      // Force 'wav' format for Groq
+      params.responseFormat = 'wav'
     }
 
     const audioBuffer = await rosetta.generateSpeech(params)

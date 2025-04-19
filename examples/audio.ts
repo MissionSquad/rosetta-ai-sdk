@@ -54,12 +54,15 @@ async function runAudioTests() {
 
   // --- Test Text-to-Speech (TTS) ---
   console.log('\n--- Testing Text-to-Speech (TTS) ---')
+
+  // OpenAI TTS
   if (configuredProviders.includes(Provider.OpenAI)) {
     try {
+      console.log('\n--- Testing OpenAI Text-to-Speech ---')
       const ttsParams: SpeechParams = {
-        provider: Provider.OpenAI, // TTS currently mapped via OpenAI
+        provider: Provider.OpenAI,
         input:
-          'Hello from the Rosetta AI software development kit! This is a test of the text to speech functionality.',
+          'Hello from the Rosetta AI software development kit! This is a test of the text to speech functionality with OpenAI.',
         voice: 'nova', // Choose a voice (alloy, echo, fable, onyx, nova, shimmer)
         responseFormat: 'mp3' // Specify output format
         // model: 'tts-1' // Optional: specify model if not default
@@ -72,13 +75,13 @@ async function runAudioTests() {
       // Save the generated audio file asynchronously
       await fs.writeFile(generatedSpeechFilePath, audioBuffer)
       console.log(
-        `Speech saved to: ${path.relative(process.cwd(), generatedSpeechFilePath)} (${(
+        `OpenAI speech saved to: ${path.relative(process.cwd(), generatedSpeechFilePath)} (${(
           audioBuffer.length / 1024
         ).toFixed(1)} KB)`
       )
 
       // Optional: Test streaming TTS
-      console.log('\nTesting Streaming TTS...')
+      console.log('\nTesting OpenAI Streaming TTS...')
       const stream = rosetta.streamSpeech(ttsParams)
       const streamFilePath = path.join(outputDir, 'streamed_speech.mp3')
       const fileWriteStream = (await fs.open(streamFilePath, 'w')).createWriteStream() // Get WriteStream from file handle
@@ -125,20 +128,67 @@ async function runAudioTests() {
     } catch (error) {
       // Demonstrate more specific error handling
       if (error instanceof ConfigurationError) {
-        console.error(`TTS Configuration Error: ${error.message}`)
+        console.error(`OpenAI TTS Configuration Error: ${error.message}`)
       } else if (error instanceof UnsupportedFeatureError) {
-        console.error(`TTS Feature Error: ${error.message}`)
+        console.error(`OpenAI TTS Feature Error: ${error.message}`)
       } else if (error instanceof ProviderAPIError) {
-        console.error(`TTS Provider API Error (${error.provider}): ${error.statusCode ?? 'N/A'} - ${error.message}`)
+        console.error(
+          `OpenAI TTS Provider API Error (${error.provider}): ${error.statusCode ?? 'N/A'} - ${error.message}`
+        )
         // console.error("Underlying TTS Provider Error:", error.underlyingError); // Optional: log more details
       } else if (error instanceof RosettaAIError) {
-        console.error(`TTS Error: ${error.name} - ${error.message}`)
+        console.error(`OpenAI TTS Error: ${error.name} - ${error.message}`)
       } else {
-        console.error(`Unexpected TTS error:`, error)
+        console.error(`Unexpected OpenAI TTS error:`, error)
       }
     }
   } else {
-    console.warn('Skipping TTS tests: OpenAI provider not configured.')
+    console.warn('Skipping OpenAI TTS tests: OpenAI provider not configured.')
+  }
+
+  // Groq TTS
+  if (configuredProviders.includes(Provider.Groq)) {
+    try {
+      console.log('\n--- Testing Groq Text-to-Speech ---')
+      const groqTtsParams: SpeechParams = {
+        provider: Provider.Groq,
+        model: 'playai-tts', // Groq TTS model
+        input:
+          'Hello from the Rosetta AI software development kit! This is a test of the text to speech functionality with Groq.',
+        voice: 'Fritz-PlayAI', // One of the supported Groq voices
+        responseFormat: 'wav' // Only wav is supported for Groq
+      }
+      console.log(`Generating speech with Groq for: "${groqTtsParams.input.substring(0, 50)}..."`)
+
+      // Generate speech
+      const audioBuffer = await rosetta.generateSpeech(groqTtsParams)
+
+      // Save the generated audio file
+      const groqSpeechFilePath = path.join(outputDir, 'groq_generated_speech.wav')
+      await fs.writeFile(groqSpeechFilePath, audioBuffer)
+      console.log(
+        `Groq speech saved to: ${path.relative(process.cwd(), groqSpeechFilePath)} (${(
+          audioBuffer.length / 1024
+        ).toFixed(1)} KB)`
+      )
+    } catch (error) {
+      // Error handling
+      if (error instanceof ConfigurationError) {
+        console.error(`Groq TTS Configuration Error: ${error.message}`)
+      } else if (error instanceof UnsupportedFeatureError) {
+        console.error(`Groq TTS Feature Error: ${error.message}`)
+      } else if (error instanceof ProviderAPIError) {
+        console.error(
+          `Groq TTS Provider API Error (${error.provider}): ${error.statusCode ?? 'N/A'} - ${error.message}`
+        )
+      } else if (error instanceof RosettaAIError) {
+        console.error(`Groq TTS Error: ${error.name} - ${error.message}`)
+      } else {
+        console.error(`Unexpected Groq TTS error:`, error)
+      }
+    }
+  } else {
+    console.warn('Skipping Groq TTS tests: Groq provider not configured.')
   }
 
   // --- Test Speech-to-Text (STT) & Translation ---

@@ -46,6 +46,7 @@ import { AzureOpenAIMapper } from './mapping/azure.openai.mapper'
 
 import { prepareAudioUpload } from './utils'
 import { listModelsForProvider } from './listing/model.lister'
+import * as GroqAudioMapper from './mapping/groq.audio.mapper'
 
 dotenvConfig()
 
@@ -102,6 +103,7 @@ export class RosettaAI {
       },
       defaultTtsModels: {
         [Provider.OpenAI]: config.defaultTtsModels?.[Provider.OpenAI] ?? loadEnv('ROSETTA_DEFAULT_TTS_OPENAI_MODEL'),
+        [Provider.Groq]: config.defaultTtsModels?.[Provider.Groq] ?? loadEnv('ROSETTA_DEFAULT_TTS_GROQ_MODEL'),
         ...config.defaultTtsModels
       },
       defaultSttModels: {
@@ -625,6 +627,15 @@ export class RosettaAI {
   /** Generates speech audio. Supports built-in (OpenAI) and custom providers. */
   public async generateSpeech(params: SpeechParams): Promise<Buffer> {
     const providerKey = params.provider
+
+    // Check for known unsupported built-in providers first
+    if (this.isBuiltInProvider(providerKey)) {
+      const provider = providerKey as Provider
+      if (![Provider.OpenAI, Provider.Groq].includes(provider)) {
+        throw new UnsupportedFeatureError(provider, 'Text-to-Speech')
+      }
+    }
+
     try {
       const mapper = this.getMapper(providerKey)
       const isCustom = !this.isBuiltInProvider(providerKey)
@@ -664,6 +675,12 @@ export class RosettaAI {
           speed: effectiveParams.speed ?? 1.0
         }
         const response = await (client as OpenAI | AzureOpenAI).audio.speech.create(ttsParams)
+        return Buffer.from(await response.arrayBuffer())
+      } else if (providerKey === Provider.Groq) {
+        // Built-in Groq Execution Path
+        const client = this.getClientForProvider(Provider.Groq)
+        const ttsParams = GroqAudioMapper.mapToGroqTtsParams(effectiveParams)
+        const response = await (client as Groq).audio.speech.create(ttsParams)
         return Buffer.from(await response.arrayBuffer())
       } else {
         throw new UnsupportedFeatureError(providerKey, 'Text-to-Speech')
@@ -1092,10 +1109,10 @@ export class RosettaAI {
     ) {
       throw new UnsupportedFeatureError(provider, featureName)
     }
-    if (
-      (featureName === 'Text-to-Speech' || featureName === 'Streaming Text-to-Speech') &&
-      provider !== Provider.OpenAI
-    ) {
+    if (featureName === 'Text-to-Speech' && ![Provider.OpenAI, Provider.Groq].includes(provider)) {
+      throw new UnsupportedFeatureError(provider, featureName)
+    }
+    if (featureName === 'Streaming Text-to-Speech' && provider !== Provider.OpenAI) {
       throw new UnsupportedFeatureError(provider, featureName)
     }
     if (featureName === 'Embeddings' && ![Provider.Google, Provider.OpenAI, Provider.Groq].includes(provider)) {
