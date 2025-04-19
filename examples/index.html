@@ -480,8 +480,8 @@
               <td>✅</td>
               <td>❌</td>
               <td>❌</td>
-              <td>❌</td>
-              <td>Via OpenAI/Azure Audio API</td>
+              <td>✅</td>
+              <td>Via OpenAI/Azure and Groq Audio APIs</td>
             </tr>
             <tr>
               <td>STT</td>
@@ -856,9 +856,9 @@ axios.post('/api/embed', {
         <h3>Text-to-Speech (`/api/tts`)</h3>
         <div class="example-interaction">
           <label for="provider-tts">Provider:</label>
-          <select id="provider-tts" name="provider" disabled>
+          <select id="provider-tts" name="provider">
             <option value="openai" selected>OpenAI / Azure</option>
-            <!-- Add other providers if supported by backend -->
+            <option value="groq">Groq</option>
           </select>
           <label for="model-tts">Model (optional, uses backend default):</label>
           <input type="text" id="model-tts" name="model" placeholder="e.g., tts-1">
@@ -867,10 +867,14 @@ axios.post('/api/embed', {
           <label for="voice-tts">Voice:</label>
           <select id="voice-tts" name="voice">
             <option value="alloy" selected>Alloy</option>
+            <option value="ash">Ash</option>
+            <option value="ballad">Ballad</option>
+            <option value="coral">Coral</option>
             <option value="echo">Echo</option>
             <option value="fable">Fable</option>
-            <option value="onyx">Onyx</option>
             <option value="nova">Nova</option>
+            <option value="onyx">Onyx</option>
+            <option value="sage">Sage</option>
             <option value="shimmer">Shimmer</option>
           </select>
           <label for="format-tts">Response Format:</label>
@@ -879,6 +883,8 @@ axios.post('/api/embed', {
             <option value="opus">Opus</option>
             <option value="aac">AAC</option>
             <option value="flac">FLAC</option>
+            <option value="wav">WAV</option>
+            <option value="pcm">PCM</option>
           </select>
           <button id="run-tts">Run TTS</button>
           <div class="loader" id="loader-tts"></div>
@@ -893,11 +899,16 @@ axios.post('/api/embed', {
         <details class="code-snippet-details">
           <summary class="code-snippet-summary">Show Code Snippet</summary>
           <pre><code class="language-javascript" id="code-tts">// Frontend JS using axios
-const provider = document.getElementById('provider-tts').value; // Should be 'openai'
+const provider = document.getElementById('provider-tts').value;
 const model = document.getElementById('model-tts').value || undefined;
 const input = document.getElementById('input-tts').value;
 const voice = document.getElementById('voice-tts').value;
-const responseFormat = document.getElementById('format-tts').value;
+let responseFormat = document.getElementById('format-tts').value;
+
+// Ensure WAV format for Groq
+if (provider === 'groq') {
+  responseFormat = 'wav'; // Groq only supports WAV
+}
 
 axios.post('/api/tts', {
   provider,
@@ -1244,8 +1255,29 @@ axios.post('/api/translate', formData, {
           });
 
           if (id === 'provider-tts') {
-            select.innerHTML = '<option value="openai" selected>OpenAI / Azure</option>';
-            select.disabled = !configuredProviders.includes('openai');
+            // For TTS, we need to handle both OpenAI and Groq
+            const ttsOptions = [];
+            
+            if (configuredProviders.includes('openai')) {
+              ttsOptions.push('<option value="openai" selected>OpenAI / Azure</option>');
+            }
+            
+            if (configuredProviders.includes('groq')) {
+              // If OpenAI is not configured but Groq is, make Groq selected
+              const selected = !configuredProviders.includes('openai') ? ' selected' : '';
+              ttsOptions.push(`<option value="groq"${selected}>Groq</option>`);
+            }
+            
+            if (ttsOptions.length > 0) {
+              select.innerHTML = ttsOptions.join('');
+              select.disabled = false;
+            } else {
+              select.innerHTML = '<option value="">No TTS providers configured</option>';
+              select.disabled = true;
+            }
+            
+            // Initialize the TTS UI based on the selected provider
+            updateTtsUI();
           }
 
           if (providersToShow.length === 0 && id !== 'provider-tts') {
@@ -1294,8 +1326,88 @@ axios.post('/api/translate', formData, {
         }
       }
 
+      // --- TTS Provider-specific UI Updates ---
+      function updateTtsUI() {
+        const provider = document.getElementById('provider-tts').value;
+        const voiceSelect = document.getElementById('voice-tts');
+        const formatSelect = document.getElementById('format-tts');
+        
+        // Clear existing options
+        voiceSelect.innerHTML = '';
+        
+        if (provider === 'groq') {
+          // Groq voices
+          const groqVoices = [
+            'Arista-PlayAI', 'Atlas-PlayAI', 'Basil-PlayAI', 'Briggs-PlayAI', 
+            'Calum-PlayAI', 'Celeste-PlayAI', 'Cheyenne-PlayAI', 'Chip-PlayAI', 
+            'Cillian-PlayAI', 'Deedee-PlayAI', 'Fritz-PlayAI', 'Gail-PlayAI', 
+            'Indigo-PlayAI', 'Mamaw-PlayAI', 'Mason-PlayAI', 'Mikail-PlayAI', 
+            'Mitch-PlayAI', 'Quinn-PlayAI', 'Thunder-PlayAI'
+          ];
+          
+          groqVoices.forEach(voice => {
+            const option = document.createElement('option');
+            option.value = voice;
+            option.textContent = voice;
+            voiceSelect.appendChild(option);
+          });
+          
+          // Groq only supports WAV format
+          formatSelect.value = 'wav';
+          formatSelect.disabled = true;
+          
+          // Add a note about format restriction
+          const formatNote = document.getElementById('format-note');
+          if (!formatNote) {
+            const note = document.createElement('div');
+            note.id = 'format-note';
+            note.className = 'note';
+            note.innerHTML = '<strong>Note:</strong> Groq TTS only supports WAV format.';
+            formatSelect.parentNode.insertBefore(note, formatSelect.nextSibling);
+          }
+        } else {
+          // OpenAI voices
+          const openaiVoices = [
+            { value: 'alloy', name: 'Alloy' },
+            { value: 'ash', name: 'Ash' },
+            { value: 'ballad', name: 'Ballad' },
+            { value: 'coral', name: 'Coral' },
+            { value: 'echo', name: 'Echo' },
+            { value: 'fable', name: 'Fable' },
+            { value: 'nova', name: 'Nova' },
+            { value: 'onyx', name: 'Onyx' },
+            { value: 'sage', name: 'Sage' },
+            { value: 'shimmer', name: 'Shimmer' }
+          ];
+          
+          openaiVoices.forEach(voice => {
+            const option = document.createElement('option');
+            option.value = voice.value;
+            option.textContent = voice.name;
+            voiceSelect.appendChild(option);
+          });
+          
+          // Enable format selection for OpenAI
+          formatSelect.disabled = false;
+          
+          // Remove format note if it exists
+          const formatNote = document.getElementById('format-note');
+          if (formatNote) {
+            formatNote.remove();
+          }
+        }
+      }
+
       // --- Event Listeners ---
       fetchConfig(); // Fetch config on load
+      
+      // Add event listener for TTS provider change
+      document.getElementById('provider-tts')?.addEventListener('change', updateTtsUI);
+      
+      // Initialize TTS UI based on default provider
+      document.addEventListener('DOMContentLoaded', function() {
+        updateTtsUI();
+      });
 
       // Generate Button
       document.getElementById('run-generate')?.addEventListener('click', async () => {

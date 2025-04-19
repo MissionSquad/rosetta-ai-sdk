@@ -27,9 +27,11 @@ import {
   EmbedResult,
   TranscribeParams,
   TranslateParams,
-  TranscriptionResult
+  TranscriptionResult,
+  SpeechParams
 } from '../../types'
 import { MappingError, UnsupportedFeatureError, ProviderAPIError, RosettaAIError } from '../../errors'
+import { CustomProviderConfig } from '../../types/custom.types'
 import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
 import { mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
@@ -536,6 +538,18 @@ export class GroqMapper implements IProviderMapper {
 
   mapFromEmbedResponse(response: Groq.Embeddings.CreateEmbeddingResponse, modelId: string): EmbedResult {
     return GroqEmbedMapper.mapFromGroqEmbedResponse(response, modelId)
+  }
+
+  // --- TTS Mapping ---
+  executeGenerateSpeech(
+    _params: SpeechParams,
+    _apiKey: string | undefined,
+    _customConfig: CustomProviderConfig,
+    _originalParams: SpeechParams
+  ): Promise<Buffer> {
+    // This method will be called by RosettaAI.generateSpeech for custom providers
+    // For built-in providers like Groq, we don't need to implement this
+    throw new MappingError('executeGenerateSpeech should not be called for built-in providers', this.provider)
   }
 
   // --- Audio Mapping ---
