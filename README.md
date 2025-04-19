@@ -48,7 +48,7 @@ This matrix provides a general guide to feature support across providers. Provid
 | JSON Mode           |       ✅       |    ❌     |   ⚠️   |  ⚠️  |           ✅           | OpenAI/Azure best; others via prompt   |
 | Grounding/Citations |       ❌       |    ❌     |   ✅   |  ❌  |           ❌           | Via Google Search tool integration     |
 | Thinking Steps      |       ❌       |    ✅     |   ❌   |  ❌  |           ❌           | Anthropic specific feature             |
-| TTS                 |       ✅       |    ❌     |   ❌   |  ❌  |           ❌           | Via OpenAI/Azure Audio API             |
+| TTS                 |       ✅       |    ❌     |   ❌   |  ✅  |           ❌           | Via OpenAI/Azure and Groq Audio APIs   |
 | STT                 |       ✅       |    ❌     |   ⚠️   |  ✅  |           ❌           | Google requires separate Speech client |
 | STT (Translate)     |       ✅       |    ❌     |   ❌   |  ✅  |           ❌           | To English                             |
 | Model Listing       |       ✅       |    ✅     |   ✅   |  ✅  |           ✅           | Custom via OpenAI-compat `/models`     |
