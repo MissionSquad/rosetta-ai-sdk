@@ -317,9 +317,29 @@ export class RosettaAI {
     return mapper
   }
 
-  /** @internal Gets the underlying SDK client instance for a **built-in** provider. Throws if called for a custom provider. */
-  private getClientForProvider(provider: Provider): Anthropic | GoogleGenerativeAI | Groq | OpenAI | AzureOpenAI {
-    // This method ONLY works for built-in Provider enum values
+  /**
+   * @internal Gets the underlying SDK client instance for a **built-in** provider.
+   * Throws if called for a custom provider or if the provider is not recognized.
+   */
+  private getClientForProvider(providerKey: ProviderKey): Anthropic | GoogleGenerativeAI | Groq | OpenAI | AzureOpenAI {
+    // Convert string provider keys to enum values if possible
+    let provider: Provider
+
+    if (typeof providerKey === 'string') {
+      // Check if the string matches a built-in provider (case-insensitive)
+      const normalizedKey = providerKey.toLowerCase()
+      const matchedProvider = Object.values(Provider).find(enumValue => enumValue.toLowerCase() === normalizedKey)
+
+      if (!matchedProvider) {
+        throw new RosettaAIError(`Unsupported built-in provider: ${providerKey}`)
+      }
+
+      provider = matchedProvider
+    } else {
+      provider = providerKey
+    }
+
+    // Now use the provider enum value to get the client
     switch (provider) {
       case Provider.Anthropic:
         if (!this.anthropicClient) throw this.providerNotConfigured(provider)
@@ -342,9 +362,24 @@ export class RosettaAI {
     }
   }
 
-  /** @internal Checks if a provider key refers to a built-in provider. */
+  /**
+   * @internal Checks if a provider key refers to a built-in provider.
+   * Handles both enum values and string representations of enum values.
+   */
   private isBuiltInProvider(providerKey: ProviderKey): providerKey is Provider {
-    return Object.values(Provider).includes(providerKey as Provider)
+    // First check if it's directly a Provider enum value
+    if (Object.values(Provider).includes(providerKey as Provider)) {
+      return true
+    }
+
+    // If it's a string, check if it matches any Provider enum value
+    if (typeof providerKey === 'string') {
+      // Convert to lowercase for case-insensitive comparison
+      const normalizedKey = providerKey.toLowerCase()
+      return Object.values(Provider).some(enumValue => enumValue.toLowerCase() === normalizedKey)
+    }
+
+    return false
   }
 
   /**
@@ -1044,9 +1079,10 @@ export class RosettaAI {
     if (!this.googleClient) {
       throw this.providerNotConfigured(Provider.Google)
     }
-    const apiVersion =
-      requestOptions?.googleApiVersion ?? this.config.providerOptions?.[Provider.Google]?.googleApiVersion
-    const baseUrl = requestOptions?.baseURL ?? this.config.providerOptions?.[Provider.Google]?.baseURL
+    // Get provider options from the config, handling both enum and string provider keys
+    const providerOptions = this.config.providerOptions?.[Provider.Google] ?? {}
+    const apiVersion = requestOptions?.googleApiVersion ?? providerOptions.googleApiVersion
+    const baseUrl = requestOptions?.baseURL ?? providerOptions.baseURL
 
     if (baseUrl) {
       console.warn(
