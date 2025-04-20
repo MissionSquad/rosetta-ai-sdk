@@ -28,9 +28,10 @@ export async function listModelsForProvider(
     apiKey?: string
     groqClient?: Groq // Pass Groq client if available for built-in Groq
     customConfig?: CustomProviderConfig // Pass custom config if providerKey is custom
+    isAzureOpenAI?: boolean // Flag indicating if we're using Azure OpenAI
   }
 ): Promise<RosettaModelList> {
-  const { sourceConfig, apiKey, groqClient, customConfig } = config
+  const { sourceConfig, apiKey, groqClient, customConfig, isAzureOpenAI } = config
   let sourceType: ModelListingSourceType
   let finalUrl: string | undefined
   const isCustom = !!customConfig
@@ -68,8 +69,24 @@ export async function listModelsForProvider(
       sourceType = 'apiEndpoint'
       finalUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/models' // Updated Google URL
     } else if (provider === Provider.OpenAI) {
+      // For OpenAI, handle Azure OpenAI differently
       sourceType = 'apiEndpoint'
-      finalUrl = 'https://api.openai.com/v1/models' // Standard OpenAI URL
+
+      // If no URL is provided in sourceConfig and we're using Azure OpenAI,
+      // we should have received a URL from the caller that includes the Azure endpoint
+      if (isAzureOpenAI) {
+        // If we don't have a URL at this point, it means the caller didn't provide one
+        // This is unexpected since the caller should have created a sourceConfig with the Azure URL
+        if (!finalUrl) {
+          console.warn(
+            'RosettaAI Warning: Azure OpenAI is active but no deployments endpoint URL was provided. Falling back to standard OpenAI URL, which will likely fail with Azure key.'
+          )
+          finalUrl = 'https://api.openai.com/v1/models' // Fallback, but will likely fail
+        }
+      } else {
+        // Standard OpenAI
+        finalUrl = 'https://api.openai.com/v1/models'
+      }
     } else {
       throw new ConfigurationError(`Model listing source type for provider ${providerKey} could not be determined.`)
     }
@@ -118,8 +135,81 @@ export async function listModelsForProvider(
         if (!isCustom && !apiKey) {
           throw new ConfigurationError(`API key for ${providerKey} is required but missing for model listing.`)
         }
-        // Call fetch utility, passing the providerKey (built-in or custom)
-        return await fetchAndValidateModelsFromApi(finalUrl, providerKey, apiKey)
+
+        // Special handling for Azure OpenAI response format
+        if (isAzureOpenAI) {
+          try {
+            console.log(`RosettaAI: Fetching Azure OpenAI deployments from: ${finalUrl}`)
+            const response = await fetch(finalUrl, {
+              method: 'GET',
+              headers: {
+                Accept: 'application/json',
+                'api-key': apiKey || '' // Azure uses 'api-key' header instead of 'Authorization: Bearer'
+              }
+            })
+
+            if (!response.ok) {
+              let errorBody = `Status: ${response.status}`
+              try {
+                errorBody = await response.text()
+              } catch {
+                /* Ignore body parsing errors */
+              }
+              throw new ProviderAPIError(
+                `Failed to fetch models from Azure OpenAI API: ${errorBody}`,
+                providerKey,
+                response.status
+              )
+            }
+
+            const azureData = await response.json()
+
+            // Transform Azure OpenAI deployments format to match OpenAI models format
+            if (Array.isArray(azureData.data)) {
+              const models: RosettaModel[] = azureData.data.map(
+                (deployment: any): RosettaModel => {
+                  return {
+                    id: deployment.id || deployment.model,
+                    object: 'model',
+                    owned_by: 'azure',
+                    created: deployment.created ? new Date(deployment.created).getTime() / 1000 : undefined,
+                    active: true, // Assume all deployments are active
+                    provider: providerKey,
+                    rawData: deployment
+                  }
+                }
+              )
+
+              return {
+                object: 'list',
+                data: models
+              }
+            } else {
+              throw new MappingError(
+                `Invalid Azure OpenAI API response structure: expected array in 'data' field.`,
+                providerKey,
+                'Azure deployments response format'
+              )
+            }
+          } catch (error) {
+            if (error instanceof RosettaAIError) {
+              throw error
+            }
+            // Wrap other errors
+            const message = error instanceof Error ? error.message : String(error)
+            throw new ProviderAPIError(
+              `Error fetching Azure OpenAI deployments: ${message}`,
+              providerKey,
+              undefined,
+              undefined,
+              undefined,
+              error
+            )
+          }
+        } else {
+          // Standard API endpoint handling (OpenAI, Google, custom providers)
+          return await fetchAndValidateModelsFromApi(finalUrl, providerKey, apiKey)
+        }
 
       default:
         const _exhaustiveCheck: never = sourceType
