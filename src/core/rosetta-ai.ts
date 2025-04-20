@@ -921,20 +921,49 @@ export class RosettaAI {
 
     // Handle built-in providers
     if (this.isBuiltInProvider(providerKey)) {
-      const listConfig = {
-        sourceConfig: sourceConfig ?? this.config.modelListingConfig?.[providerKey],
-        apiKey:
-          providerKey === Provider.Anthropic
-            ? this.config.anthropicApiKey
-            : providerKey === Provider.Google
-            ? this.config.googleApiKey
-            : providerKey === Provider.Groq
-            ? this.config.groqApiKey
-            : providerKey === Provider.OpenAI
-            ? this.config.azureOpenAIApiKey ?? this.config.openaiApiKey // Prioritize Azure key
-            : undefined,
-        groqClient: this.groqClient
+      // Determine if we're using Azure OpenAI for the OpenAI provider
+      const isAzureOpenAI = providerKey === Provider.OpenAI && !!this.azureOpenAIClient
+
+      // Determine the appropriate API key based on provider and client type
+      let apiKey: string | undefined
+      if (providerKey === Provider.Anthropic) {
+        apiKey = this.config.anthropicApiKey
+      } else if (providerKey === Provider.Google) {
+        apiKey = this.config.googleApiKey
+      } else if (providerKey === Provider.Groq) {
+        apiKey = this.config.groqApiKey
+      } else if (providerKey === Provider.OpenAI) {
+        // For OpenAI, use the appropriate key based on which client is active
+        apiKey = isAzureOpenAI ? this.config.azureOpenAIApiKey : this.config.openaiApiKey
       }
+
+      // Create a custom source config for Azure OpenAI if needed
+      let effectiveSourceConfig = sourceConfig ?? this.config.modelListingConfig?.[providerKey]
+
+      // If using Azure OpenAI but no custom source config is provided, create one
+      if (isAzureOpenAI && !effectiveSourceConfig && this.config.azureOpenAIEndpoint) {
+        // Create a source config for Azure OpenAI deployments endpoint
+        const azureEndpoint = this.config.azureOpenAIEndpoint
+        const apiVersion = this.config.azureOpenAIApiVersion
+        if (azureEndpoint && apiVersion) {
+          const baseUrl = azureEndpoint.endsWith('/') ? azureEndpoint.slice(0, -1) : azureEndpoint
+          effectiveSourceConfig = {
+            type: 'apiEndpoint',
+            url: `${baseUrl}/openai/deployments?api-version=${apiVersion}`
+          }
+          console.log(
+            `RosettaAI: Using Azure OpenAI deployments endpoint for model listing: ${effectiveSourceConfig.url}`
+          )
+        }
+      }
+
+      const listConfig = {
+        sourceConfig: effectiveSourceConfig,
+        apiKey,
+        groqClient: this.groqClient,
+        isAzureOpenAI // Pass this flag to listModelsForProvider
+      }
+
       return listModelsForProvider(providerKey, listConfig)
     } else {
       // --- Custom Provider Model Listing ---
@@ -971,22 +1000,35 @@ export class RosettaAI {
    */
   public async listAllModels(): Promise<Partial<Record<ProviderKey, RosettaModelList | RosettaAIError>>> {
     const configuredProviders = this.getConfiguredProviders()
+    console.log(`RosettaAI: Listing models for all configured providers: ${configuredProviders.join(', ')}`)
     const results: Partial<Record<ProviderKey, RosettaModelList | RosettaAIError>> = {}
 
-    const promises = configuredProviders.map(async providerKey => {
+    // Process providers sequentially to avoid potential race conditions
+    // This is more reliable than parallel processing when multiple providers are configured
+    for (const providerKey of configuredProviders) {
       try {
-        const models = await this.listModels(providerKey) // Use the single provider method
+        console.log(`RosettaAI: Listing models for provider: ${providerKey}`)
+        const models = await this.listModels(providerKey)
+        console.log(`RosettaAI: Successfully listed ${models.data.length} models for ${providerKey}`)
         results[providerKey] = models
       } catch (error) {
-        console.error(`Error listing models for ${providerKey}:`, error)
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        console.error(`RosettaAI: Error listing models for ${providerKey}: ${errorMessage}`)
+        // Add detailed error information
+        if (error instanceof RosettaAIError) {
+          console.error(`RosettaAI: Error type: ${error.constructor.name}`)
+          if (error instanceof ProviderAPIError && error.statusCode) {
+            console.error(`RosettaAI: Status code: ${error.statusCode}`)
+          }
+        }
+        // Store the error in the results
         results[providerKey] =
           error instanceof RosettaAIError
             ? error
             : new ProviderAPIError(String(error), providerKey, undefined, undefined, undefined, error)
       }
-    })
+    }
 
-    await Promise.allSettled(promises) // Wait for all attempts
     return results
   }
 
