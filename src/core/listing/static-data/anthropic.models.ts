@@ -6,6 +6,165 @@ import { RosettaModelList, RosettaModel, Provider } from '../../../types'
 const rawAnthropicData = {
   object: 'list',
   data: [
+    // --- Claude 3.7 Sonnet ---
+    {
+      id: 'claude-3-7-sonnet-20250219',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 200000,
+      public_apps: null,
+      max_completion_tokens: 64000, // From "Max output" 64000 tokens
+      properties: {
+        description: 'Our most intelligent model',
+        strengths: 'Highest level of intelligence and capability with toggleable extended thinking',
+        multilingual: true, // From "Yes"
+        vision: true, // From "Yes"
+        extended_thinking: true, // From "Yes"
+        comparative_latency: 'Fast',
+        cost_input_mtok: 3.0, // From "$3.00"
+        cost_output_mtok: 15.0, // From "$15.00"
+        training_data_cutoff: 'Nov 2024',
+        extended_max_completion_tokens: null // Not specified in new data
+      }
+    },
+    {
+      id: 'claude-3-7-sonnet-latest', // Alias from the text
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 200000,
+      public_apps: null,
+      max_completion_tokens: 64000, // Mirrors claude-3-7-sonnet-20250219
+      properties: {
+        description: 'Our most intelligent model',
+        strengths: 'Highest level of intelligence and capability with toggleable extended thinking',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Fast',
+        cost_input_mtok: 3.0,
+        cost_output_mtok: 15.0,
+        training_data_cutoff: 'Nov 2024', // Assumed to be same as the underlying model
+        extended_max_completion_tokens: null
+      }
+    },
+    // --- Claude 3.5 Sonnet (Upgraded Version) ---
+    {
+      id: 'claude-3-5-sonnet-20241022', // Upgraded version from API list
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 200000,
+      public_apps: null,
+      max_completion_tokens: 8192, // From "Max output" 8192 tokens
+      properties: {
+        description: 'Our previous most intelligent model', // From "Claude 3.5 Sonnet" column
+        strengths: 'High level of intelligence and capability', // From "Claude 3.5 Sonnet" column
+        multilingual: true, // From "Yes"
+        vision: true, // From "Yes"
+        extended_thinking: false, // From "No"
+        comparative_latency: 'Fast', // From "Claude 3.5 Sonnet" column
+        cost_input_mtok: 3.0, // From "$3.00"
+        cost_output_mtok: 15.0, // From "$15.00"
+        training_data_cutoff: 'Apr 2024', // From "Claude 3.5 Sonnet" column
+        extended_max_completion_tokens: null // Not specified in new data
+      }
+    },
+    {
+      id: 'claude-3-5-sonnet-latest', // Alias from the text
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 200000,
+      public_apps: null,
+      max_completion_tokens: 8192, // Mirrors claude-3-5-sonnet-20241022
+      properties: {
+        description: 'Our previous most intelligent model',
+        strengths: 'High level of intelligence and capability',
+        multilingual: true,
+        vision: true,
+        extended_thinking: false,
+        comparative_latency: 'Fast',
+        cost_input_mtok: 3.0,
+        cost_output_mtok: 15.0,
+        training_data_cutoff: 'Apr 2024', // Assumed to be same as the underlying model
+        extended_max_completion_tokens: null
+      }
+    },
+    // --- Claude 3.5 Sonnet (Previous Version) ---
+    {
+      id: 'claude-3-5-sonnet-20240620', // Previous version from API list
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 200000, // Assumed same as other 3.5 Sonnet
+      public_apps: null,
+      max_completion_tokens: 8192, // Assumed same as upgraded 3.5 Sonnet based on table column
+      properties: {
+        description: 'Our previous most intelligent model', // Using data from "Claude 3.5 Sonnet" column as specific data isn't provided
+        strengths: 'High level of intelligence and capability', // Using data from "Claude 3.5 Sonnet" column
+        multilingual: true, // Using data from "Claude 3.5 Sonnet" column
+        vision: true, // Using data from "Claude 3.5 Sonnet" column
+        extended_thinking: false, // Using data from "Claude 3.5 Sonnet" column
+        comparative_latency: 'Fast', // Using data from "Claude 3.5 Sonnet" column
+        cost_input_mtok: 3.0, // Using data from "Claude 3.5 Sonnet" column
+        cost_output_mtok: 15.0, // Using data from "Claude 3.5 Sonnet" column
+        training_data_cutoff: 'Apr 2024', // Using data from "Claude 3.5 Sonnet" column, actual cutoff might differ slightly but not specified
+        extended_max_completion_tokens: null
+      }
+    },
+    // --- Claude 3.5 Haiku ---
+    {
+      id: 'claude-3-5-haiku-20241022',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 200000,
+      public_apps: null,
+      max_completion_tokens: 8192, // From "Max output" 8192 tokens
+      properties: {
+        description: 'Our fastest model',
+        strengths: 'Intelligence at blazing speeds',
+        multilingual: true, // From "Yes"
+        vision: true, // From "Yes"
+        extended_thinking: false, // From "No"
+        comparative_latency: 'Fastest',
+        cost_input_mtok: 0.8, // From "$0.80"
+        cost_output_mtok: 4.0, // From "$4.00"
+        training_data_cutoff: 'July 2024',
+        extended_max_completion_tokens: null // Not specified in new data
+      }
+    },
+    {
+      id: 'claude-3-5-haiku-latest', // Alias from the text
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 200000,
+      public_apps: null,
+      max_completion_tokens: 8192, // Mirrors claude-3-5-haiku-20241022
+      properties: {
+        description: 'Our fastest model',
+        strengths: 'Intelligence at blazing speeds',
+        multilingual: true,
+        vision: true,
+        extended_thinking: false,
+        comparative_latency: 'Fastest',
+        cost_input_mtok: 0.8,
+        cost_output_mtok: 4.0,
+        training_data_cutoff: 'July 2024', // Assumed to be same as the underlying model
+        extended_max_completion_tokens: null
+      }
+    },
+    // --- Claude 3 Opus ---
     {
       id: 'claude-3-opus-20240229',
       object: 'model',
@@ -14,42 +173,43 @@ const rawAnthropicData = {
       active: true,
       context_window: 200000,
       public_apps: null,
-      max_completion_tokens: 4096,
+      max_completion_tokens: 4096, // From "Max output" 4096 tokens
       properties: {
-        description: 'Most powerful model for highly complex tasks.',
-        strengths: 'Complex analysis, math, coding, research, long-context understanding.',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'slowest',
-        cost_input_mtok: 15.0,
-        cost_output_mtok: 75.0,
-        training_data_cutoff: 'August 2023',
-        extended_max_completion_tokens: null
+        description: 'Powerful model for complex tasks',
+        strengths: 'Top-level intelligence, fluency, and understanding',
+        multilingual: true, // From "Yes"
+        vision: true, // From "Yes"
+        extended_thinking: false, // From "No" - Updated based on new table
+        comparative_latency: 'Moderately fast',
+        cost_input_mtok: 15.0, // From "$15.00"
+        cost_output_mtok: 75.0, // From "$75.00"
+        training_data_cutoff: 'Aug 2023',
+        extended_max_completion_tokens: null // Not specified in new data
       }
     },
     {
-      id: 'claude-3-sonnet-20240229',
+      id: 'claude-3-opus-latest', // Alias from the text
       object: 'model',
       owned_by: 'anthropic',
       created: null,
       active: true,
       context_window: 200000,
       public_apps: null,
-      max_completion_tokens: 4096,
+      max_completion_tokens: 4096, // Mirrors claude-3-opus-20240229
       properties: {
-        description: 'Ideal balance of intelligence and speed for enterprise workloads.',
-        strengths: 'Data processing, RAG, coding, quality control, content generation.',
+        description: 'Powerful model for complex tasks',
+        strengths: 'Top-level intelligence, fluency, and understanding',
         multilingual: true,
         vision: true,
-        extended_thinking: true,
-        comparative_latency: 'medium',
-        cost_input_mtok: 3.0,
-        cost_output_mtok: 15.0,
-        training_data_cutoff: 'August 2023',
+        extended_thinking: false,
+        comparative_latency: 'Moderately fast',
+        cost_input_mtok: 15.0,
+        cost_output_mtok: 75.0,
+        training_data_cutoff: 'Aug 2023', // Assumed to be same as the underlying model
         extended_max_completion_tokens: null
       }
     },
+    // --- Claude 3 Haiku ---
     {
       id: 'claude-3-haiku-20240307',
       object: 'model',
@@ -58,21 +218,22 @@ const rawAnthropicData = {
       active: true,
       context_window: 200000,
       public_apps: null,
-      max_completion_tokens: 4096,
+      max_completion_tokens: 4096, // From "Max output" 4096 tokens
       properties: {
-        description: 'Fastest, most compact model for near-instant responsiveness.',
-        strengths: 'Customer interactions, content moderation, cost-saving tasks, logistics.',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'fastest',
-        cost_input_mtok: 0.25,
-        cost_output_mtok: 1.25,
-        training_data_cutoff: 'August 2023',
-        extended_max_completion_tokens: null
+        description: 'Fastest and most compact model for near-instant responsiveness',
+        strengths: 'Quick and accurate targeted performance',
+        multilingual: true, // From "Yes"
+        vision: true, // From "Yes"
+        extended_thinking: false, // From "No" - Updated based on new table
+        comparative_latency: 'Fastest',
+        cost_input_mtok: 0.25, // From "$0.25"
+        cost_output_mtok: 1.25, // From "$1.25"
+        training_data_cutoff: 'Aug 2023',
+        extended_max_completion_tokens: null // Not specified in new data
       }
     }
-    // Add other Anthropic models here if known
+    // Note: The text does not list a 'claude-3-haiku-latest' alias for the 20240307 version,
+    // so it's not included here to match the provided data exactly.
   ]
 }
 
