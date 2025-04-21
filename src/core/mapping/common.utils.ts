@@ -86,7 +86,9 @@ export function mapBaseParams(
   stopSequences?: string[]
 } {
   const stopSequences = Array.isArray(params.stop) ? params.stop : params.stop ? [params.stop] : undefined
-
+  if (params.maxTokens === -1) {
+    delete params.maxTokens
+  }
   return {
     temperature: params.temperature,
     topP: params.topP,

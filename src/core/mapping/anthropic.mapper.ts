@@ -297,10 +297,6 @@ export class AnthropicMapper implements IProviderMapper {
       ...(thinkingParam && { thinking: thinkingParam })
     }
 
-    if (basePayload.max_tokens === -1) {
-      basePayload.max_tokens = 4096
-    }
-
     if (params.stream) {
       const streamPayload: Anthropic.Messages.MessageCreateParamsStreaming = { ...basePayload, stream: true }
       return streamPayload
