@@ -37,6 +37,7 @@ import { mapBaseParams, mapBaseToolChoice } from './common.utils'
 import * as OpenAIEmbedMapper from './openai.embed.mapper'
 import * as OpenAIAudioMapper from './openai.audio.mapper'
 import {
+  isThinkingModel,
   mapContentForOpenAIRole,
   mapFromOpenAIResponse,
   mapOpenAIStream,
@@ -181,12 +182,19 @@ export class OpenAIMapper implements IProviderMapper {
       model: params.model!,
       messages,
       max_tokens: baseMappedParams.maxTokens,
+      max_completion_tokens: baseMappedParams.maxTokens,
       temperature: baseMappedParams.temperature,
       top_p: baseMappedParams.topP,
       stop: baseMappedParams.stopSequences, // Use mapped stopSequences
       tools,
       tool_choice: openAIToolChoice,
       response_format: responseFormat
+    }
+
+    if (isThinkingModel(params.model!)) {
+      delete basePayload.max_tokens
+    } else {
+      delete basePayload.max_completion_tokens
     }
 
     if (params.stream) {
