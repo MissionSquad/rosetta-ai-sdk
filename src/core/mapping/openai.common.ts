@@ -46,6 +46,16 @@ export function mapRoleToOpenAI(role: RosettaMessage['role']): OpenAIRole {
   }
 }
 
+export function isThinkingModel(modelName: string): boolean {
+  const thinkingModels = ['o1', 'o3', 'o4', 'o5', 'o6'] // o5 and o6 don't exist yet, attempting to future proof?
+  for (const model of thinkingModels) {
+    if (modelName.includes(model)) {
+      return true
+    }
+  }
+  return false
+}
+
 export function mapContentForOpenAIRole(
   content: RosettaMessage['content'],
   role: OpenAIRole
