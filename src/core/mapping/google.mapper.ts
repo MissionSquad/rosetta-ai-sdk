@@ -186,7 +186,22 @@ export class GoogleMapper implements IProviderMapper {
           respContent = { content: msg.content } // Wrap non-JSON string content
           console.warn(`Tool result content for ${funcName} was not valid JSON. Wrapping as { content: "..." }`)
         }
-        history.push({ role: googleRole, parts: [{ functionResponse: { name: funcName, response: respContent } }] })
+        // Note: The Google API has inconsistent behavior with function responses.
+        // As suggested by the user, we're trying to send both 'response' and 'content' fields
+        // to handle potential API inconsistencies.
+        history.push({
+          role: googleRole,
+          parts: [
+            {
+              functionResponse: {
+                name: funcName,
+                response: respContent
+                // @ts-ignore - Using both response and content fields to handle API inconsistencies
+                // content: respContent
+              }
+            }
+          ]
+        })
       } else {
         // Only add if parts is not empty
         if (parts.length > 0) {
@@ -221,7 +236,19 @@ export class GoogleMapper implements IProviderMapper {
         respContent = { content: lastMessage.content } // Wrap non-JSON string content
         console.warn(`Final tool result content for ${funcName} was not valid JSON. Wrapping as { content: "..." }`)
       }
-      currentTurnParts = [{ functionResponse: { name: funcName, response: respContent } }]
+      // Note: The Google API has inconsistent behavior with function responses.
+      // As suggested by the user, we're trying to send both 'response' and 'content' fields
+      // to handle potential API inconsistencies.
+      currentTurnParts = [
+        {
+          functionResponse: {
+            name: funcName,
+            response: respContent //,
+            // @ts-ignore - Using both response and content fields to handle API inconsistencies
+            // content: respContent
+          }
+        }
+      ]
     } else if (lastMessageRole === 'user') {
       currentTurnParts = this.mapContentToGoogleParts(lastMessage.content)
       if (currentTurnParts.length === 0) {
