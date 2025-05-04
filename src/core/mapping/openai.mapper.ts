@@ -193,6 +193,7 @@ export class OpenAIMapper implements IProviderMapper {
 
     if (isThinkingModel(params.model!)) {
       delete basePayload.max_tokens
+      delete basePayload.temperature
     } else {
       delete basePayload.max_completion_tokens
     }
