@@ -93,6 +93,41 @@ export class GoogleMapper implements IProviderMapper {
     )
   }
 
+  /**
+   * Removes properties that cause issues with the Google API from a schema object.
+   * Specifically removes 'additionalProperties' and '$schema' properties.
+   *
+   * @param schema - The original schema object
+   * @returns A new schema object with problematic properties removed
+   */
+  private cleanSchemaForGoogle(schema: any): any {
+    if (!schema || typeof schema !== 'object') {
+      return schema
+    }
+
+    // Create a shallow copy of the schema
+    const cleanedSchema = { ...schema }
+
+    // Remove problematic properties
+    delete cleanedSchema.additionalProperties
+    delete cleanedSchema.$schema
+
+    // Recursively clean nested properties and objects in properties
+    if (cleanedSchema.properties && typeof cleanedSchema.properties === 'object') {
+      cleanedSchema.properties = Object.entries(cleanedSchema.properties).reduce((acc, [key, value]) => {
+        acc[key] = this.cleanSchemaForGoogle(value)
+        return acc
+      }, {} as Record<string, any>)
+    }
+
+    // Handle items for array types
+    if (cleanedSchema.items && typeof cleanedSchema.items === 'object') {
+      cleanedSchema.items = this.cleanSchemaForGoogle(cleanedSchema.items)
+    }
+
+    return cleanedSchema
+  }
+
   private findLastToolCallName(history: GoogleContent[], _toolCallId: string): string | undefined {
     for (let i = history.length - 1; i >= 0; i--) {
       const prevMsg = history[i]
@@ -273,8 +308,18 @@ export class GoogleMapper implements IProviderMapper {
           this.provider
         )
       }
+
+      // Clean the schema by removing properties that cause issues with Google API
+      const cleanedSchema = this.cleanSchemaForGoogle(schema)
+
       return {
-        functionDeclarations: [{ name: tool.function.name, description: tool.function.description, parameters: schema }]
+        functionDeclarations: [
+          {
+            name: tool.function.name,
+            description: tool.function.description,
+            parameters: cleanedSchema
+          }
+        ]
       }
     })
 
