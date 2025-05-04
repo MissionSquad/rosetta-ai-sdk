@@ -89,12 +89,21 @@ export function mapBaseParams(
   if (params.maxTokens === -1) {
     delete params.maxTokens
   }
-  return {
-    temperature: params.temperature,
-    topP: params.topP,
-    maxTokens: params.maxTokens,
-    stopSequences: stopSequences
-  }
+
+  // Create an object with only defined parameters
+  const result: {
+    temperature?: number
+    topP?: number
+    maxTokens?: number
+    stopSequences?: string[]
+  } = {}
+
+  if (params.temperature !== undefined) result.temperature = params.temperature
+  if (params.topP !== undefined) result.topP = params.topP
+  if (params.maxTokens !== undefined) result.maxTokens = params.maxTokens
+  if (stopSequences !== undefined) result.stopSequences = stopSequences
+
+  return result
 }
 
 /**
