@@ -100,12 +100,19 @@ export class GoogleMapper implements IProviderMapper {
    * @param schema - The original schema object
    * @returns A new schema object with problematic properties removed
    */
-  private cleanSchemaForGoogle(schema: any): any {
+  private cleanSchemaForGoogle(schema: any, visited = new Set<any>()): any {
     if (!schema || typeof schema !== 'object') {
       return schema;
     }
 
-    // Create a mutable copy to avoid modifying the original schema object
+    if (visited.has(schema)) {
+      // console.warn('RosettaAI GoogleMapper: Circular reference detected in schema. Returning as-is to break cycle.');
+      return schema; // Break cycle
+    }
+
+    visited.add(schema);
+
+    // Create a mutable copy to avoid modifying the original schema object at this level
     const cleanedSchema = { ...schema };
 
     // Remove standard problematic properties for Google
@@ -113,23 +120,13 @@ export class GoogleMapper implements IProviderMapper {
     delete cleanedSchema.$schema;
 
     // Handle exclusiveMinimum:
-    // If exclusiveMinimum is a number (e.g., { exclusiveMinimum: 10 }),
-    // it means the value must be > 10.
-    // We convert this to minimum: 10, which means >= 10.
-    // This is a slight semantic change but makes it compatible.
-    // For integers, minimum: X + 1 would be more precise, but this is a general fix.
     if (typeof cleanedSchema.exclusiveMinimum === 'number') {
       if (typeof cleanedSchema.minimum === 'number' && cleanedSchema.minimum !== cleanedSchema.exclusiveMinimum) {
-          // Log a warning if 'minimum' is already present and different, as we are overwriting it.
-          console.warn(`RosettaAI GoogleMapper: Schema for property had both 'minimum: ${cleanedSchema.minimum}' and 'exclusiveMinimum: ${cleanedSchema.exclusiveMinimum}'. Prioritizing 'exclusiveMinimum' value and converting to 'minimum: ${cleanedSchema.exclusiveMinimum}'.`);
+        console.warn(`RosettaAI GoogleMapper: Schema for property had both 'minimum: ${cleanedSchema.minimum}' and 'exclusiveMinimum: ${cleanedSchema.exclusiveMinimum}'. Prioritizing 'exclusiveMinimum' value and converting to 'minimum: ${cleanedSchema.exclusiveMinimum}'.`);
       }
       cleanedSchema.minimum = cleanedSchema.exclusiveMinimum;
       delete cleanedSchema.exclusiveMinimum;
     } else if (cleanedSchema.exclusiveMinimum === true && typeof cleanedSchema.minimum === 'number') {
-      // This handles older JSON Schema draft styles (e.g., { minimum: 10, exclusiveMinimum: true })
-      // Google likely doesn't support 'exclusiveMinimum: true'.
-      // Removing it makes the existing 'minimum' inclusive.
-      // A warning is logged as this changes the exclusivity.
       console.warn(`RosettaAI GoogleMapper: Converting 'exclusiveMinimum: true' with 'minimum: ${cleanedSchema.minimum}'. The bound will become inclusive. If strict inequality was intended, the original schema's 'minimum' value might need adjustment (e.g., incrementing for integers).`);
       delete cleanedSchema.exclusiveMinimum;
     }
@@ -137,7 +134,7 @@ export class GoogleMapper implements IProviderMapper {
     // Handle exclusiveMaximum (similar logic to exclusiveMinimum):
     if (typeof cleanedSchema.exclusiveMaximum === 'number') {
       if (typeof cleanedSchema.maximum === 'number' && cleanedSchema.maximum !== cleanedSchema.exclusiveMaximum) {
-          console.warn(`RosettaAI GoogleMapper: Schema for property had both 'maximum: ${cleanedSchema.maximum}' and 'exclusiveMaximum: ${cleanedSchema.exclusiveMaximum}'. Prioritizing 'exclusiveMaximum' value and converting to 'maximum: ${cleanedSchema.exclusiveMaximum}'.`);
+        console.warn(`RosettaAI GoogleMapper: Schema for property had both 'maximum: ${cleanedSchema.maximum}' and 'exclusiveMaximum: ${cleanedSchema.exclusiveMaximum}'. Prioritizing 'exclusiveMaximum' value and converting to 'maximum: ${cleanedSchema.exclusiveMaximum}'.`);
       }
       cleanedSchema.maximum = cleanedSchema.exclusiveMaximum;
       delete cleanedSchema.exclusiveMaximum;
@@ -147,20 +144,29 @@ export class GoogleMapper implements IProviderMapper {
     }
 
     // Recursively clean nested 'properties' (for object schemas)
-    if (cleanedSchema.properties && typeof cleanedSchema.properties === 'object') {
+    // Pass the original sub-schema (schema.properties[key]) for cycle detection
+    if (schema.properties && typeof schema.properties === 'object') {
       const newProperties: Record<string, any> = {};
-      for (const key in cleanedSchema.properties) {
-        if (Object.prototype.hasOwnProperty.call(cleanedSchema.properties, key)) {
-          newProperties[key] = this.cleanSchemaForGoogle(cleanedSchema.properties[key]); // Recursive call
+      for (const key in schema.properties) {
+        if (Object.prototype.hasOwnProperty.call(schema.properties, key)) {
+          newProperties[key] = this.cleanSchemaForGoogle(schema.properties[key], visited);
         }
       }
       cleanedSchema.properties = newProperties;
+    } else if (cleanedSchema.properties) { // Ensure properties is not carried over if original schema didn't have it as object
+        delete cleanedSchema.properties 
     }
 
+
     // Recursively clean 'items' (for array schemas)
-    if (cleanedSchema.items && typeof cleanedSchema.items === 'object') {
-      cleanedSchema.items = this.cleanSchemaForGoogle(cleanedSchema.items); // Recursive call
+    // Pass the original sub-schema (schema.items) for cycle detection
+    if (schema.items && typeof schema.items === 'object') {
+      cleanedSchema.items = this.cleanSchemaForGoogle(schema.items, visited);
+    } else if (cleanedSchema.items) { // Ensure items is not carried over if original schema didn't have it as object
+        delete cleanedSchema.items
     }
+    
+    visited.delete(schema); // Clean up visited set for this path
 
     return cleanedSchema;
   }
