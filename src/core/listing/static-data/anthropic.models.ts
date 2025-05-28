@@ -6,6 +6,96 @@ import { RosettaModelList, RosettaModel, Provider } from '../../../types'
 const rawAnthropicData = {
   object: 'list',
   data: [
+    // --- Claude 4 Opus ---
+    {
+      id: 'claude-opus-4-20250514',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null, // Placeholder
+      active: true,
+      context_window: 200000, // Assuming similar to recent models
+      public_apps: null,
+      max_completion_tokens: 32000, // Updated based on feedback
+      properties: {
+        description: 'Anthropic\'s most powerful Claude 4 model',
+        strengths: 'Highest level of intelligence and capability for complex tasks (Claude 4 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true, // Assuming for a new Opus model
+        comparative_latency: 'Moderately Fast', // Matches feedback
+        cost_input_mtok: 15.0, // Matches feedback
+        cost_output_mtok: 75.0, // Matches feedback
+        training_data_cutoff: 'Mar 2025', // Updated based on feedback
+        extended_max_completion_tokens: null
+      }
+    },
+    {
+      id: 'claude-opus-4-latest',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 200000,
+      public_apps: null,
+      max_completion_tokens: 32000, // Updated based on feedback
+      properties: {
+        description: 'Anthropic\'s most powerful Claude 4 model (latest alias)',
+        strengths: 'Highest level of intelligence and capability for complex tasks (Claude 4 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Moderately Fast', // Matches feedback
+        cost_input_mtok: 15.0, // Matches feedback
+        cost_output_mtok: 75.0, // Matches feedback
+        training_data_cutoff: 'Mar 2025', // Updated based on feedback
+        extended_max_completion_tokens: null
+      }
+    },
+    // --- Claude 4 Sonnet ---
+    {
+      id: 'claude-sonnet-4-20250514',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null, // Placeholder
+      active: true,
+      context_window: 200000, // Assuming similar to recent models
+      public_apps: null,
+      max_completion_tokens: 64000, // Matches feedback
+      properties: {
+        description: 'Anthropic\'s balanced Claude 4 model for intelligence and speed',
+        strengths: 'High level of intelligence and capability with good speed (Claude 4 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true, // Assuming for a new Sonnet model
+        comparative_latency: 'Fast', // Matches feedback
+        cost_input_mtok: 3.0, // Matches feedback
+        cost_output_mtok: 15.0, // Matches feedback
+        training_data_cutoff: 'Mar 2025', // Updated based on feedback
+        extended_max_completion_tokens: null
+      }
+    },
+    {
+      id: 'claude-sonnet-4-latest',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 200000,
+      public_apps: null,
+      max_completion_tokens: 64000, // Matches feedback
+      properties: {
+        description: 'Anthropic\'s balanced Claude 4 model for intelligence and speed (latest alias)',
+        strengths: 'High level of intelligence and capability with good speed (Claude 4 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Fast', // Matches feedback
+        cost_input_mtok: 3.0, // Matches feedback
+        cost_output_mtok: 15.0, // Matches feedback
+        training_data_cutoff: 'Mar 2025', // Updated based on feedback
+        extended_max_completion_tokens: null
+      }
+    },
     // --- Claude 3.7 Sonnet ---
     {
       id: 'claude-3-7-sonnet-20250219',

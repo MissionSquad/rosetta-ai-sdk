@@ -102,30 +102,67 @@ export class GoogleMapper implements IProviderMapper {
    */
   private cleanSchemaForGoogle(schema: any): any {
     if (!schema || typeof schema !== 'object') {
-      return schema
+      return schema;
     }
 
-    // Create a shallow copy of the schema
-    const cleanedSchema = { ...schema }
+    // Create a mutable copy to avoid modifying the original schema object
+    const cleanedSchema = { ...schema };
 
-    // Remove problematic properties
-    delete cleanedSchema.additionalProperties
-    delete cleanedSchema.$schema
+    // Remove standard problematic properties for Google
+    delete cleanedSchema.additionalProperties;
+    delete cleanedSchema.$schema;
 
-    // Recursively clean nested properties and objects in properties
+    // Handle exclusiveMinimum:
+    // If exclusiveMinimum is a number (e.g., { exclusiveMinimum: 10 }),
+    // it means the value must be > 10.
+    // We convert this to minimum: 10, which means >= 10.
+    // This is a slight semantic change but makes it compatible.
+    // For integers, minimum: X + 1 would be more precise, but this is a general fix.
+    if (typeof cleanedSchema.exclusiveMinimum === 'number') {
+      if (typeof cleanedSchema.minimum === 'number' && cleanedSchema.minimum !== cleanedSchema.exclusiveMinimum) {
+          // Log a warning if 'minimum' is already present and different, as we are overwriting it.
+          console.warn(`RosettaAI GoogleMapper: Schema for property had both 'minimum: ${cleanedSchema.minimum}' and 'exclusiveMinimum: ${cleanedSchema.exclusiveMinimum}'. Prioritizing 'exclusiveMinimum' value and converting to 'minimum: ${cleanedSchema.exclusiveMinimum}'.`);
+      }
+      cleanedSchema.minimum = cleanedSchema.exclusiveMinimum;
+      delete cleanedSchema.exclusiveMinimum;
+    } else if (cleanedSchema.exclusiveMinimum === true && typeof cleanedSchema.minimum === 'number') {
+      // This handles older JSON Schema draft styles (e.g., { minimum: 10, exclusiveMinimum: true })
+      // Google likely doesn't support 'exclusiveMinimum: true'.
+      // Removing it makes the existing 'minimum' inclusive.
+      // A warning is logged as this changes the exclusivity.
+      console.warn(`RosettaAI GoogleMapper: Converting 'exclusiveMinimum: true' with 'minimum: ${cleanedSchema.minimum}'. The bound will become inclusive. If strict inequality was intended, the original schema's 'minimum' value might need adjustment (e.g., incrementing for integers).`);
+      delete cleanedSchema.exclusiveMinimum;
+    }
+
+    // Handle exclusiveMaximum (similar logic to exclusiveMinimum):
+    if (typeof cleanedSchema.exclusiveMaximum === 'number') {
+      if (typeof cleanedSchema.maximum === 'number' && cleanedSchema.maximum !== cleanedSchema.exclusiveMaximum) {
+          console.warn(`RosettaAI GoogleMapper: Schema for property had both 'maximum: ${cleanedSchema.maximum}' and 'exclusiveMaximum: ${cleanedSchema.exclusiveMaximum}'. Prioritizing 'exclusiveMaximum' value and converting to 'maximum: ${cleanedSchema.exclusiveMaximum}'.`);
+      }
+      cleanedSchema.maximum = cleanedSchema.exclusiveMaximum;
+      delete cleanedSchema.exclusiveMaximum;
+    } else if (cleanedSchema.exclusiveMaximum === true && typeof cleanedSchema.maximum === 'number') {
+      console.warn(`RosettaAI GoogleMapper: Converting 'exclusiveMaximum: true' with 'maximum: ${cleanedSchema.maximum}'. The bound will become inclusive. If strict inequality was intended, the original schema's 'maximum' value might need adjustment (e.g., decrementing for integers).`);
+      delete cleanedSchema.exclusiveMaximum;
+    }
+
+    // Recursively clean nested 'properties' (for object schemas)
     if (cleanedSchema.properties && typeof cleanedSchema.properties === 'object') {
-      cleanedSchema.properties = Object.entries(cleanedSchema.properties).reduce((acc, [key, value]) => {
-        acc[key] = this.cleanSchemaForGoogle(value)
-        return acc
-      }, {} as Record<string, any>)
+      const newProperties: Record<string, any> = {};
+      for (const key in cleanedSchema.properties) {
+        if (Object.prototype.hasOwnProperty.call(cleanedSchema.properties, key)) {
+          newProperties[key] = this.cleanSchemaForGoogle(cleanedSchema.properties[key]); // Recursive call
+        }
+      }
+      cleanedSchema.properties = newProperties;
     }
 
-    // Handle items for array types
+    // Recursively clean 'items' (for array schemas)
     if (cleanedSchema.items && typeof cleanedSchema.items === 'object') {
-      cleanedSchema.items = this.cleanSchemaForGoogle(cleanedSchema.items)
+      cleanedSchema.items = this.cleanSchemaForGoogle(cleanedSchema.items); // Recursive call
     }
 
-    return cleanedSchema
+    return cleanedSchema;
   }
 
   private findLastToolCallName(history: GoogleContent[], _toolCallId: string): string | undefined {
