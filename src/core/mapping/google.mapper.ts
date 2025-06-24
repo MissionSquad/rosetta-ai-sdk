@@ -707,6 +707,15 @@ export class GoogleMapper implements IProviderMapper {
 
           // --- Finish Reason ---
           const reason = candidate.finishReason
+
+          if (reason === FinishReason.SAFETY) {
+            const safetyMessage =
+              "\n\nThis response was blocked by the AI provider's safety filters. Please modify your request and try again."
+            yield { type: 'content_delta', data: { delta: safetyMessage } }
+            aggregatedText += safetyMessage
+            if (aggregatedResult) aggregatedResult.content = aggregatedText
+          }
+
           // Only update finalFinishReason if it's not already 'tool_calls'
           if (reason && reason !== FinishReason.FINISH_REASON_UNSPECIFIED && finalFinishReason !== 'tool_calls') {
             if (reason === FinishReason.SAFETY) finalFinishReason = 'content_filter'
