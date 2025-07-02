@@ -17,7 +17,7 @@ const rawAnthropicData = {
       public_apps: null,
       max_completion_tokens: 32000, // Updated based on feedback
       properties: {
-        description: 'Anthropic\'s most powerful Claude 4 model',
+        description: "Anthropic's most powerful Claude 4 model",
         strengths: 'Highest level of intelligence and capability for complex tasks (Claude 4 series)',
         multilingual: true,
         vision: true,
@@ -30,7 +30,7 @@ const rawAnthropicData = {
       }
     },
     {
-      id: 'claude-opus-4-latest',
+      id: 'claude-opus-4-0',
       object: 'model',
       owned_by: 'anthropic',
       created: null,
@@ -39,7 +39,7 @@ const rawAnthropicData = {
       public_apps: null,
       max_completion_tokens: 32000, // Updated based on feedback
       properties: {
-        description: 'Anthropic\'s most powerful Claude 4 model (latest alias)',
+        description: "Anthropic's most powerful Claude 4 model (alias)",
         strengths: 'Highest level of intelligence and capability for complex tasks (Claude 4 series)',
         multilingual: true,
         vision: true,
@@ -62,7 +62,7 @@ const rawAnthropicData = {
       public_apps: null,
       max_completion_tokens: 64000, // Matches feedback
       properties: {
-        description: 'Anthropic\'s balanced Claude 4 model for intelligence and speed',
+        description: "Anthropic's balanced Claude 4 model for intelligence and speed",
         strengths: 'High level of intelligence and capability with good speed (Claude 4 series)',
         multilingual: true,
         vision: true,
@@ -75,7 +75,7 @@ const rawAnthropicData = {
       }
     },
     {
-      id: 'claude-sonnet-4-latest',
+      id: 'claude-sonnet-4-0',
       object: 'model',
       owned_by: 'anthropic',
       created: null,
@@ -84,7 +84,7 @@ const rawAnthropicData = {
       public_apps: null,
       max_completion_tokens: 64000, // Matches feedback
       properties: {
-        description: 'Anthropic\'s balanced Claude 4 model for intelligence and speed (latest alias)',
+        description: "Anthropic's balanced Claude 4 model for intelligence and speed (alias)",
         strengths: 'High level of intelligence and capability with good speed (Claude 4 series)',
         multilingual: true,
         vision: true,
