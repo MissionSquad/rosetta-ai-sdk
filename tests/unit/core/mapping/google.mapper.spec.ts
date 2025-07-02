@@ -886,12 +886,12 @@ describe('Google Mapper', () => {
       const stream = mapper.mapProviderStream(mockGoogleStreamGenerator(mockChunks))
       const results = await collectStreamChunks(stream)
 
-      expect(results).toHaveLength(5) // start, delta, stop, usage, final
-      expect(results[2]).toEqual({ type: 'message_stop', data: { finishReason: 'content_filter' } })
-      expect(results[3].type).toBe('final_usage')
-      expect(results[4].type).toBe('final_result')
-      expect((results[4] as any).data.result.finishReason).toBe('content_filter')
-      expect((results[4] as any).data.result.content).toBe('Unsafe ')
+      expect(results).toHaveLength(6) // start, delta, stop, usage, final
+      expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'content_filter' } })
+      expect(results[4].type).toBe('final_usage')
+      expect(results[5].type).toBe('final_result')
+      expect((results[5] as any).data.result.finishReason).toBe('content_filter')
+      expect((results[5] as any).data.result.content).toBe('Unsafe \n\nThis response was blocked by the AI provider\'s safety filters. Please modify your request and try again.')
     })
 
     it('[Hard] should handle stream with citations', async () => {
