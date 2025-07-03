@@ -8,8 +8,13 @@ import { ProviderAPIError, MappingError, RosettaAIError } from '../../errors'
  */
 function isCohereApiUrl(url: string): boolean {
   try {
-    const parsedUrl = new URL(url)
-    return parsedUrl.hostname === 'api.cohere.com' || parsedUrl.hostname.endsWith('.cohere.com')
+    const { hostname } = new URL(url)
+    return (
+      hostname === 'api.cohere.com' ||
+      hostname.endsWith('.cohere.com') ||
+      hostname === 'api.cohere.ai' ||
+      hostname.endsWith('.cohere.ai')
+    )
   } catch {
     return false
   }
@@ -89,14 +94,17 @@ export async function fetchAndValidateModelsFromApi(
     )
   }
 
-  // Construct the final URL with page_size for Cohere
+  // For Cohere, the model list URL is fixed and different from the chat completions compatibility endpoint.
+  const isCohere = isCohereApiUrl(url)
   let finalUrl = url
-  if (isCohereApiUrl(url)) {
-    // Add page_size parameter to avoid pagination
-    const urlObj = new URL(url)
+
+  if (isCohere) {
+    // Cohere's model list is at a fixed endpoint, different from their compatibility endpoint path
+    const cohereModelsUrl = 'https://api.cohere.com/v1/models'
+    const urlObj = new URL(cohereModelsUrl)
     urlObj.searchParams.set('page_size', '1000')
     finalUrl = urlObj.toString()
-    console.log(`RosettaAI: Detected Cohere API, adding page_size parameter: ${finalUrl}`)
+    console.log(`RosettaAI: Detected Cohere provider. Overriding model list URL to: ${finalUrl}`)
   }
 
   // API key might be optional for custom providers (e.g., local servers)
@@ -138,7 +146,7 @@ export async function fetchAndValidateModelsFromApi(
     let rawJson = await response.json()
 
     // Transform Cohere response if detected
-    if (isCohereApiUrl(url)) {
+    if (isCohere) {
       console.log(`RosettaAI: Transforming Cohere response format`)
       rawJson = transformCohereResponse(rawJson)
     }
