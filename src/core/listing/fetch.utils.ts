@@ -3,6 +3,60 @@ import { z } from 'zod'
 import { RosettaModel, RosettaModelList, ProviderKey, Provider } from '../../types'
 import { ProviderAPIError, MappingError, RosettaAIError } from '../../errors'
 
+/**
+ * Determines if a URL belongs to the Cohere API
+ */
+function isCohereApiUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url)
+    return (
+      hostname === 'api.cohere.com' ||
+      hostname.endsWith('.cohere.com') ||
+      hostname === 'api.cohere.ai' ||
+      hostname.endsWith('.cohere.ai')
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Transforms Cohere's response format to match OpenAI's expected format
+ */
+function transformCohereResponse(rawJson: any): any {
+  // Check if this looks like a Cohere response
+  if (!rawJson.models || !Array.isArray(rawJson.models)) {
+    return rawJson // Not a Cohere response, return as-is
+  }
+
+  // Transform the response
+  const transformed = {
+    object: 'list' as const,
+    data: rawJson.models.map((model: any) => ({
+      // Map 'name' to 'id' as that's what Cohere uses as the identifier
+      id: model.name || model.id,
+      object: 'model' as const,
+      // Use a default for owned_by since Cohere doesn't provide this
+      owned_by: 'cohere',
+      // Map other fields while preserving them in rawData
+      created: model.created,
+      active: model.active ?? true, // Assume active if not specified
+      context_window: model.context_length || model.context_window,
+      // Preserve all original data
+      ...model
+    }))
+  }
+
+  // Remove the original 'models' and 'next_page_token' from each data item
+  transformed.data = transformed.data.map((item: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { models, next_page_token, ...cleanItem } = item
+    return cleanItem
+  })
+
+  return transformed
+}
+
 // Zod schema for the MINIMUM expected API response structure
 const BaseApiResponseSchema = z
   .object({
@@ -40,6 +94,19 @@ export async function fetchAndValidateModelsFromApi(
     )
   }
 
+  // For Cohere, the model list URL is fixed and different from the chat completions compatibility endpoint.
+  const isCohere = isCohereApiUrl(url)
+  let finalUrl = url
+
+  if (isCohere) {
+    // Cohere's model list is at a fixed endpoint, different from their compatibility endpoint path
+    const cohereModelsUrl = 'https://api.cohere.com/v1/models'
+    const urlObj = new URL(cohereModelsUrl)
+    urlObj.searchParams.set('page_size', '1000')
+    finalUrl = urlObj.toString()
+    console.log(`RosettaAI: Detected Cohere provider. Overriding model list URL to: ${finalUrl}`)
+  }
+
   // API key might be optional for custom providers (e.g., local servers)
   const headers: HeadersInit = {
     Accept: 'application/json'
@@ -57,7 +124,7 @@ export async function fetchAndValidateModelsFromApi(
   }
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(finalUrl, {
       method: 'GET',
       headers: headers
     })
@@ -76,7 +143,13 @@ export async function fetchAndValidateModelsFromApi(
       )
     }
 
-    const rawJson = await response.json()
+    let rawJson = await response.json()
+
+    // Transform Cohere response if detected
+    if (isCohere) {
+      console.log(`RosettaAI: Transforming Cohere response format`)
+      rawJson = transformCohereResponse(rawJson)
+    }
 
     // --- CRITICAL VALIDATION STEP ---
     const validationResult = BaseApiResponseSchema.safeParse(rawJson)
