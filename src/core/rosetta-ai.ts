@@ -1203,7 +1203,7 @@ export class RosettaAI {
       const hasImage = params.messages.some(
         msg => Array.isArray(msg.content) && msg.content.some(part => part.type === 'image')
       )
-      if (hasImage && ![Provider.Anthropic, Provider.Google, Provider.OpenAI].includes(provider)) {
+      if (hasImage && ![Provider.Anthropic, Provider.Google, Provider.OpenAI, Provider.Groq].includes(provider)) {
         throw new UnsupportedFeatureError(provider, 'Image input')
       }
       // Check for tools usage
