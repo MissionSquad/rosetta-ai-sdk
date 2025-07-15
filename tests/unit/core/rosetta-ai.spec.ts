@@ -757,17 +757,16 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
     })
 
     // --- Tests for checkUnsupportedFeatures ---
-    it('[Medium] should throw UnsupportedFeatureError for image input with Groq', async () => {
+    it('[Medium] should NOT throw for image input with Groq', async () => {
       const rosettaGroq = new RosettaAI({ groqApiKey: 'key' })
       const params: GenerateParams = {
         provider: Provider.Groq,
-        model: 'llama3-8b-8192',
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
         messages: [{ role: 'user', content: [{ type: 'image', image: {} as any }] }]
       }
-      await expect(rosettaGroq.generate(params)).rejects.toThrow(UnsupportedFeatureError)
-      await expect(rosettaGroq.generate(params)).rejects.toThrow(
-        "Provider 'groq' does not support the requested feature: Image input"
-      )
+      // The generate call should now resolve successfully as image support is enabled
+      await expect(rosettaGroq.generate(params)).resolves.toBeDefined()
+      await expect(rosettaGroq.generate(params)).resolves.toEqual({ mapped: 'groq_result' })
     })
 
     it('[Medium] should NOT throw UnsupportedFeatureError for tool use with supported provider (Anthropic)', async () => {
