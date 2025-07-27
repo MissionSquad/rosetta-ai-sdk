@@ -76,7 +76,6 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@google/genai": "^1.9.0",
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^16.4.5",
     "groq-sdk": "^0.18.0",
