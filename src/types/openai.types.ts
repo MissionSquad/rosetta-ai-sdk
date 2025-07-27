@@ -1,7 +1,3 @@
-// rosetta-ai-sdk/src/types/openai.types.ts
-
-import { RosettaToolCallRequest } from './common.types'
-
 /**
  * The function that the model called.
  */
