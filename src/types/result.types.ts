@@ -1,4 +1,5 @@
 import { RosettaToolCallRequest, Citation } from './common.types'
+import { OpenAICompletion } from './openai.types' // Import the new type
 
 /**
  * Represents token usage statistics for an API call.
@@ -34,6 +35,11 @@ export interface GenerateResult {
   model: string
   /** The raw response object from the underlying SDK (use with caution, structure varies). */
   rawResponse?: unknown
+  /**
+   * If `openAICompletions` was true in the config, this field will contain the
+   * response transformed into the standard OpenAI Chat Completion format.
+   */
+  openAIResponse?: OpenAICompletion
 }
 
 /**

@@ -65,4 +65,10 @@ export interface RosettaAIConfig {
 
   /** Optional array of custom provider configurations. */
   customProviders?: CustomProviderConfig[]
+  /**
+   * If true, the `generate` method will transform the response from any provider
+   * into the standard OpenAI Chat Completion format and attach it to the `GenerateResult`.
+   * @default false
+   */
+  openAICompletions?: boolean
 }
