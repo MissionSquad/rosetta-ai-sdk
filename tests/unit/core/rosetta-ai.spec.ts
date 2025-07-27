@@ -694,7 +694,10 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
         'gpt-4o-mini',
         undefined // No tools passed in this specific test
       )
-      expect(result).toEqual({ mapped: 'openai_result' }) // From mock mapper return
+      expect(result).toEqual({
+        mapped: 'openai_result',
+        rawResponse: { mapped: 'openai_raw_response' }
+      }) // From mock mapper return
     })
 
     it('should use default model if not provided in params', async () => {
@@ -766,7 +769,10 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       }
       // The generate call should now resolve successfully as image support is enabled
       await expect(rosettaGroq.generate(params)).resolves.toBeDefined()
-      await expect(rosettaGroq.generate(params)).resolves.toEqual({ mapped: 'groq_result' })
+      await expect(rosettaGroq.generate(params)).resolves.toEqual({
+        mapped: 'groq_result',
+        rawResponse: { mapped: 'groq_mock_response' }
+      })
     })
 
     it('[Medium] should NOT throw UnsupportedFeatureError for tool use with supported provider (Anthropic)', async () => {

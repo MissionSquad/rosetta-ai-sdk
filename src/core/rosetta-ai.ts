@@ -15,6 +15,7 @@ import OpenAI, { AzureOpenAI } from 'openai'
 
 import { config as dotenvConfig } from 'dotenv'
 
+import { nanoid } from 'nanoid'
 import {
   Provider,
   ProviderKey,
@@ -33,6 +34,7 @@ import {
   RosettaModelList,
   ModelListingSourceConfig
 } from '../types'
+import { OpenAICompletion, OpenAICompletionChoice } from '../types/openai.types' // Import the new types
 import { ConfigurationError, ProviderAPIError, UnsupportedFeatureError, RosettaAIError, MappingError } from '../errors'
 import { CustomProviderConfig } from '../types/custom.types'
 
@@ -43,6 +45,7 @@ import { GoogleMapper } from './mapping/google.mapper'
 import { GroqMapper } from './mapping/groq.mapper'
 import { OpenAIMapper } from './mapping/openai.mapper'
 import { AzureOpenAIMapper } from './mapping/azure.openai.mapper'
+import { mapTokenUsage } from './mapping/common.utils'
 
 import { prepareAudioUpload } from './utils'
 import { listModelsForProvider } from './listing/model.lister'
@@ -56,6 +59,7 @@ dotenvConfig()
 export class RosettaAI {
   /** @internal The configuration used by the client instance. */
   readonly config: RosettaAIConfig
+  private _openAICompletions: boolean = false // Add this field
   private anthropicClient?: Anthropic
   private googleClient?: GoogleGenerativeAI
   private groqClient?: Groq
@@ -115,8 +119,10 @@ export class RosettaAI {
       defaultMaxRetries: config.defaultMaxRetries ?? 2,
       defaultTimeoutMs: config.defaultTimeoutMs ?? 60 * 1000,
       modelListingConfig: config.modelListingConfig,
-      customProviders: config.customProviders ?? []
+      customProviders: config.customProviders ?? [],
+      openAICompletions: config.openAICompletions ?? false // Add this
     }
+    this._openAICompletions = this.config.openAICompletions ?? false // Store it
 
     this.mappers = new Map<ProviderKey, IProviderMapper>()
     this.customProviderConfigs = new Map<string, CustomProviderConfig>()
@@ -461,7 +467,15 @@ export class RosettaAI {
             providerKey
           )
         }
-        return mapper.mapFromProviderResponse(providerResponse, model, params.tools)
+        const result = mapper.mapFromProviderResponse(providerResponse, model, params.tools)
+        result.rawResponse = providerResponse // Ensure rawResponse is attached
+
+        // --- OpenAI Compliance Transformation (New Logic) ---
+        if (this._openAICompletions) {
+          result.openAIResponse = this._transformToOpenAIResponse(providerKey, providerResponse, result)
+        }
+
+        return result
       } else {
         // Custom provider without executeGenerate or built-in provider without mapFromProviderResponse
         throw new ConfigurationError(
@@ -1298,5 +1312,103 @@ export class RosettaAI {
 
     // Use ProviderAPIError as the default fallback wrapper
     return new ProviderAPIError(errorMessage, providerKey, undefined, undefined, undefined, error)
+  }
+
+  /**
+   * @internal Transforms a provider's raw response into the standard OpenAI format.
+   */
+  private _transformToOpenAIResponse(
+    providerKey: ProviderKey,
+    providerResponse: any,
+    baseResult: GenerateResult
+  ): OpenAICompletion {
+    const now = Math.floor(Date.now() / 1000)
+    const id = `chatcmpl-${nanoid()}`
+
+    // Helper to create a standard choice object
+    const createChoice = (
+      content: string | null,
+      finish_reason: string | null,
+      tool_calls?: any[]
+    ): OpenAICompletionChoice => ({
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: content,
+        tool_calls: tool_calls,
+        refusal: null
+      },
+      logprobs: null,
+      finish_reason: finish_reason
+    })
+
+    // Use the common token usage mapper
+    const usage = mapTokenUsage(providerResponse.usage ?? providerResponse.usageMetadata)
+
+    switch (providerKey) {
+      case Provider.Anthropic:
+        return {
+          id: providerResponse.id ?? id,
+          object: 'chat.completion',
+          created: now,
+          model: baseResult.model,
+          choices: [createChoice(baseResult.content, baseResult.finishReason, baseResult.toolCalls)],
+          usage: {
+            prompt_tokens: usage?.promptTokens ?? 0,
+            completion_tokens: usage?.completionTokens ?? 0,
+            total_tokens: usage?.totalTokens ?? 0
+          },
+          system_fingerprint: null,
+          service_tier: providerResponse.usage?.service_tier ?? null
+        }
+
+      case Provider.Google:
+        return {
+          id: providerResponse.responseId ?? id,
+          object: 'chat.completion',
+          created: now,
+          model: baseResult.model,
+          choices: [createChoice(baseResult.content, baseResult.finishReason, baseResult.toolCalls)],
+          usage: {
+            prompt_tokens: usage?.promptTokens ?? 0,
+            completion_tokens: usage?.completionTokens ?? 0,
+            total_tokens: usage?.totalTokens ?? 0
+          },
+          system_fingerprint: providerResponse.modelVersion ?? null,
+          service_tier: null
+        }
+
+      case Provider.OpenAI:
+      case Provider.Groq:
+      default: // Assume custom providers are OpenAI-compliant
+        return {
+          id: providerResponse.id ?? id,
+          object: 'chat.completion',
+          created: providerResponse.created ?? now,
+          model: providerResponse.model ?? baseResult.model,
+          choices: providerResponse.choices.map((choice: any): OpenAICompletionChoice => {
+            return {
+              index: choice.index,
+              message: {
+                role: 'assistant',
+                content: choice.message.content,
+                tool_calls: choice.message.tool_calls,
+                refusal: choice.message.refusal
+              },
+              logprobs: choice.logprobs,
+              finish_reason: choice.finish_reason
+            }
+          }),
+          usage: {
+            prompt_tokens: usage?.promptTokens ?? 0,
+            completion_tokens: usage?.completionTokens ?? 0,
+            total_tokens: usage?.totalTokens ?? 0,
+            prompt_tokens_details: providerResponse.usage?.prompt_tokens_details,
+            completion_tokens_details: providerResponse.usage?.completion_tokens_details
+          },
+          system_fingerprint: providerResponse.system_fingerprint,
+          service_tier: providerResponse.service_tier
+        }
+    }
   }
 }
