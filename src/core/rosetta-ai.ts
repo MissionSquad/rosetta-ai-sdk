@@ -429,7 +429,11 @@ export class RosettaAI {
       // --- Execute ---
       if (isCustom && mapper.executeGenerate && customConfig) {
         // Custom Provider Execution Path
-        return await mapper.executeGenerate(mappedParams, apiKey, customConfig, params)
+        const result = await mapper.executeGenerate(mappedParams, apiKey, customConfig, params)
+        if (this._openAICompletions) {
+          result.openAIResponse = this._transformToOpenAIResponse(providerKey, result.rawResponse, result)
+        }
+        return result
       } else if (this.isBuiltInProvider(providerKey)) {
         // Built-in Provider Execution Path
         const client = this.getClientForProvider(providerKey) // Safe cast here
@@ -1343,7 +1347,13 @@ export class RosettaAI {
     })
 
     // Use the common token usage mapper
-    const usage = mapTokenUsage(providerResponse.usage ?? providerResponse.usageMetadata)
+    const usage = mapTokenUsage(providerResponse?.usage ?? providerResponse?.usageMetadata)
+
+    if (!this.isBuiltInProvider(providerKey)) {
+      // For custom providers, assume the rawResponse is already OpenAI-compliant.
+      // The `providerResponse` here is the `rawResponse` from the GenerateResult.
+      return providerResponse as OpenAICompletion
+    }
 
     switch (providerKey) {
       case Provider.Anthropic:
