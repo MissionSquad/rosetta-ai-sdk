@@ -1393,18 +1393,40 @@ export class RosettaAI {
 
     
     if (!this.isBuiltInProvider(providerKey)) {
+      // For custom providers, check if the raw response is already OpenAI-compliant
       if (isOpenAICompletion(providerResponse)) {
+        // The response is already in OpenAI format, return it with minimal modifications
+        // to ensure consistency across all responses
+        const openAIResponse = providerResponse as OpenAI.Chat.Completions.ChatCompletion
+
         return {
-          ...providerResponse,
+          id: openAIResponse.id,
+          object: openAIResponse.object,
+          created: openAIResponse.created,
+          model: openAIResponse.model,
+          choices: openAIResponse.choices.map(choice => ({
+            index: choice.index,
+            message: {
+              role: 'assistant' as const,
+              content: choice.message.content,
+              tool_calls: choice.message.tool_calls as OpenAICompletionChoice['message']['tool_calls'],
+              refusal: (choice.message as any).refusal ?? null
+            },
+            logprobs: choice.logprobs,
+            finish_reason: choice.finish_reason
+          })),
           usage: {
-            prompt_tokens: providerResponse.usage?.prompt_tokens ?? 0,
-            completion_tokens: providerResponse.usage?.completion_tokens ?? 0,
-            total_tokens: providerResponse.usage?.total_tokens ?? 0
+            prompt_tokens: openAIResponse.usage?.prompt_tokens ?? 0,
+            completion_tokens: openAIResponse.usage?.completion_tokens ?? 0,
+            total_tokens: openAIResponse.usage?.total_tokens ?? 0
           },
-          system_fingerprint: null
+          system_fingerprint: openAIResponse.system_fingerprint ?? null,
+          service_tier: (openAIResponse as any).service_tier ?? null
         }
       }
+
       // Fallback for custom providers that might not be strictly OpenAI-compliant in structure
+      // This creates a minimal OpenAI-compliant response from the GenerateResult data
       return {
         id,
         object: 'chat.completion',
@@ -1412,9 +1434,9 @@ export class RosettaAI {
         model: baseResult.model,
         choices: [createChoice(baseResult.content, baseResult.finishReason, baseResult.toolCalls)],
         usage: {
-          prompt_tokens: 0,
-          completion_tokens: 0,
-          total_tokens: 0
+          prompt_tokens: baseResult.usage?.promptTokens ?? 0,
+          completion_tokens: baseResult.usage?.completionTokens ?? 0,
+          total_tokens: baseResult.usage?.totalTokens ?? 0
         },
         system_fingerprint: null,
         service_tier: null
