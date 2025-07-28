@@ -17,6 +17,10 @@ import { config as dotenvConfig } from 'dotenv'
 
 import { nanoid } from 'nanoid'
 import {
+  GenerateContentResponse as GoogleGenerateContentResponse,
+  EnhancedGenerateContentResponse as GoogleEnhancedGenerateContentResponse
+} from '@google/generative-ai'
+import {
   Provider,
   ProviderKey,
   RosettaAIConfig,
@@ -52,6 +56,47 @@ import { listModelsForProvider } from './listing/model.lister'
 import * as GroqAudioMapper from './mapping/groq.audio.mapper'
 
 dotenvConfig()
+
+// --- Type Guard Functions ---
+
+function isOpenAICompletion(response: unknown): response is OpenAI.Chat.Completions.ChatCompletion {
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    'id' in response &&
+    'choices' in response &&
+    'created' in response &&
+    'model' in response &&
+    'object' in response &&
+    (response as any).object === 'chat.completion'
+  )
+}
+
+function isAnthropicMessage(response: unknown): response is Anthropic.Messages.Message {
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    'id' in response &&
+    'content' in response &&
+    'model' in response &&
+    'role' in response &&
+    (response as any).role === 'assistant' &&
+    'type' in response &&
+    (response as any).type === 'message'
+  )
+}
+
+function isGoogleGenerateContentResponse(
+  response: unknown
+): response is GoogleGenerateContentResponse | GoogleEnhancedGenerateContentResponse {
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    'candidates' in response &&
+    'promptFeedback' in response &&
+    typeof (response as any).candidates === 'object'
+  )
+}
 
 /**
  * RosettaAI: Unified SDK for Interacting with Multiple AI Providers.
@@ -429,7 +474,11 @@ export class RosettaAI {
       // --- Execute ---
       if (isCustom && mapper.executeGenerate && customConfig) {
         // Custom Provider Execution Path
-        return await mapper.executeGenerate(mappedParams, apiKey, customConfig, params)
+        const result = await mapper.executeGenerate(mappedParams, apiKey, customConfig, params)
+        if (this._openAICompletions) {
+          result.openAIResponse = this._transformToOpenAIResponse(providerKey, result.rawResponse, result)
+        }
+        return result
       } else if (this.isBuiltInProvider(providerKey)) {
         // Built-in Provider Execution Path
         const client = this.getClientForProvider(providerKey) // Safe cast here
@@ -1319,7 +1368,7 @@ export class RosettaAI {
    */
   private _transformToOpenAIResponse(
     providerKey: ProviderKey,
-    providerResponse: any,
+    providerResponse: unknown,
     baseResult: GenerateResult
   ): OpenAICompletion {
     const now = Math.floor(Date.now() / 1000)
@@ -1342,73 +1391,121 @@ export class RosettaAI {
       finish_reason: finish_reason
     })
 
-    // Use the common token usage mapper
-    const usage = mapTokenUsage(providerResponse.usage ?? providerResponse.usageMetadata)
+    
+    if (!this.isBuiltInProvider(providerKey)) {
+      if (isOpenAICompletion(providerResponse)) {
+        return {
+          ...providerResponse,
+          usage: {
+            prompt_tokens: providerResponse.usage?.prompt_tokens ?? 0,
+            completion_tokens: providerResponse.usage?.completion_tokens ?? 0,
+            total_tokens: providerResponse.usage?.total_tokens ?? 0
+          },
+          system_fingerprint: null
+        }
+      }
+      // Fallback for custom providers that might not be strictly OpenAI-compliant in structure
+      return {
+        id,
+        object: 'chat.completion',
+        created: now,
+        model: baseResult.model,
+        choices: [createChoice(baseResult.content, baseResult.finishReason, baseResult.toolCalls)],
+        usage: {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0
+        },
+        system_fingerprint: null,
+        service_tier: null
+      }
+    }
 
     switch (providerKey) {
       case Provider.Anthropic:
-        return {
-          id: providerResponse.id ?? id,
-          object: 'chat.completion',
-          created: now,
-          model: baseResult.model,
-          choices: [createChoice(baseResult.content, baseResult.finishReason, baseResult.toolCalls)],
-          usage: {
-            prompt_tokens: usage?.promptTokens ?? 0,
-            completion_tokens: usage?.completionTokens ?? 0,
-            total_tokens: usage?.totalTokens ?? 0
-          },
-          system_fingerprint: null,
-          service_tier: providerResponse.usage?.service_tier ?? null
+        if (isAnthropicMessage(providerResponse)) {
+          return {
+            id: providerResponse.id,
+            object: 'chat.completion',
+            created: now,
+            model: baseResult.model,
+            choices: [createChoice(baseResult.content, baseResult.finishReason, baseResult.toolCalls)],
+            usage: {
+              prompt_tokens: providerResponse.usage.input_tokens,
+              completion_tokens: providerResponse.usage.output_tokens,
+              total_tokens: providerResponse.usage.input_tokens + providerResponse.usage.output_tokens
+            },
+            system_fingerprint: null,
+            service_tier: null
+          }
         }
+        break // Fall through to default if type guard fails
 
       case Provider.Google:
-        return {
-          id: providerResponse.responseId ?? id,
-          object: 'chat.completion',
-          created: now,
-          model: baseResult.model,
-          choices: [createChoice(baseResult.content, baseResult.finishReason, baseResult.toolCalls)],
-          usage: {
-            prompt_tokens: usage?.promptTokens ?? 0,
-            completion_tokens: usage?.completionTokens ?? 0,
-            total_tokens: usage?.totalTokens ?? 0
-          },
-          system_fingerprint: providerResponse.modelVersion ?? null,
-          service_tier: null
+        if (isGoogleGenerateContentResponse(providerResponse)) {
+          const usage = mapTokenUsage(providerResponse?.usageMetadata)
+          return {
+            id, // Google does not provide a top-level ID in the same way
+            object: 'chat.completion',
+            created: now,
+            model: baseResult.model,
+            choices: [createChoice(baseResult.content, baseResult.finishReason, baseResult.toolCalls)],
+            usage: {
+              prompt_tokens: usage?.promptTokens ?? 0,
+              completion_tokens: usage?.completionTokens ?? 0,
+              total_tokens: usage?.totalTokens ?? 0
+            },
+            system_fingerprint: null, // Not provided by Google in this object
+            service_tier: null
+          }
         }
+        break // Fall through to default if type guard fails
 
       case Provider.OpenAI:
       case Provider.Groq:
-      default: // Assume custom providers are OpenAI-compliant
-        return {
-          id: providerResponse.id ?? id,
-          object: 'chat.completion',
-          created: providerResponse.created ?? now,
-          model: providerResponse.model ?? baseResult.model,
-          choices: providerResponse.choices.map((choice: any): OpenAICompletionChoice => {
-            return {
+        if (isOpenAICompletion(providerResponse)) {
+          return {
+            id: providerResponse.id,
+            object: 'chat.completion',
+            created: providerResponse.created,
+            model: providerResponse.model,
+            choices: providerResponse.choices.map(choice => ({
               index: choice.index,
               message: {
                 role: 'assistant',
                 content: choice.message.content,
-                tool_calls: choice.message.tool_calls,
-                refusal: choice.message.refusal
+                tool_calls: choice.message.tool_calls as OpenAICompletionChoice['message']['tool_calls'],
+                refusal: (choice.message as any).refusal ?? null
               },
               logprobs: choice.logprobs,
               finish_reason: choice.finish_reason
-            }
-          }),
-          usage: {
-            prompt_tokens: usage?.promptTokens ?? 0,
-            completion_tokens: usage?.completionTokens ?? 0,
-            total_tokens: usage?.totalTokens ?? 0,
-            prompt_tokens_details: providerResponse.usage?.prompt_tokens_details,
-            completion_tokens_details: providerResponse.usage?.completion_tokens_details
-          },
-          system_fingerprint: providerResponse.system_fingerprint,
-          service_tier: providerResponse.service_tier
+            })),
+            usage: {
+              prompt_tokens: providerResponse.usage?.prompt_tokens ?? 0,
+              completion_tokens: providerResponse.usage?.completion_tokens ?? 0,
+              total_tokens: providerResponse.usage?.total_tokens ?? 0
+            },
+            system_fingerprint: providerResponse.system_fingerprint ?? null,
+            service_tier: (providerResponse as any).service_tier ?? null
+          }
         }
+        break // Fall through to default if type guard fails
+    }
+
+    // Default/fallback response if no type guard matched
+    return {
+      id,
+      object: 'chat.completion',
+      created: now,
+      model: baseResult.model,
+      choices: [createChoice(baseResult.content, baseResult.finishReason, baseResult.toolCalls)],
+      usage: {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0
+      },
+      system_fingerprint: null,
+      service_tier: null
     }
   }
 }
