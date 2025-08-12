@@ -56,6 +56,10 @@ export function isThinkingModel(modelName: string): boolean {
   return false
 }
 
+export function isGPT5Model(modelName: string): boolean {
+  return modelName.includes('gpt-5')
+}
+
 export function mapContentForOpenAIRole(
   content: RosettaMessage['content'],
   role: OpenAIRole

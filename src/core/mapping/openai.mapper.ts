@@ -37,6 +37,7 @@ import { mapBaseParams, mapBaseToolChoice } from './common.utils'
 import * as OpenAIEmbedMapper from './openai.embed.mapper'
 import * as OpenAIAudioMapper from './openai.audio.mapper'
 import {
+  isGPT5Model,
   isThinkingModel,
   mapContentForOpenAIRole,
   mapFromOpenAIResponse,
@@ -191,6 +192,7 @@ export class OpenAIMapper implements IProviderMapper {
 
     // Decide token field according to rules:
     const isThinking = isThinkingModel(params.model!)
+    const isGPT5 = isGPT5Model(params.model!)
     const hasEffectiveLimit = baseMappedParams.maxTokens !== undefined
 
     if (!isThinking) {
@@ -210,6 +212,11 @@ export class OpenAIMapper implements IProviderMapper {
       delete basePayload.temperature
     } else {
       delete basePayload.max_tokens
+    }
+    if (isGPT5) {
+      if (basePayload.temperature != null && !isNaN(basePayload.temperature)) {
+        basePayload.temperature = 1
+      }
     }
 
     if (params.stream) {
