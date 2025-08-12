@@ -86,9 +86,16 @@ export function mapBaseParams(
   stopSequences?: string[]
 } {
   const stopSequences = Array.isArray(params.stop) ? params.stop : params.stop ? [params.stop] : undefined
-  if (params.maxTokens === -1) {
-    delete params.maxTokens
-  }
+
+  // Normalize and apply precedence for token limits
+  const hasMct = params.maxCompletionTokens != null
+  const hasMt = params.maxTokens != null
+
+  const normalizedMct = hasMct && params.maxCompletionTokens !== -1 ? params.maxCompletionTokens : undefined
+  const normalizedMt = hasMt && params.maxTokens !== -1 ? params.maxTokens : undefined
+
+  // Precedence: maxCompletionTokens > maxTokens
+  const effectiveMaxTokens = normalizedMct ?? normalizedMt
 
   // Create an object with only defined parameters
   const result: {
@@ -100,7 +107,7 @@ export function mapBaseParams(
 
   if (params.temperature !== undefined) result.temperature = params.temperature
   if (params.topP !== undefined) result.topP = params.topP
-  if (params.maxTokens !== undefined) result.maxTokens = params.maxTokens
+  if (effectiveMaxTokens !== undefined) result.maxTokens = effectiveMaxTokens
   if (stopSequences !== undefined) result.stopSequences = stopSequences
 
   return result

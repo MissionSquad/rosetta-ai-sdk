@@ -119,6 +119,100 @@ export class GoogleMapper implements IProviderMapper {
     delete cleanedSchema.additionalProperties;
     delete cleanedSchema.$schema;
 
+    // Normalize/strip unsupported JSON Schema constructs for Google Function Declarations
+
+    // Map lowercase/JSON Schema "type" (or array of types) to Google SchemaType
+    const toGoogleType = (t: any): GoogleSchemaType | undefined => {
+      const map: Record<string, GoogleSchemaType> = {
+        string: GoogleSchemaType.STRING,
+        number: GoogleSchemaType.NUMBER,
+        integer: GoogleSchemaType.INTEGER,
+        boolean: GoogleSchemaType.BOOLEAN,
+        array: GoogleSchemaType.ARRAY,
+        object: GoogleSchemaType.OBJECT
+      };
+      if (typeof t === 'string') return map[t.toLowerCase()];
+      return undefined;
+    };
+
+    if (cleanedSchema.type !== undefined) {
+      if (Array.isArray(cleanedSchema.type)) {
+        // Choose a compatible single type (prefer the first recognized), fallback to STRING
+        const first = cleanedSchema.type.find((x: any) => typeof x === 'string');
+        const g = toGoogleType(first);
+        cleanedSchema.type = g ?? GoogleSchemaType.STRING;
+      } else if (typeof cleanedSchema.type === 'string') {
+        const g = toGoogleType(cleanedSchema.type);
+        if (g) cleanedSchema.type = g;
+      }
+    }
+
+    // Convert const -> enum (Gemini doesn't accept "const" in schemas)
+    if (Object.prototype.hasOwnProperty.call(cleanedSchema, 'const')) {
+      const c = (cleanedSchema as any).const;
+      delete (cleanedSchema as any).const;
+      if (c !== undefined) {
+        if (Array.isArray(cleanedSchema.enum)) {
+          cleanedSchema.enum = Array.from(new Set([...(cleanedSchema.enum as any[]), c]));
+        } else {
+          cleanedSchema.enum = [c];
+        }
+      }
+    }
+
+    // Helper: extract enum values from union members (anyOf/oneOf) when they are const/enum literals
+    const extractEnumFromUnion = (arr: any[]): any[] | null => {
+      const values: any[] = [];
+      for (const s of arr) {
+        if (s && typeof s === 'object') {
+          if (Object.prototype.hasOwnProperty.call(s, 'const')) {
+            values.push((s as any).const);
+          } else if (Array.isArray((s as any).enum)) {
+            values.push(...(s as any).enum);
+          }
+        }
+      }
+      return values.length > 0 ? Array.from(new Set(values)) : null;
+    };
+
+    // Normalize anyOf/oneOf -> enum when possible; otherwise drop and fallback to STRING
+    const unionKeys = ['anyOf', 'oneOf'] as const;
+    for (const key of unionKeys) {
+      const unionVal = (cleanedSchema as any)[key];
+      if (Array.isArray(unionVal)) {
+        const enums = extractEnumFromUnion(unionVal);
+        delete (cleanedSchema as any)[key];
+        if (enums && enums.length > 0) {
+          cleanedSchema.enum = Array.isArray(cleanedSchema.enum)
+            ? Array.from(new Set([...(cleanedSchema.enum as any[]), ...enums]))
+            : enums;
+          if (!cleanedSchema.type) cleanedSchema.type = GoogleSchemaType.STRING;
+        } else {
+          // Heterogeneous unions (e.g., string|number) are not representable: default to STRING
+          if (!cleanedSchema.type) cleanedSchema.type = GoogleSchemaType.STRING;
+        }
+      }
+    }
+
+    // Defensive: remove snake_case union keys if present (SDK may transform keys)
+    delete (cleanedSchema as any).any_of;
+    delete (cleanedSchema as any).one_of;
+
+    // Remove other unsupported JSON Schema keywords for Google function declarations
+    const UNSUPPORTED = [
+      'allOf','all_of','not','if','then','else','dependentSchemas','dependent_schemas',
+      'patternProperties','pattern_properties','contains','unevaluatedProperties','unevaluated_properties',
+      'nullable','$id','$ref','examples'
+    ];
+    for (const k of UNSUPPORTED) {
+      if (Object.prototype.hasOwnProperty.call(cleanedSchema, k)) delete (cleanedSchema as any)[k];
+    }
+
+    // If enum exists and type is missing, default to STRING (Gemini expects a concrete type)
+    if (cleanedSchema.enum && !cleanedSchema.type) {
+      cleanedSchema.type = GoogleSchemaType.STRING;
+    }
+
     // Handle exclusiveMinimum:
     if (typeof cleanedSchema.exclusiveMinimum === 'number') {
       if (typeof cleanedSchema.minimum === 'number' && cleanedSchema.minimum !== cleanedSchema.exclusiveMinimum) {
@@ -345,15 +439,15 @@ export class GoogleMapper implements IProviderMapper {
         throw new MappingError(`Only 'function' tools are currently supported for Google.`, this.provider)
       }
       const schema = tool.function.parameters
-      if (!this.isFunctionDeclarationSchema(schema)) {
+      // Clean the schema by removing/normalizing properties that cause issues with Google API
+      const cleanedSchema = this.cleanSchemaForGoogle(schema)
+      // Validate after cleaning so JSON Schema can be converted into Google's FunctionDeclarationSchema
+      if (!this.isFunctionDeclarationSchema(cleanedSchema)) {
         throw new MappingError(
           `Invalid parameters schema for tool ${tool.function.name}. Expected FunctionDeclarationSchema.`,
           this.provider
         )
       }
-
-      // Clean the schema by removing properties that cause issues with Google API
-      const cleanedSchema = this.cleanSchemaForGoogle(schema)
 
       return {
         functionDeclarations: [

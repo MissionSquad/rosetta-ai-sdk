@@ -71,7 +71,7 @@ describeIf(hasOpenAIKey || hasAnthropicKey || hasGoogleKey || hasGroqKey)(
           // Use a model known to support tools for the provider
           model:
             provider === Provider.Anthropic
-              ? 'claude-3-sonnet-20240229' // Sonnet/Opus recommended
+              ? 'claude-3-5-sonnet-latest' // Sonnet/Opus recommended
               : provider === Provider.Google
               ? 'gemini-1.5-flash-latest' // Flash/Pro support tools
               : provider === Provider.Groq
@@ -145,7 +145,7 @@ describeIf(hasOpenAIKey || hasAnthropicKey || hasGoogleKey || hasGroqKey)(
           provider: provider,
           model:
             provider === Provider.Anthropic
-              ? 'claude-3-sonnet-20240229'
+              ? 'claude-3-5-sonnet-latest'
               : provider === Provider.Google
               ? 'gemini-1.5-flash-latest'
               : provider === Provider.Groq

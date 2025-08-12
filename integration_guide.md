@@ -240,7 +240,7 @@ const config: RosettaAIConfig = {
 
   // Default Models (Overrides env vars if set)
   defaultModels: {
-    [Provider.Anthropic]: 'claude-3-sonnet-20240229',
+    [Provider.Anthropic]: 'claude-3-5-sonnet-latest',
     [Provider.Google]: 'gemini-1.5-pro-latest',
     // OpenAI default uses Azure deployment name if Azure is configured
     [Provider.OpenAI]: 'gpt-4o', // Example: Overrides Azure default if needed, otherwise uses azureOpenAIDefaultChatDeploymentName

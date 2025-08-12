@@ -178,11 +178,9 @@ export class OpenAIMapper implements IProviderMapper {
     // Use common utility for base parameters
     const baseMappedParams = mapBaseParams(params)
 
-    const basePayload = {
+    const basePayload: any = {
       model: params.model!,
       messages,
-      max_tokens: baseMappedParams.maxTokens,
-      max_completion_tokens: baseMappedParams.maxTokens,
       temperature: baseMappedParams.temperature,
       top_p: baseMappedParams.topP,
       stop: baseMappedParams.stopSequences, // Use mapped stopSequences
@@ -191,11 +189,27 @@ export class OpenAIMapper implements IProviderMapper {
       response_format: responseFormat
     }
 
-    if (isThinkingModel(params.model!)) {
+    // Decide token field according to rules:
+    const isThinking = isThinkingModel(params.model!)
+    const hasEffectiveLimit = baseMappedParams.maxTokens !== undefined
+
+    if (!isThinking) {
+      // Non-thinking OpenAI models must use max_completion_tokens only.
+      if (hasEffectiveLimit) {
+        basePayload.max_completion_tokens = baseMappedParams.maxTokens
+      }
+    } else {
+      // Thinking models: do not send any token limit or temperature.
+      delete basePayload.temperature
+    }
+
+    // Final cleanup to ensure only intended fields exist
+    if (isThinking) {
       delete basePayload.max_tokens
+      delete basePayload.max_completion_tokens
       delete basePayload.temperature
     } else {
-      delete basePayload.max_completion_tokens
+      delete basePayload.max_tokens
     }
 
     if (params.stream) {

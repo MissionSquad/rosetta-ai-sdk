@@ -1,18 +1,47 @@
 /* eslint-disable no-console */
 // Embeddings Example
-import { RosettaAI, Provider, EmbedParams, RosettaAIError } from '../src'
+import { RosettaAI, Provider, EmbedParams, RosettaAIError, CustomProviderConfig } from '../src'
+import { OpenAICompatibleMapper } from '../src/core/mapping/openai-compatible.mapper'
 import dotenv from 'dotenv'
 
 dotenv.config()
 
+// GPUStack custom provider configuration
+const gpustackProviderKey = 'gpustack'
+const gpustackProviderConfig: CustomProviderConfig = {
+  providerKey: gpustackProviderKey,
+  mapper: OpenAICompatibleMapper,
+  supportedFeatures: ['generate', 'stream', 'tool_use', 'embed', 'image_input'],
+  apiKey: process.env.GPUSTACK_API_KEY,
+  defaultModel: process.env.ROSETTA_DEFAULT_GPUSTACK_MODEL ?? 'qwen2.5-coder-14b-instruct',
+  defaultEmbeddingModel: 'qwen3-embedding-0.6b', // Specifically use this model
+  toolConfig: {
+    toolDefinitionFormat: 'jsonSchema',
+    toolCallInputFormat: 'jsonString',
+    toolResultFormat: 'jsonString'
+  }
+}
+
 async function runEmbeddings() {
-  const rosetta = new RosettaAI()
+  if (!process.env.GPUSTACK_API_KEY) {
+    console.warn('Warning: GPUSTACK_API_KEY not found in environment. GPUStack provider will be skipped.')
+  }
+
+  const rosetta = new RosettaAI({
+    customProviders: [gpustackProviderConfig]
+  })
 
   // Filter providers that support embeddings
-  const providers = rosetta.getConfiguredProviders().filter(p => ['openai', 'google', 'gpustack'].includes(p as string))
+  const providers = rosetta.getConfiguredProviders().filter(p => {
+    // Check if it's a standard provider that supports embeddings
+    if (['openai', 'google'].includes(p as string)) return true
+    // Check if it's our custom gpustack provider
+    if (p === gpustackProviderKey) return true
+    return false
+  })
 
   if (providers.length === 0) {
-    console.error('No configured providers support embeddings (OpenAI, Google, Groq needed).')
+    console.error('No configured providers support embeddings (OpenAI, Google, or GPUStack needed).')
     return
   }
 
@@ -27,15 +56,15 @@ async function runEmbeddings() {
     console.log(`\n--- Provider: ${provider} ---`)
     try {
       // Select embedding model (default or fallback)
-      const model =
-        rosetta.config.defaultEmbeddingModels?.[provider] ??
-        (provider === Provider.OpenAI
-          ? 'text-embedding-3-small'
-          : provider === Provider.Google
-          ? 'text-embedding-004' // Google's latest embedding model
-          : provider === Provider.Groq
-          ? 'nomic-embed-text-v1.5' // Groq's embedding model
-          : undefined)
+      let model: string | undefined
+
+      if (provider === Provider.OpenAI) {
+        model = rosetta.config.defaultEmbeddingModels?.[provider] ?? 'text-embedding-3-small'
+      } else if (provider === Provider.Google) {
+        model = rosetta.config.defaultEmbeddingModels?.[provider] ?? 'text-embedding-004'
+      } else if (provider === gpustackProviderKey) {
+        model = gpustackProviderConfig.defaultEmbeddingModel
+      }
 
       if (!model) {
         console.log(`Skipping ${provider}: No default embedding model configured or fallback available.`)
@@ -43,18 +72,11 @@ async function runEmbeddings() {
       }
       console.log(`Using model: ${model}`)
 
-      // Prepare parameters - Groq might only support single string input
-      let inputData: string | string[]
-      if (provider === Provider.Groq) {
-        console.log(`(Note: Groq currently processes only the first text for embeddings in this example)`)
-        inputData = textsToEmbed[0]!
-      } else {
-        // OpenAI and Google support batching via array input
-        inputData = textsToEmbed
-      }
+      // OpenAI, Google, and GPUStack support batching via array input
+      const inputData = textsToEmbed
 
       const params: EmbedParams = {
-        provider: Provider.OpenAI,
+        provider: provider as Provider,
         model,
         input: inputData
         // Optionally add dimensions for OpenAI: dimensions: 256

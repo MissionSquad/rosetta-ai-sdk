@@ -13,6 +13,8 @@ export interface GenerateParams {
   messages: RosettaMessage[]
   /** The maximum number of tokens to generate in the response. */
   maxTokens?: number
+  /** The maximum number of completion tokens to generate in the response (OpenAI-style). */
+  maxCompletionTokens?: number
   /** Controls randomness: lower values (e.g., 0.2) make output more focused, higher values (e.g., 0.8) make it more random. */
   temperature?: number
   /** Nucleus sampling parameter: considers only tokens comprising the top `topP` probability mass. */
