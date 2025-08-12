@@ -91,7 +91,7 @@ async function runToolUseChat(initialPrompt: string) {
       (provider === Provider.Google
         ? 'gemini-1.5-flash-latest' // gemini-1.5-pro-latest
         : provider === Provider.Anthropic
-        ? 'claude-3-sonnet-20240229' // Sonnet or Opus recommended for tools
+        ? 'claude-3-5-sonnet-latest' // Sonnet or Opus recommended for tools
         : provider === Provider.Groq
         ? 'llama-3.3-70b-versatile' // llama-3.3 from Groq
         : provider === Provider.OpenAI

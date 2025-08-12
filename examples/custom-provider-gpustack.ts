@@ -14,6 +14,8 @@
  */
 
 import dotenv from 'dotenv'
+import fs from 'fs'
+import path from 'path'
 import { z } from 'zod'
 
 import {
@@ -38,7 +40,7 @@ const gpustackProviderKey = 'gpustack' // Unique key for this provider
 const gpustackProviderConfig: CustomProviderConfig = {
   providerKey: gpustackProviderKey,
   mapper: OpenAICompatibleMapper, // Use the reusable OpenAI-compatible mapper
-  supportedFeatures: ['generate', 'stream', 'tool_use', 'embed'], // Features supported by Gpustack's OpenAI endpoint
+  supportedFeatures: ['generate', 'stream', 'tool_use', 'embed', 'image_input'], // Features supported by Gpustack's OpenAI endpoint
   // baseURL: process.env.GPUSTACK_BASE_URL, // Gpustack's OpenAI-compatible endpoint, loaded from environment
   apiKey: process.env.GPUSTACK_API_KEY, // Loaded from environment
   // Define a default model for Gpustack
@@ -259,6 +261,67 @@ async function runGpustackExamples() {
     if (error instanceof ProviderAPIError && error.statusCode === 404) {
       console.error(
         `Hint: Ensure the embedding model ('nomic-embed-text-v1.5' or configured default) is available on your Gpustack endpoint.`
+      )
+    }
+  }
+
+  // --- 5. Image Input ---
+  console.log('--- 5. Image Input (Gpustack) ---')
+  try {
+    // Define the path to the image. Assumes 'document.png' is in the 'examples' directory.
+    const imagePath = path.join(__dirname, 'document.png')
+
+    // Check if the image file exists before proceeding
+    if (!fs.existsSync(imagePath)) {
+      console.warn(`[Image Input] Warning: Image file not found at ${imagePath}. Skipping example.`)
+    } else {
+      // Read the image file and convert it to a base64 string
+      const imageBuffer = fs.readFileSync(imagePath)
+      const base64Data = imageBuffer.toString('base64')
+      const mimeType = 'image/png' // The MIME type for the image
+
+      // Define the system prompt for the vision task
+      const systemPrompt =
+        'Extract the text from the above document as if you were reading it naturally. Diagrams can be represented as text descriptions with simple text line drawings.'
+
+      // NOTE: Ensure the model used supports vision/image inputs.
+      // 'llava-v1.6-34b' is a common type of vision model, but you may need to
+      // replace it with the specific vision-capable model available on your Gpustack endpoint.
+      const visionModel = 'nanonets-ocr-s'
+      console.log(`[Image Input] Attempting with model: ${visionModel}`)
+
+      const response = await rosetta.generate({
+        provider: gpustackProviderKey as Provider,
+        model: visionModel,
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                image: {
+                  mimeType,
+                  base64Data
+                }
+              }
+            ]
+          }
+        ],
+        maxTokens: 4096 // Allow for a longer response to extract text
+      })
+
+      console.log(`[Image Input Response]:\n${response.content}`)
+      console.log(`[Image Input Usage]: ${JSON.stringify(response.usage)}`)
+    }
+  } catch (error) {
+    console.error('[Image Input Error]', error)
+    if (error instanceof ProviderAPIError) {
+      console.error(
+        `Hint: Ensure the vision model is correct and available on your Gpustack endpoint and that the API key has the correct permissions.`
       )
     }
   }

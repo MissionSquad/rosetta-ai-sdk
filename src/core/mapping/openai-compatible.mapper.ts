@@ -158,16 +158,26 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     const tools = this.mapToolsToOpenAI(originalParams.tools)
     const tool_choice = this.mapToolChoiceToOpenAI(originalParams.toolChoice)
 
+    // Precedence and sentinel handling for token limits
+    const hasMct = originalParams.maxCompletionTokens != null
+    const hasMt = originalParams.maxTokens != null
+    const normalizedMct =
+      hasMct && originalParams.maxCompletionTokens !== -1 ? originalParams.maxCompletionTokens : undefined
+    const normalizedMt = hasMt && originalParams.maxTokens !== -1 ? originalParams.maxTokens : undefined
+    const effectiveMaxTokens = normalizedMct ?? normalizedMt
+
     const openAIParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
       model: model,
       messages: messages,
-      max_tokens: originalParams.maxTokens,
+      ...(hasMct ? { max_completion_tokens: effectiveMaxTokens } : {}), // only use max_completion_tokens if sent
+      ...(hasMt && !hasMct ? { max_tokens: effectiveMaxTokens } : {}), // only use max_tokens if sent and max_completion_tokens is not sent
       temperature: originalParams.temperature,
       stream: false,
       tools,
       tool_choice,
-      top_p: originalParams.topP
+      top_p: originalParams.topP,
       // Add other compatible parameters if needed (e.g., stop, seed)
+      ...(originalParams.stop ? { stop: originalParams.stop } : {})
     }
 
     try {
@@ -215,17 +225,28 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
       return
     }
 
+    // Precedence and sentinel handling for token limits
+    const hasMct = originalParams.maxCompletionTokens != null
+    const hasMt = originalParams.maxTokens != null
+    const normalizedMct =
+      hasMct && originalParams.maxCompletionTokens !== -1 ? originalParams.maxCompletionTokens : undefined
+    const normalizedMt = hasMt && originalParams.maxTokens !== -1 ? originalParams.maxTokens : undefined
+    const effectiveMaxTokens = normalizedMct ?? normalizedMt
+
     const openAIParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
       model: model,
       messages: messages,
-      max_tokens: originalParams.maxTokens,
+      ...(hasMct ? { max_completion_tokens: effectiveMaxTokens } : {}), // only use max_completion_tokens if sent
+      ...(hasMt && !hasMct ? { max_tokens: effectiveMaxTokens } : {}), // only use max_tokens if sent and max_completion_tokens is not sent
       temperature: originalParams.temperature,
       stream: true,
       stream_options: { include_usage: true }, // Request usage data
       tools,
       tool_choice,
-      top_p: originalParams.topP
+      top_p: originalParams.topP,
       // Add other compatible parameters if needed
+      ...(originalParams.stop != null ? { stop: originalParams.stop } : {}),
+      ...(originalParams.responseFormat != null ? { response_format: originalParams.responseFormat } : {})
     }
 
     try {
