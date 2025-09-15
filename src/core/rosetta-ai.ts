@@ -36,7 +36,8 @@ import {
   StreamChunk,
   ProviderOptions,
   RosettaModelList,
-  ModelListingSourceConfig
+  ModelListingSourceConfig,
+  RosettaVoiceList
 } from '../types'
 import { OpenAICompletion, OpenAICompletionChoice } from '../types/openai.types' // Import the new types
 import { ConfigurationError, ProviderAPIError, UnsupportedFeatureError, RosettaAIError, MappingError } from '../errors'
@@ -998,6 +999,52 @@ export class RosettaAI {
   }
 
   /**
+   * Lists the available voices for a specific configured provider (custom providers only in v1).
+   *
+   * @param providerKey The provider key (built-in or custom) for which to list voices.
+   * @returns A promise resolving to a provider-agnostic list of voices.
+   * @throws {ConfigurationError} If the provider is not configured.
+   * @throws {UnsupportedFeatureError} If voice listing is not supported for the provider.
+   * @throws {ProviderAPIError} If the provider API call fails.
+   * @throws {MappingError} If the response cannot be parsed correctly.
+   */
+  public async listVoices(providerKey: ProviderKey): Promise<RosettaVoiceList> {
+    // Ensure provider is configured
+    const mapper = this.mappers.get(providerKey)
+    if (!mapper) {
+      throw new ConfigurationError(`Provider '${providerKey}' is not configured in this RosettaAI instance.`)
+    }
+
+    // Built-in providers currently do not expose a unified voice catalog API in v1
+    if (this.isBuiltInProvider(providerKey)) {
+      throw new UnsupportedFeatureError(providerKey as Provider, 'Voice Listing')
+    }
+
+    // Custom provider path
+    const customConfig = this.customProviderConfigs.get(providerKey)
+    const apiKey = this.customApiKeys.get(providerKey)
+
+    if (!customConfig) {
+      throw new ConfigurationError(`Configuration for custom provider '${providerKey}' not found.`)
+    }
+
+    // Check feature support
+    if (!customConfig.supportedFeatures.includes('list_voices')) {
+      throw new UnsupportedFeatureError(providerKey, 'Voice Listing')
+    }
+
+    // Ensure mapper implements executeListVoices
+    if (!('executeListVoices' in mapper) || typeof (mapper as any).executeListVoices !== 'function') {
+      throw new ConfigurationError(
+        `Custom provider '${providerKey}' does not implement executeListVoices. Update the mapper to support voice listing.`
+      )
+    }
+
+    // Delegate to mapper
+    return await (mapper as any).executeListVoices(apiKey, customConfig)
+  }
+
+  /**
    * Lists the models available for a specific configured provider (built-in or custom).
    *
    * @param providerKey The provider key (built-in or custom) for which to list models.
@@ -1205,6 +1252,9 @@ export class RosettaAI {
           break
         case 'model listing': // Check for model listing
           featureKey = 'list_models'
+          break
+        case 'voice listing': // Check for voice listing
+          featureKey = 'list_voices'
           break
         // Add mappings for other features like tool_use, image_input, json_mode
       }

@@ -11,7 +11,8 @@ import {
   SpeechParams,
   AudioStreamChunk,
   RosettaTool,
-  RosettaToolCallRequest
+  RosettaToolCallRequest,
+  RosettaVoiceList
 } from '../../types'
 import {
   RosettaAIError,
@@ -173,6 +174,17 @@ export abstract class BaseCustomMapper implements IProviderMapper {
     _originalParams: TranslateParams
   ): Promise<TranscriptionResult> {
     throw new UnsupportedFeatureError(this.provider, 'translate (executeTranslate not implemented)')
+  }
+
+  /**
+   * **Optional:** Lists voices for a custom provider (e.g., TTS voice catalog).
+   * Default implementation throws UnsupportedFeatureError; override in provider mappers that support it.
+   */
+  executeListVoices?(
+    _apiKey: string | undefined,
+    _providerConfig: CustomProviderConfig
+  ): Promise<RosettaVoiceList> {
+    throw new UnsupportedFeatureError(this.provider, 'listVoices (executeListVoices not implemented)')
   }
 
   // --- Helper Methods ---

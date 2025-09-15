@@ -10,7 +10,8 @@ import {
   RosettaTool,
   ProviderKey,
   SpeechParams,
-  AudioStreamChunk
+  AudioStreamChunk,
+  RosettaVoiceList
 } from '../../types'
 import { RosettaAIError } from '../../errors'
 import { CustomProviderConfig } from '../../types/custom.types'
@@ -278,4 +279,17 @@ export interface IProviderMapper {
     providerConfig: CustomProviderConfig,
     originalParams: TranslateParams
   ): Promise<TranscriptionResult>
+
+  /**
+   * **Optional:** Lists voices for a custom provider (e.g., TTS voice catalog).
+   *
+   * @param apiKey - The API key for the custom provider.
+   * @param providerConfig - The full configuration object for this custom provider.
+   * @returns A promise resolving to a provider-agnostic RosettaVoiceList.
+   * @throws {ProviderAPIError | RosettaAIError} If the custom API call fails.
+   */
+  executeListVoices?(
+    apiKey: string | undefined,
+    providerConfig: CustomProviderConfig
+  ): Promise<RosettaVoiceList>
 }

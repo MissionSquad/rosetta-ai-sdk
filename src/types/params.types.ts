@@ -1,4 +1,4 @@
-import { Provider, ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData } from './common.types'
+import { ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData } from './common.types'
 import { ProviderOptions } from './config.types'
 
 /**
@@ -78,8 +78,8 @@ export interface EmbedParams {
  * Parameters for generating speech (Text-to-Speech).
  */
 export interface SpeechParams {
-  /** The provider to use for this request (currently OpenAI and Groq). */
-  provider: Provider.OpenAI | Provider.Groq
+  /** The provider to use for this request (built-in or custom). */
+  provider: ProviderKey
   /** The specific TTS model ID. Optional if a default is configured (e.g., 'tts-1' for OpenAI, 'playai-tts' for Groq). */
   model?: string
   /** The text to synthesize into speech. */
@@ -93,14 +93,15 @@ export interface SpeechParams {
   speed?: number
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
+  ttsNormalize?: boolean
 }
 
 /**
  * Base parameters for audio processing (Transcription/Translation).
  */
 interface BaseAudioParams {
-  /** The provider to use for this request (e.g., OpenAI, Groq). */
-  provider: Provider
+  /** The provider to use for this request (built-in or custom). */
+  provider: ProviderKey
   /** The specific STT/translation model ID. Optional if a default is configured (e.g., 'whisper-1'). */
   model?: string
   /** The audio data to process. */
