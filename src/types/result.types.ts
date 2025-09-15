@@ -1,4 +1,4 @@
-import { RosettaToolCallRequest, Citation } from './common.types'
+import { RosettaToolCallRequest, Citation, ProviderKey } from './common.types'
 import { OpenAICompletion } from './openai.types' // Import the new type
 
 /**
@@ -74,4 +74,34 @@ export interface TranscriptionResult {
   model: string
   /** The raw response object from the underlying SDK. */
   rawResponse?: unknown
+}
+
+/**
+ * Voice metadata (provider-agnostic) for TTS voice catalogs.
+ */
+export interface RosettaVoice {
+  /** Provider-specific voice identifier */
+  id: string
+  /** Human-readable name if provided by the provider */
+  name?: string
+  /** Optional labels/tags attached to the voice */
+  labels?: Record<string, string>
+  /** Optional voice category/type provided by the provider */
+  category?: string
+  /** Optional preview URL to sample the voice */
+  previewUrl?: string
+  /** Whether the authenticated user owns the voice (provider-dependent) */
+  owned?: boolean
+  /** Provider key for reference */
+  provider: ProviderKey
+  /** Raw provider response for advanced use */
+  rawData?: unknown
+}
+
+/**
+ * Standard list wrapper for voice catalogs.
+ */
+export interface RosettaVoiceList {
+  object: 'list'
+  data: RosettaVoice[]
 }

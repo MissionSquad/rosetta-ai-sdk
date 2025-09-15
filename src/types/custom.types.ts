@@ -47,7 +47,8 @@ export interface CustomProviderConfig {
     | 'tool_use'
     | 'image_input'
     | 'json_mode'
-    | 'list_models' // Added feature flag for model listing
+    | 'list_models' // Model listing
+    | 'list_voices' // Voice listing
     // Add other potential features as needed
   >
 
