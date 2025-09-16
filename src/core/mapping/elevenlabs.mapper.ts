@@ -206,6 +206,18 @@ export class ElevenLabsMapper extends BaseCustomMapper {
         modelId,
         ...(output_format ? { outputFormat: output_format } : {})
       }
+      // Provider-specific voice settings (optional)
+      const opts = originalParams.ttsOptions as Record<string, unknown> | undefined
+      if (opts && typeof opts === 'object') {
+        const voiceSettings: Record<string, unknown> = {}
+        if (typeof opts.stability === 'number') voiceSettings.stability = opts.stability
+        if (typeof opts.similarityBoost === 'number') voiceSettings.similarityBoost = opts.similarityBoost
+        if (typeof opts.style === 'number') voiceSettings.style = opts.style
+        if (typeof opts.useSpeakerBoost === 'boolean') voiceSettings.useSpeakerBoost = opts.useSpeakerBoost
+        if (Object.keys(voiceSettings).length > 0) {
+          ;(ttsReq as any).voiceSettings = voiceSettings
+        }
+      }
       const stream = await client.textToSpeech.convert(voiceId, ttsReq)
       return await collectStreamToBuffer(stream)
     } catch (err) {
@@ -241,6 +253,18 @@ export class ElevenLabsMapper extends BaseCustomMapper {
       const streamReq: StreamTextToSpeechRequest = {
         text: inputText,
         modelId
+      }
+      // Provider-specific voice settings (optional) for streaming if SDK supports
+      const opts = originalParams.ttsOptions as Record<string, unknown> | undefined
+      if (opts && typeof opts === 'object') {
+        const voiceSettings: Record<string, unknown> = {}
+        if (typeof opts.stability === 'number') voiceSettings.stability = opts.stability
+        if (typeof opts.similarityBoost === 'number') voiceSettings.similarityBoost = opts.similarityBoost
+        if (typeof opts.style === 'number') voiceSettings.style = opts.style
+        if (typeof opts.useSpeakerBoost === 'boolean') voiceSettings.useSpeakerBoost = opts.useSpeakerBoost
+        if (Object.keys(voiceSettings).length > 0) {
+          ;(streamReq as any).voiceSettings = voiceSettings
+        }
       }
       stream = await client.textToSpeech.stream(voiceId, streamReq)
     } catch (e) {
