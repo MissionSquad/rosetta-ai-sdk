@@ -1,3 +1,4 @@
+import { VoiceSettings } from '@elevenlabs/elevenlabs-js/api'
 import { RosettaToolCallRequest, Citation, ProviderKey } from './common.types'
 import { OpenAICompletion } from './openai.types' // Import the new type
 
@@ -88,8 +89,12 @@ export interface RosettaVoice {
   labels?: Record<string, string>
   /** Optional voice category/type provided by the provider */
   category?: string
+  /** The description of the voice. */
+  description?: string
   /** Optional preview URL to sample the voice */
   previewUrl?: string
+  /** The settings of the voice. */
+  settings?: VoiceSettings
   /** Whether the authenticated user owns the voice (provider-dependent) */
   owned?: boolean
   /** Provider key for reference */

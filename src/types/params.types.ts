@@ -91,6 +91,8 @@ export interface SpeechParams {
   responseFormat?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm'
   /** Optional: Speed of the generated speech (0.25 to 4.0). Defaults to 1.0. */
   speed?: number
+  /** Optional: Provider-specific TTS options bag (e.g., ElevenLabs voice settings). */
+  ttsOptions?: Record<string, unknown>
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
   ttsNormalize?: boolean
