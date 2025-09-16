@@ -355,7 +355,9 @@ export class ElevenLabsMapper extends BaseCustomMapper {
       name: v.name,
       labels: v.labels,
       category: v.category ? String(v.category) : undefined,
+      description: v.description,
       previewUrl: v.previewUrl,
+      settings: v.settings,
       owned: v.isOwner,
       provider: this.provider,
       rawData: v
