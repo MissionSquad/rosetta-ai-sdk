@@ -196,7 +196,7 @@ export class ElevenLabsMapper extends BaseCustomMapper {
       throw new MappingError('TTS model_id is required (set SpeechParams.model or defaultTtsModel).', this.provider)
     }
 
-    const output_format = mapTtsOutputFormat(originalParams.responseFormat)
+    const outputFormat = mapTtsOutputFormat(originalParams.responseFormat)
 
     try {
       const shouldNormalize = originalParams?.ttsNormalize !== false
@@ -204,7 +204,7 @@ export class ElevenLabsMapper extends BaseCustomMapper {
       const ttsReq: TextToSpeechRequest = {
         text: inputText,
         modelId,
-        ...(output_format ? { outputFormat: output_format } : {})
+        ...(outputFormat ? { outputFormat } : {})
       }
       // Provider-specific voice settings (optional)
       const opts = originalParams.ttsOptions as Record<string, unknown> | undefined
@@ -246,13 +246,16 @@ export class ElevenLabsMapper extends BaseCustomMapper {
       return
     }
 
+    const outputFormat = mapTtsOutputFormat(originalParams.responseFormat)
+
     let stream: unknown
     try {
       const shouldNormalize = originalParams?.ttsNormalize !== false
       const inputText = shouldNormalize ? normalizeTextForTTS(originalParams.input) : originalParams.input
       const streamReq: StreamTextToSpeechRequest = {
         text: inputText,
-        modelId
+        modelId,
+        ...(outputFormat ? { outputFormat } : {})
       }
       // Provider-specific voice settings (optional) for streaming if SDK supports
       const opts = originalParams.ttsOptions as Record<string, unknown> | undefined
