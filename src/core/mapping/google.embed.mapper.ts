@@ -4,18 +4,7 @@ import type { EmbedResult } from '../../types'
 import { Provider } from '../../types'
 import { MappingError } from '../../errors'
 import { mapTokenUsage } from './common.utils'
-
-// Type for new SDK embedding response
-type EmbedContentResponse = {
-  embeddings?: Array<{
-    values?: number[]
-    statistics?: any
-  }>
-  metadata?: {
-    billableCharacterCount?: number
-  }
-  usageMetadata?: any
-}
+import type { EmbedContentResponse } from '@google/genai'
 
 // Map embedding response (handles both single and batch)
 export function mapFromGoogleEmbedResponse(response: EmbedContentResponse, model: string): EmbedResult {

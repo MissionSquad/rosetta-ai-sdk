@@ -21,6 +21,24 @@ export interface ProviderOptions {
   googleVertexAIProject?: string
   /** Google Cloud location/region for Vertex AI (e.g., 'us-central1'). Required if googleVertexAI is true. */
   googleVertexAILocation?: string
+  /**
+   * Safety settings for Google provider. Allows customization of content filtering thresholds.
+   * If not specified, defaults to BLOCK_MEDIUM_AND_ABOVE for all categories.
+   *
+   * @example
+   * ```typescript
+   * {
+   *   googleSafetySettings: [
+   *     { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+   *     { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' }
+   *   ]
+   * }
+   * ```
+   */
+  googleSafetySettings?: Array<{
+    category: 'HARM_CATEGORY_HARASSMENT' | 'HARM_CATEGORY_HATE_SPEECH' | 'HARM_CATEGORY_SEXUALLY_EXPLICIT' | 'HARM_CATEGORY_DANGEROUS_CONTENT'
+    threshold: 'BLOCK_NONE' | 'BLOCK_ONLY_HIGH' | 'BLOCK_MEDIUM_AND_ABOVE' | 'BLOCK_LOW_AND_ABOVE'
+  }>
   // Add other provider-specific config options here as needed
 }
 

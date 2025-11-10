@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import {
   GoogleGenAI,
-  GenerateContentParameters
+  GenerateContentParameters,
+  EmbedContentParameters
 } from '@google/genai'
 import Groq from 'groq-sdk'
 import OpenAI, { AzureOpenAI } from 'openai'
@@ -682,7 +683,7 @@ export class RosettaAI {
         // --- Client Call Logic ---
         if (providerKey === Provider.Google) {
           // New SDK embedContent method handles both single and batch
-          providerResponse = await (client as GoogleGenAI).models.embedContent(mappedParams as any)
+          providerResponse = await (client as GoogleGenAI).models.embedContent(mappedParams as EmbedContentParameters)
         } else if (providerKey === Provider.Groq) {
           providerResponse = await (client as Groq).embeddings.create(mappedParams)
         } else if (providerKey === Provider.OpenAI) {

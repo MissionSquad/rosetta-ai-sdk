@@ -11,7 +11,9 @@ import {
   Part,
   FinishReason,
   HarmCategory,
-  HarmBlockThreshold
+  HarmBlockThreshold,
+  EmbedContentParameters,
+  EmbedContentResponse
 } from '@google/genai'
 import {
   GenerateParams,
@@ -298,6 +300,10 @@ export class GoogleMapper implements IProviderMapper {
           throw new MappingError('Multiple system messages not supported by Google.', this.provider)
         if (typeof msg.content !== 'string')
           throw new MappingError('Google system instruction must be string.', this.provider)
+        // Note: In the new @google/genai SDK, systemInstruction is a Content object where
+        // the role must be 'user' or 'model' (per SDK Content interface).
+        // The systemInstruction field itself designates this as a system-level instruction.
+        // See: https://ai.google.dev/gemini-api/docs/migrate#configuration
         systemInstruction = { role: 'user', parts: [{ text: msg.content }] }
         return
       }
@@ -485,12 +491,19 @@ export class GoogleMapper implements IProviderMapper {
       responseSchema: responseSchema,
       tools: finalTools,
       systemInstruction: systemInstruction,
-      safetySettings: [
-        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }
-      ]
+      // Safety settings: use custom settings if provided, otherwise default to BLOCK_MEDIUM_AND_ABOVE
+      // Default thresholds provide balanced protection without being overly restrictive
+      safetySettings: params.providerOptions?.googleSafetySettings
+        ? params.providerOptions.googleSafetySettings.map(s => ({
+            category: s.category as HarmCategory,
+            threshold: s.threshold as HarmBlockThreshold
+          }))
+        : [
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }
+          ]
     }
 
     // Return GenerateContentParameters (new SDK structure)
@@ -867,7 +880,7 @@ export class GoogleMapper implements IProviderMapper {
   }
 
   // --- Embedding Mapping ---
-  mapToEmbedParams(params: EmbedParams): any {
+  mapToEmbedParams(params: EmbedParams): EmbedContentParameters {
     // New SDK uses a unified embedContent method
     const contents = Array.isArray(params.input) ? params.input : [params.input]
 
@@ -884,15 +897,9 @@ export class GoogleMapper implements IProviderMapper {
     }
   }
 
-  mapFromEmbedResponse(response: any, modelId: string): EmbedResult {
-    // Determine if it's a batch or single response based on structure
-    if ('embeddings' in response && Array.isArray(response.embeddings)) {
-      return GoogleEmbedMapper.mapFromGoogleEmbedBatchResponse(response, modelId)
-    } else if ('embedding' in response) {
-      return GoogleEmbedMapper.mapFromGoogleEmbedResponse(response, modelId)
-    } else {
-      throw new MappingError('Unknown Google embedding response structure.', this.provider)
-    }
+  mapFromEmbedResponse(response: EmbedContentResponse, modelId: string): EmbedResult {
+    // The new SDK returns EmbedContentResponse with embeddings array
+    return GoogleEmbedMapper.mapFromGoogleEmbedResponse(response, modelId)
   }
 
   // --- Audio Mapping ---
