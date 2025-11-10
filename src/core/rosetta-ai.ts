@@ -1,15 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import {
-  GoogleGenerativeAI,
-  GenerativeModel,
-  HarmCategory,
-  HarmBlockThreshold,
-  StartChatParams,
-  GenerateContentRequest,
-  EmbedContentRequest,
-  BatchEmbedContentsRequest,
-  Part as GooglePart
-} from '@google/generative-ai'
+  GoogleGenAI,
+  GenerateContentParameters
+} from '@google/genai'
 import Groq from 'groq-sdk'
 import OpenAI, { AzureOpenAI } from 'openai'
 
@@ -17,9 +10,8 @@ import { config as dotenvConfig } from 'dotenv'
 
 import { nanoid } from 'nanoid'
 import {
-  GenerateContentResponse as GoogleGenerateContentResponse,
-  EnhancedGenerateContentResponse as GoogleEnhancedGenerateContentResponse
-} from '@google/generative-ai'
+  GenerateContentResponse as GoogleGenerateContentResponse
+} from '@google/genai'
 import {
   Provider,
   ProviderKey,
@@ -34,7 +26,6 @@ import {
   TranslateParams,
   TranscriptionResult,
   StreamChunk,
-  ProviderOptions,
   RosettaModelList,
   ModelListingSourceConfig,
   RosettaVoiceList
@@ -89,12 +80,11 @@ function isAnthropicMessage(response: unknown): response is Anthropic.Messages.M
 
 function isGoogleGenerateContentResponse(
   response: unknown
-): response is GoogleGenerateContentResponse | GoogleEnhancedGenerateContentResponse {
+): response is GoogleGenerateContentResponse {
   return (
     typeof response === 'object' &&
     response !== null &&
     'candidates' in response &&
-    'promptFeedback' in response &&
     typeof (response as any).candidates === 'object'
   )
 }
@@ -107,7 +97,7 @@ export class RosettaAI {
   readonly config: RosettaAIConfig
   private _openAICompletions: boolean = false // Add this field
   private anthropicClient?: Anthropic
-  private googleClient?: GoogleGenerativeAI
+  private googleClient?: GoogleGenAI
   private groqClient?: Groq
   private openAIClient?: OpenAI
   private azureOpenAIClient?: AzureOpenAI
@@ -126,6 +116,8 @@ export class RosettaAI {
     this.config = {
       anthropicApiKey: config.anthropicApiKey ?? loadEnv('ANTHROPIC_API_KEY'),
       googleApiKey: config.googleApiKey ?? loadEnv('GOOGLE_API_KEY'),
+      googleVertexAIProject: config.googleVertexAIProject ?? loadEnv('GOOGLE_CLOUD_PROJECT'),
+      googleVertexAILocation: config.googleVertexAILocation ?? loadEnv('GOOGLE_CLOUD_LOCATION'),
       groqApiKey: config.groqApiKey ?? loadEnv('GROQ_API_KEY'),
       openaiApiKey: config.openaiApiKey ?? loadEnv('OPENAI_API_KEY'),
       azureOpenAIApiKey: config.azureOpenAIApiKey ?? loadEnv('AZURE_OPENAI_API_KEY'),
@@ -192,9 +184,32 @@ export class RosettaAI {
       })
     }
 
-    // Google
-    if (this.config.googleApiKey) {
-      this.googleClient = new GoogleGenerativeAI(this.config.googleApiKey)
+    // Google - support both Gemini API (with API key) and Vertex AI
+    const providerOptions = this.config.providerOptions?.[Provider.Google] ?? {}
+    const useVertexAI = providerOptions.googleVertexAI ?? false
+
+    if (useVertexAI) {
+      // Vertex AI mode
+      const project = providerOptions.googleVertexAIProject ?? this.config.googleVertexAIProject
+      const location = providerOptions.googleVertexAILocation ?? this.config.googleVertexAILocation
+
+      if (project && location) {
+        this.googleClient = new GoogleGenAI({
+          vertexai: true,
+          project: project,
+          location: location,
+          apiVersion: providerOptions.googleApiVersion
+        })
+        console.log(`RosettaAI: Initialized Google Vertex AI client (Project: ${project}, Location: ${location})`)
+      } else {
+        console.warn('RosettaAI: Vertex AI mode requested but project or location is missing. Google provider unavailable.')
+      }
+    } else if (this.config.googleApiKey) {
+      // Gemini API mode (API key)
+      this.googleClient = new GoogleGenAI({
+        apiKey: this.config.googleApiKey,
+        apiVersion: providerOptions.googleApiVersion
+      })
     }
 
     // Groq
@@ -373,7 +388,7 @@ export class RosettaAI {
    * @internal Gets the underlying SDK client instance for a **built-in** provider.
    * Throws if called for a custom provider or if the provider is not recognized.
    */
-  private getClientForProvider(providerKey: ProviderKey): Anthropic | GoogleGenerativeAI | Groq | OpenAI | AzureOpenAI {
+  private getClientForProvider(providerKey: ProviderKey): Anthropic | GoogleGenAI | Groq | OpenAI | AzureOpenAI {
     // Convert string provider keys to enum values if possible
     let provider: Provider
 
@@ -488,19 +503,9 @@ export class RosettaAI {
         if (providerKey === Provider.Anthropic) {
           providerResponse = await (client as Anthropic).messages.create(mappedParams)
         } else if (providerKey === Provider.Google) {
-          const googleM = this.getGoogleModel(model, params.providerOptions)
-          const { googleMappedParams: googleP, isChat } = mappedParams // Mapper returns this structure now
-          if (isChat) {
-            const { contents: currentTurnContent, ...chatParams } = googleP as StartChatParams & {
-              contents: GooglePart[]
-            }
-            const chat = googleM.startChat(chatParams)
-            const googleCR = await chat.sendMessage(currentTurnContent)
-            providerResponse = googleCR.response
-          } else {
-            const googleR = await googleM.generateContent(googleP as GenerateContentRequest)
-            providerResponse = googleR.response
-          }
+          // New SDK uses a unified API - no need to distinguish chat vs generateContent
+          const googleParams = mappedParams as GenerateContentParameters
+          providerResponse = await (client as GoogleGenAI).models.generateContent(googleParams)
         } else if (providerKey === Provider.Groq) {
           providerResponse = await (client as Groq).chat.completions.create(mappedParams)
         } else if (providerKey === Provider.OpenAI) {
@@ -596,19 +601,9 @@ export class RosettaAI {
         if (providerKey === Provider.Anthropic) {
           providerStream = await (client as Anthropic).messages.create(mappedParams)
         } else if (providerKey === Provider.Google) {
-          const googleM = this.getGoogleModel(model, params.providerOptions)
-          const { googleMappedParams: googleP, isChat } = mappedParams
-          if (isChat) {
-            const { contents: currentTurnContent, ...chatParams } = googleP as StartChatParams & {
-              contents: GooglePart[]
-            }
-            const chat = googleM.startChat(chatParams)
-            const googleSR = await chat.sendMessageStream(currentTurnContent)
-            providerStream = googleSR.stream
-          } else {
-            const googleSR = await googleM.generateContentStream(googleP as GenerateContentRequest)
-            providerStream = googleSR.stream
-          }
+          // New SDK returns AsyncGenerator directly from generateContentStream
+          const googleParams = mappedParams as GenerateContentParameters
+          providerStream = await (client as GoogleGenAI).models.generateContentStream(googleParams)
         } else if (providerKey === Provider.Groq) {
           providerStream = await (client as Groq).chat.completions.create(mappedParams)
         } else if (providerKey === Provider.OpenAI) {
@@ -686,12 +681,8 @@ export class RosettaAI {
         let providerResponse: any
         // --- Client Call Logic ---
         if (providerKey === Provider.Google) {
-          const googleM = this.getGoogleModel(model, params.providerOptions)
-          if ('requests' in mappedParams) {
-            providerResponse = await googleM.batchEmbedContents(mappedParams as BatchEmbedContentsRequest)
-          } else {
-            providerResponse = await googleM.embedContent(mappedParams as EmbedContentRequest)
-          }
+          // New SDK embedContent method handles both single and batch
+          providerResponse = await (client as GoogleGenAI).models.embedContent(mappedParams as any)
         } else if (providerKey === Provider.Groq) {
           providerResponse = await (client as Groq).embeddings.create(mappedParams)
         } else if (providerKey === Provider.OpenAI) {
@@ -1184,33 +1175,8 @@ export class RosettaAI {
     )
   }
 
-  /** @internal Gets a configured Google GenerativeModel instance. */
-  private getGoogleModel(modelId: string, requestOptions?: ProviderOptions): GenerativeModel {
-    if (!this.googleClient) {
-      throw this.providerNotConfigured(Provider.Google)
-    }
-    // Get provider options from the config, handling both enum and string provider keys
-    const providerOptions = this.config.providerOptions?.[Provider.Google] ?? {}
-    const apiVersion = requestOptions?.googleApiVersion ?? providerOptions.googleApiVersion
-    const baseUrl = requestOptions?.baseURL ?? providerOptions.baseURL
-
-    if (baseUrl) {
-      console.warn(
-        'Google provider: Custom baseURL provided but not directly used by the @google/generative-ai SDK constructor. Ensure environment variables (like GOOGLE_API_ENDPOINT) are set if needed.'
-      )
-    }
-
-    const safetySettings = [
-      { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-      { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-      { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-      { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }
-    ]
-
-    const googleRequestOptions = apiVersion ? { apiVersion } : undefined
-
-    return this.googleClient.getGenerativeModel({ model: modelId, safetySettings }, googleRequestOptions)
-  }
+  // Note: getGoogleModel() method removed - new SDK doesn't use model instances
+  // The new SDK calls methods directly on ai.models with model ID in parameters
 
   /** @internal Checks for unsupported features for the given provider and parameters. */
   private checkUnsupportedFeatures(

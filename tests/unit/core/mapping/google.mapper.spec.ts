@@ -1,21 +1,15 @@
 import {
-  GenerateContentRequest,
-  StartChatParams,
+  GenerateContentParameters,
   GenerateContentResponse,
   Part,
   FunctionCall,
-  EmbedContentResponse,
-  BatchEmbedContentsResponse,
   FinishReason,
   HarmCategory,
   HarmProbability,
-  BlockReason,
-  FunctionDeclarationsTool,
-  GoogleSearchRetrievalTool,
-  GenerateContentCandidate,
-  BatchEmbedContentsRequest,
-  EmbedContentRequest
-} from '@google/generative-ai'
+  BlockedReason,
+  Tool,
+  Candidate
+} from '@google/genai'
 import { GoogleMapper } from '../../../../src/core/mapping/google.mapper'
 import * as GoogleEmbedMapper from '../../../../src/core/mapping/google.embed.mapper'
 import {
