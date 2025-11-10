@@ -44,7 +44,7 @@ import { AzureOpenAIMapper } from '../../../src/core/mapping/azure.openai.mapper
 
 // Mock the underlying SDK clients
 jest.mock('@anthropic-ai/sdk')
-jest.mock('@google/generative-ai')
+jest.mock('@google/genai')
 jest.mock('groq-sdk')
 jest.mock('openai') // Mocks both OpenAI and AzureOpenAI constructors
 

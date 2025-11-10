@@ -1,4 +1,4 @@
-import { EmbedContentResponse, BatchEmbedContentsResponse } from '@google/generative-ai'
+import { EmbedContentResponse } from '@google/genai'
 import {
   mapFromGoogleEmbedResponse,
   mapFromGoogleEmbedBatchResponse
@@ -12,7 +12,7 @@ describe('Google Embed Mapper', () => {
   describe('mapFromGoogleEmbedResponse', () => {
     it('[Easy] should map a single embedding response', () => {
       const response: EmbedContentResponse = {
-        embedding: { values: [0.1, 0.2, 0.3] }
+        embeddings: [{ values: [0.1, 0.2, 0.3] }]
       }
       const result = mapFromGoogleEmbedResponse(response, modelUsed)
       expect(result.embeddings).toEqual([[0.1, 0.2, 0.3]])
@@ -23,7 +23,7 @@ describe('Google Embed Mapper', () => {
 
     it('[Easy] should map a single embedding response with usage metadata', () => {
       const response = {
-        embedding: { values: [0.1, 0.2, 0.3] },
+        embeddings: [{ values: [0.1, 0.2, 0.3] }],
         usageMetadata: { totalTokenCount: 10, cachedContentTokenCount: 2 }
       } as EmbedContentResponse // Cast as SDK type might not include usage yet
       const expectedUsage: TokenUsage = {
@@ -40,25 +40,25 @@ describe('Google Embed Mapper', () => {
     })
 
     it('[Medium] should throw MappingError if embedding structure is invalid (null embedding)', () => {
-      const invalidResponse = { embedding: null } as any
+      const invalidResponse = { embeddings: null } as any
       expect(() => mapFromGoogleEmbedResponse(invalidResponse, modelUsed)).toThrow(MappingError)
       expect(() => mapFromGoogleEmbedResponse(invalidResponse, modelUsed)).toThrow(
-        'Invalid single embedding response structure from Google.'
+        'Invalid embedding response structure from Google.'
       )
     })
 
     it('[Medium] should throw MappingError if embedding structure is invalid (missing values)', () => {
-      const invalidResponse = { embedding: {} } as any
+      const invalidResponse = { embeddings: {} } as any
       expect(() => mapFromGoogleEmbedResponse(invalidResponse, modelUsed)).toThrow(MappingError)
       expect(() => mapFromGoogleEmbedResponse(invalidResponse, modelUsed)).toThrow(
-        'Invalid single embedding response structure from Google.'
+        'Invalid embedding response structure from Google.'
       )
     })
   })
 
   describe('mapFromGoogleEmbedBatchResponse', () => {
     it('[Easy] should map a batch embedding response', () => {
-      const response: BatchEmbedContentsResponse = {
+      const response: EmbedContentResponse = {
         embeddings: [{ values: [0.1, 0.2] }, { values: [0.3, 0.4] }]
       }
       const result = mapFromGoogleEmbedBatchResponse(response, modelUsed)
@@ -75,7 +75,7 @@ describe('Google Embed Mapper', () => {
       const response = {
         embeddings: [{ values: [0.1, 0.2] }, { values: [0.3, 0.4] }],
         usageMetadata: { totalTokenCount: 25 }
-      } as BatchEmbedContentsResponse // Cast as SDK type might not include usage yet
+      } as EmbedContentResponse // Cast as SDK type might not include usage yet
       const expectedUsage: TokenUsage = {
         promptTokens: undefined,
         completionTokens: undefined,
@@ -94,7 +94,7 @@ describe('Google Embed Mapper', () => {
 
     it('[Medium] should handle missing embeddings in batch response and warn', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const response: BatchEmbedContentsResponse = {
+      const response: EmbedContentResponse = {
         embeddings: [
           { values: [0.1, 0.2] },
           null as any, // Simulate a missing embedding object
@@ -106,7 +106,7 @@ describe('Google Embed Mapper', () => {
         [0.1, 0.2],
         [0.5, 0.6]
       ])
-      expect(warnSpy).toHaveBeenCalledWith('Some embeddings were missing values in Google batch response.')
+      expect(warnSpy).toHaveBeenCalledWith('Some embeddings were missing values in Google response.')
       warnSpy.mockRestore()
     })
 
@@ -114,7 +114,7 @@ describe('Google Embed Mapper', () => {
       const invalidResponse = { embeddings: null } as any
       expect(() => mapFromGoogleEmbedBatchResponse(invalidResponse, modelUsed)).toThrow(MappingError)
       expect(() => mapFromGoogleEmbedBatchResponse(invalidResponse, modelUsed)).toThrow(
-        'Invalid batch embedding response structure from Google.'
+        'Invalid embedding response structure from Google.'
       )
     })
 
@@ -122,7 +122,7 @@ describe('Google Embed Mapper', () => {
       const invalidResponse = { embeddings: {} } as any
       expect(() => mapFromGoogleEmbedBatchResponse(invalidResponse, modelUsed)).toThrow(MappingError)
       expect(() => mapFromGoogleEmbedBatchResponse(invalidResponse, modelUsed)).toThrow(
-        'Invalid batch embedding response structure from Google.'
+        'Invalid embedding response structure from Google.'
       )
     })
 
@@ -130,12 +130,12 @@ describe('Google Embed Mapper', () => {
       const response = { embeddings: [null, undefined, { values: undefined }] } as any
       expect(() => mapFromGoogleEmbedBatchResponse(response, modelUsed)).toThrow(MappingError)
       expect(() => mapFromGoogleEmbedBatchResponse(response, modelUsed)).toThrow(
-        'All embeddings were missing values in Google batch response.'
+        'All embeddings were missing values in Google response.'
       )
     })
 
     it('[Hard] should handle empty embeddings array gracefully', () => {
-      const response: BatchEmbedContentsResponse = {
+      const response: EmbedContentResponse = {
         embeddings: [] // Empty array
       }
       const result = mapFromGoogleEmbedBatchResponse(response, modelUsed)
