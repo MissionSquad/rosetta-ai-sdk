@@ -1,20 +1,20 @@
 import {
-  Content as GoogleContent,
+  Content,
   FunctionCall,
-  Tool as GoogleTool,
-  GenerateContentRequest,
+  Tool,
+  GenerateContentParameters,
+  GenerateContentConfig,
   GenerateContentResponse,
-  StartChatParams,
   CitationMetadata,
-  SchemaType as GoogleSchemaType,
-  FunctionDeclarationSchema,
-  FunctionCallPart,
-  TextPart,
-  Part as GooglePart,
-  EmbedContentRequest,
-  BatchEmbedContentsRequest,
-  FinishReason
-} from '@google/generative-ai'
+  Type as GoogleSchemaType,
+  Schema as FunctionDeclarationSchema,
+  Part,
+  FinishReason,
+  HarmCategory,
+  HarmBlockThreshold,
+  EmbedContentParameters,
+  EmbedContentResponse
+} from '@google/genai'
 import {
   GenerateParams,
   GenerateResult,
@@ -57,7 +57,7 @@ export class GoogleMapper implements IProviderMapper {
     }
   }
 
-  private mapContentToGoogleParts(content: RosettaMessage['content']): GooglePart[] {
+  private mapContentToGoogleParts(content: RosettaMessage['content']): Part[] {
     if (content === null) {
       console.warn('Mapping null content to empty parts array for Google history.')
       return []
@@ -265,7 +265,7 @@ export class GoogleMapper implements IProviderMapper {
     return cleanedSchema;
   }
 
-  private findLastToolCallName(history: GoogleContent[], _toolCallId: string): string | undefined {
+  private findLastToolCallName(history: Content[], _toolCallId: string): string | undefined {
     for (let i = history.length - 1; i >= 0; i--) {
       const prevMsg = history[i]
       if (prevMsg?.role === 'model' && Array.isArray(prevMsg.parts)) {
@@ -282,9 +282,9 @@ export class GoogleMapper implements IProviderMapper {
 
   mapToProviderParams(
     params: GenerateParams
-  ): { googleMappedParams: GenerateContentRequest | (StartChatParams & { contents: GooglePart[] }); isChat: boolean } {
-    let systemInstruction: GoogleContent | undefined = undefined
-    const history: GoogleContent[] = []
+  ): GenerateContentParameters {
+    let systemInstruction: Content | undefined = undefined
+    const contents: Content[] = []
     const messagesToProcess = [...params.messages]
 
     const lastMessage = messagesToProcess.pop()
@@ -300,23 +300,27 @@ export class GoogleMapper implements IProviderMapper {
           throw new MappingError('Multiple system messages not supported by Google.', this.provider)
         if (typeof msg.content !== 'string')
           throw new MappingError('Google system instruction must be string.', this.provider)
-        systemInstruction = { role: 'system', parts: [{ text: msg.content }] }
+        // Note: In the new @google/genai SDK, systemInstruction is a Content object where
+        // the role must be 'user' or 'model' (per SDK Content interface).
+        // The systemInstruction field itself designates this as a system-level instruction.
+        // See: https://ai.google.dev/gemini-api/docs/migrate#configuration
+        systemInstruction = { role: 'user', parts: [{ text: msg.content }] }
         return
       }
 
       const parts = this.mapContentToGoogleParts(msg.content)
-      // Skip adding history entries if parts array is empty (from null/empty string/array content)
+      // Skip adding entries if parts array is empty (from null/empty string/array content)
       if (parts.length === 0 && googleRole !== 'model') {
         // Allow empty parts for model role if tool calls are present
         // @ts-ignore
         if (!(googleRole === 'model' && msg.toolCalls && msg.toolCalls.length > 0)) {
-          console.warn(`Skipping history message with role '${googleRole}' due to empty content parts.`)
+          console.warn(`Skipping message with role '${googleRole}' due to empty content parts.`)
           return
         }
       }
 
       if (googleRole === 'model' && msg.toolCalls && msg.toolCalls.length > 0) {
-        const functionCallParts: FunctionCallPart[] = msg.toolCalls.map(tc => {
+        const functionCallParts: Part[] = msg.toolCalls.map(tc => {
           try {
             return { functionCall: { name: tc.function.name, args: JSON.parse(tc.function.arguments) } }
           } catch (e) {
@@ -328,7 +332,7 @@ export class GoogleMapper implements IProviderMapper {
             )
           }
         })
-        const existingTextParts = parts.filter((p): p is TextPart => 'text' in p)
+        const existingTextParts = parts.filter((p): p is Part => 'text' in p)
         // Ensure parts array is not empty if only function calls exist
         const finalParts = [...existingTextParts, ...functionCallParts]
         if (finalParts.length === 0) {
@@ -336,15 +340,15 @@ export class GoogleMapper implements IProviderMapper {
           console.warn(`Model message with tool calls resulted in empty parts array.`)
           return // Skip adding empty message
         }
-        history.push({ role: googleRole, parts: finalParts })
+        contents.push({ role: googleRole, parts: finalParts })
       } else if (googleRole === 'function') {
         if (!msg.toolCallId || typeof msg.content !== 'string') {
           throw new MappingError(
-            'Invalid tool result message for Google history. Requires toolCallId and string content.',
+            'Invalid tool result message for Google. Requires toolCallId and string content.',
             this.provider
           )
         }
-        const funcName = this.findLastToolCallName(history, msg.toolCallId)
+        const funcName = this.findLastToolCallName(contents, msg.toolCallId)
         if (!funcName) {
           throw new MappingError(
             `Cannot find function name for tool result (ID: ${msg.toolCallId}). Ensure model message with FunctionCall precedes this tool message.`,
@@ -358,18 +362,13 @@ export class GoogleMapper implements IProviderMapper {
           respContent = { content: msg.content } // Wrap non-JSON string content
           console.warn(`Tool result content for ${funcName} was not valid JSON. Wrapping as { content: "..." }`)
         }
-        // Note: The Google API has inconsistent behavior with function responses.
-        // As suggested by the user, we're trying to send both 'response' and 'content' fields
-        // to handle potential API inconsistencies.
-        history.push({
+        contents.push({
           role: googleRole,
           parts: [
             {
               functionResponse: {
                 name: funcName,
                 response: respContent
-                // @ts-ignore - Using both response and content fields to handle API inconsistencies
-                // content: respContent
               }
             }
           ]
@@ -377,14 +376,14 @@ export class GoogleMapper implements IProviderMapper {
       } else {
         // Only add if parts is not empty
         if (parts.length > 0) {
-          history.push({ role: googleRole, parts })
+          contents.push({ role: googleRole, parts })
         } else {
-          console.warn(`Skipping history message with role '${googleRole}' due to empty content parts.`)
+          console.warn(`Skipping message with role '${googleRole}' due to empty content parts.`)
         }
       }
     })
 
-    let currentTurnParts: GooglePart[]
+    let lastMsgParts: Part[]
     const lastMessageRole = this.mapRoleToGoogle(lastMessage.role)
 
     if (lastMessageRole === 'function') {
@@ -394,7 +393,7 @@ export class GoogleMapper implements IProviderMapper {
           this.provider
         )
       }
-      const funcName = this.findLastToolCallName(history, lastMessage.toolCallId) // Check history before last message
+      const funcName = this.findLastToolCallName(contents, lastMessage.toolCallId)
       if (!funcName) {
         throw new MappingError(
           `Cannot find function name for final tool result (ID: ${lastMessage.toolCallId}).`,
@@ -408,33 +407,31 @@ export class GoogleMapper implements IProviderMapper {
         respContent = { content: lastMessage.content } // Wrap non-JSON string content
         console.warn(`Final tool result content for ${funcName} was not valid JSON. Wrapping as { content: "..." }`)
       }
-      // Note: The Google API has inconsistent behavior with function responses.
-      // As suggested by the user, we're trying to send both 'response' and 'content' fields
-      // to handle potential API inconsistencies.
-      currentTurnParts = [
+      lastMsgParts = [
         {
           functionResponse: {
             name: funcName,
-            response: respContent //,
-            // @ts-ignore - Using both response and content fields to handle API inconsistencies
-            // content: respContent
+            response: respContent
           }
         }
       ]
     } else if (lastMessageRole === 'user') {
-      currentTurnParts = this.mapContentToGoogleParts(lastMessage.content)
-      if (currentTurnParts.length === 0) {
+      lastMsgParts = this.mapContentToGoogleParts(lastMessage.content)
+      if (lastMsgParts.length === 0) {
         // Google requires the final user message to have content parts
         throw new MappingError('Final user message content cannot be null or empty.', this.provider)
       }
     } else {
       throw new MappingError(
-        `Invalid role for the final message in a Google chat turn: '${lastMessageRole}'. Expected 'user' or 'tool'.`,
+        `Invalid role for the final message: '${lastMessageRole}'. Expected 'user' or 'tool'.`,
         this.provider
       )
     }
 
-    const googleTools: GoogleTool[] | undefined = params.tools?.map(tool => {
+    // Add the last message to contents
+    contents.push({ role: lastMessageRole, parts: lastMsgParts })
+
+    const googleTools: Tool[] | undefined = params.tools?.map(tool => {
       if (tool.type !== 'function') {
         throw new MappingError(`Only 'function' tools are currently supported for Google.`, this.provider)
       }
@@ -462,7 +459,7 @@ export class GoogleMapper implements IProviderMapper {
 
     let finalTools = googleTools
     if (params.grounding?.enabled) {
-      const searchTool: GoogleTool = { googleSearchRetrieval: {} }
+      const searchTool: Tool = { googleSearchRetrieval: {} }
       if (params.grounding.source && params.grounding.source !== 'web') {
         console.warn(
           `Only 'web' grounding source currently mapped for Google Search Retrieval. Ignoring source: ${params.grounding.source}`
@@ -472,45 +469,52 @@ export class GoogleMapper implements IProviderMapper {
     }
 
     let responseMimeType: string | undefined
+    let responseSchema: any | undefined
     if (params.responseFormat?.type === 'json_object') {
       responseMimeType = 'application/json'
       if (params.responseFormat.schema) {
-        console.warn(
-          'Google JSON mode requested via responseFormat. Ensure schema is described in the prompt. `schema` parameter is ignored for Google GenerationConfig.'
-        )
+        const cleanedSchema = this.cleanSchemaForGoogle(params.responseFormat.schema)
+        responseSchema = cleanedSchema
       }
     }
 
     // Use common utility for base parameters
     const baseMappedParams = mapBaseParams(params)
 
-    const generationConfig = {
+    // Build GenerateContentConfig
+    const config: GenerateContentConfig = {
       maxOutputTokens: baseMappedParams.maxTokens,
       temperature: baseMappedParams.temperature,
       topP: baseMappedParams.topP,
       stopSequences: baseMappedParams.stopSequences,
-      responseMimeType: responseMimeType
+      responseMimeType: responseMimeType,
+      responseSchema: responseSchema,
+      tools: finalTools,
+      systemInstruction: systemInstruction,
+      // Safety settings: use custom settings if provided, otherwise default to BLOCK_MEDIUM_AND_ABOVE
+      // Default thresholds provide balanced protection without being overly restrictive
+      safetySettings: params.providerOptions?.googleSafetySettings
+        ? params.providerOptions.googleSafetySettings.map(s => ({
+            category: s.category as HarmCategory,
+            threshold: s.threshold as HarmBlockThreshold
+          }))
+        : [
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }
+          ]
     }
 
-    // Determine if it's a chat or single-turn request
-    const isChat = history.length > 0 || !!systemInstruction
+    // Return GenerateContentParameters (new SDK structure)
+    if (!params.model) {
+      throw new MappingError('Model parameter is required for Google provider', this.provider)
+    }
 
-    if (isChat) {
-      const chatParams: StartChatParams = {
-        history,
-        generationConfig,
-        tools: finalTools,
-        systemInstruction
-      }
-      return { googleMappedParams: { ...chatParams, contents: currentTurnParts }, isChat: true }
-    } else {
-      const request: GenerateContentRequest = {
-        contents: [{ role: 'user', parts: currentTurnParts }],
-        generationConfig,
-        tools: finalTools,
-        systemInstruction
-      }
-      return { googleMappedParams: request, isChat: false }
+    return {
+      model: params.model,
+      contents: contents,
+      config: config
     }
   }
 
@@ -530,8 +534,8 @@ export class GoogleMapper implements IProviderMapper {
   }
 
   private mapCitationsFromGoogle(metadata: CitationMetadata | undefined): Citation[] | undefined {
-    if (!metadata?.citationSources || metadata.citationSources.length === 0) return undefined
-    return metadata.citationSources.map((s, index) => ({
+    if (!metadata?.citations || metadata.citations.length === 0) return undefined
+    return metadata.citations.map((s: any, index: number) => ({
       sourceId: s.uri ?? `google_cite_idx_${index}`,
       startIndex: s.startIndex,
       endIndex: s.endIndex,
@@ -589,7 +593,7 @@ export class GoogleMapper implements IProviderMapper {
     let finishReason = candidateFinishReason ?? 'unknown'
 
     if (candidate.content?.parts) {
-      const textParts = candidate.content.parts.filter((p): p is TextPart => p && 'text' in p)
+      const textParts = candidate.content.parts.filter((p): p is Part => p && 'text' in p)
       if (textParts.length > 0) {
         textContent = textParts.map(p => p.text).join('')
         const isJsonLike = textContent?.trim().startsWith('{') || textContent?.trim().startsWith('[')
@@ -603,9 +607,10 @@ export class GoogleMapper implements IProviderMapper {
         }
       }
 
-      const functionCallParts = candidate.content.parts.filter((p): p is FunctionCallPart => p && 'functionCall' in p)
+      const functionCallParts = candidate.content.parts.filter((p): p is Part => p && 'functionCall' in p)
       if (functionCallParts.length > 0) {
-        const mappedCalls = this.mapToolCallsFromGoogle(functionCallParts.map(p => p.functionCall))
+        const functionCalls = functionCallParts.map(p => p.functionCall).filter((fc): fc is FunctionCall => fc !== undefined)
+        const mappedCalls = this.mapToolCallsFromGoogle(functionCalls)
         if (mappedCalls && mappedCalls.length > 0) {
           toolCalls = mappedCalls
           if (!['SAFETY', 'RECITATION', 'MAX_TOKENS'].includes(candidateFinishReason ?? '')) {
@@ -701,9 +706,9 @@ export class GoogleMapper implements IProviderMapper {
           try {
             // --- Text Delta ---
             const textDelta =
-              safeGet<GooglePart[]>(candidate, 'content', 'parts') // Use safeGet
-                ?.filter((p): p is TextPart => p && 'text' in p)
-                .map(p => p.text)
+              safeGet<Part[]>(candidate, 'content', 'parts') // Use safeGet
+                ?.filter((p): p is Part => p && 'text' in p)
+                .map(p => p.text ?? '')
                 .join('') ?? ''
 
             if (textDelta) {
@@ -728,12 +733,13 @@ export class GoogleMapper implements IProviderMapper {
             }
 
             // --- Function Call Delta ---
-            const functionCallParts = safeGet<GooglePart[]>(candidate, 'content', 'parts')?.filter(
-              (p): p is FunctionCallPart => p && 'functionCall' in p
+            const functionCallParts = safeGet<Part[]>(candidate, 'content', 'parts')?.filter(
+              (p): p is Part => p && 'functionCall' in p
             )
 
             if (functionCallParts && functionCallParts.length > 0) {
-              const newCalls = this.mapToolCallsFromGoogle(functionCallParts.map(p => p.functionCall))
+              const functionCalls = functionCallParts.map(p => p.functionCall).filter((fc): fc is FunctionCall => fc !== undefined)
+              const newCalls = this.mapToolCallsFromGoogle(functionCalls)
               if (newCalls) {
                 for (const tc of newCalls) {
                   // Check if this specific tool call ID has already been fully processed and added
@@ -874,38 +880,26 @@ export class GoogleMapper implements IProviderMapper {
   }
 
   // --- Embedding Mapping ---
-  mapToEmbedParams(params: EmbedParams): EmbedContentRequest | BatchEmbedContentsRequest {
-    // Google Embeddings API uses different structures for single vs batch
-    if (Array.isArray(params.input) && params.input.length > 1) {
-      // Batch request
-      const requests: EmbedContentRequest[] = params.input.map(text => ({
-        model: `models/${params.model!}`, // Model needs prefix for batch
-        content: { parts: [{ text }], role: 'user' }
-      }))
-      return { requests }
-    } else {
-      // Single request
-      const inputText = Array.isArray(params.input) ? params.input[0] : params.input
-      if (typeof inputText !== 'string' || inputText === '') {
+  mapToEmbedParams(params: EmbedParams): EmbedContentParameters {
+    // New SDK uses a unified embedContent method
+    const contents = Array.isArray(params.input) ? params.input : [params.input]
+
+    // Validate inputs
+    for (const text of contents) {
+      if (typeof text !== 'string' || text === '') {
         throw new MappingError('Input text for Google embedding cannot be empty.', this.provider)
       }
-      return {
-        // @ts-ignore
-        model: `models/${params.model!}`, // Model needs prefix. should this be in google.embed.mapper.ts?
-        content: { parts: [{ text: inputText }], role: 'user' }
-      }
+    }
+
+    return {
+      model: `models/${params.model!}`,
+      contents: contents
     }
   }
 
-  mapFromEmbedResponse(response: any, modelId: string): EmbedResult {
-    // Determine if it's a batch or single response based on structure
-    if ('embeddings' in response && Array.isArray(response.embeddings)) {
-      return GoogleEmbedMapper.mapFromGoogleEmbedBatchResponse(response, modelId)
-    } else if ('embedding' in response) {
-      return GoogleEmbedMapper.mapFromGoogleEmbedResponse(response, modelId)
-    } else {
-      throw new MappingError('Unknown Google embedding response structure.', this.provider)
-    }
+  mapFromEmbedResponse(response: EmbedContentResponse, modelId: string): EmbedResult {
+    // The new SDK returns EmbedContentResponse with embeddings array
+    return GoogleEmbedMapper.mapFromGoogleEmbedResponse(response, modelId)
   }
 
   // --- Audio Mapping ---

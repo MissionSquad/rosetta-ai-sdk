@@ -13,8 +13,32 @@ export interface ProviderOptions {
   azureChatDeploymentId?: string
   /** Azure OpenAI specific deployment ID for embedding models. Overrides `azureOpenAIDefaultEmbeddingDeploymentName`. */
   azureEmbeddingDeploymentId?: string
-  /** Google API version (e.g., 'v1beta', 'v1alpha'). Affects available features. */
-  googleApiVersion?: 'v1beta' | 'v1alpha'
+  /** Google API version (e.g., 'v1beta', 'v1alpha', 'v1'). Affects available features. */
+  googleApiVersion?: 'v1beta' | 'v1alpha' | 'v1'
+  /** Whether to use Vertex AI instead of Gemini API for Google provider. */
+  googleVertexAI?: boolean
+  /** Google Cloud project ID for Vertex AI. Required if googleVertexAI is true. */
+  googleVertexAIProject?: string
+  /** Google Cloud location/region for Vertex AI (e.g., 'us-central1'). Required if googleVertexAI is true. */
+  googleVertexAILocation?: string
+  /**
+   * Safety settings for Google provider. Allows customization of content filtering thresholds.
+   * If not specified, defaults to BLOCK_MEDIUM_AND_ABOVE for all categories.
+   *
+   * @example
+   * ```typescript
+   * {
+   *   googleSafetySettings: [
+   *     { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+   *     { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' }
+   *   ]
+   * }
+   * ```
+   */
+  googleSafetySettings?: Array<{
+    category: 'HARM_CATEGORY_HARASSMENT' | 'HARM_CATEGORY_HATE_SPEECH' | 'HARM_CATEGORY_SEXUALLY_EXPLICIT' | 'HARM_CATEGORY_DANGEROUS_CONTENT'
+    threshold: 'BLOCK_NONE' | 'BLOCK_ONLY_HIGH' | 'BLOCK_MEDIUM_AND_ABOVE' | 'BLOCK_LOW_AND_ABOVE'
+  }>
   // Add other provider-specific config options here as needed
 }
 
@@ -25,8 +49,13 @@ export interface ProviderOptions {
 export interface RosettaAIConfig {
   /** API key for Anthropic. Falls back to `process.env.ANTHROPIC_API_KEY`. */
   anthropicApiKey?: string
-  /** API key for Google Generative AI. Falls back to `process.env.GOOGLE_API_KEY`. */
+  /** API key for Google Generative AI (Gemini API). Falls back to `process.env.GOOGLE_API_KEY`.
+   * Not required if using Vertex AI with Application Default Credentials. */
   googleApiKey?: string
+  /** Google Cloud project ID for Vertex AI. Falls back to `process.env.GOOGLE_CLOUD_PROJECT`. */
+  googleVertexAIProject?: string
+  /** Google Cloud location for Vertex AI. Falls back to `process.env.GOOGLE_CLOUD_LOCATION`. */
+  googleVertexAILocation?: string
   /** API key for Groq. Falls back to `process.env.GROQ_API_KEY`. */
   groqApiKey?: string
   /** API key for Standard OpenAI. Falls back to `process.env.OPENAI_API_KEY`. Ignored if Azure config is provided and valid. */
