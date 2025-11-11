@@ -8,7 +8,9 @@ import {
   HarmProbability,
   BlockedReason,
   Tool,
-  Candidate
+  Candidate,
+  Content,
+  EmbedContentParameters
 } from '@google/genai'
 import { GoogleMapper } from '../../../../src/core/mapping/google.mapper'
 import * as GoogleEmbedMapper from '../../../../src/core/mapping/google.embed.mapper'
@@ -61,18 +63,28 @@ async function collectStreamChunks(stream: AsyncIterable<StreamChunk>): Promise<
   return chunks
 }
 
+// Type-safe helpers to extract specific StreamChunk variants
+function assertChunkType<T extends StreamChunk['type']>(
+  chunk: StreamChunk,
+  type: T
+): asserts chunk is Extract<StreamChunk, { type: T }> {
+  if (chunk.type !== type) {
+    throw new Error(`Expected chunk type '${type}' but got '${chunk.type}'`)
+  }
+}
+
 // Helper to create mock candidate
 const createMockCandidate = (
   parts: Part[],
   finishReason: FinishReason | null,
   citations?: any,
   safetyRatings?: any[]
-): GenerateContentCandidate => ({
+): Candidate => ({
   index: 0,
   content: { role: 'model', parts },
   finishReason: finishReason ?? undefined,
   safetyRatings: safetyRatings ?? [],
-  citationMetadata: citations ? { citationSources: citations } : undefined,
+  citationMetadata: citations ? { citations: citations } : undefined,
   finishMessage: undefined
 })
 
@@ -100,13 +112,11 @@ describe('Google Mapper', () => {
         ...baseParams,
         messages: [{ role: 'user', content: 'Hello' }]
       }
-      const { googleMappedParams, isChat } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as GenerateContentRequest
-      expect(isChat).toBe(false)
-      expect(result.contents).toEqual([{ role: 'user', parts: [{ text: 'Hello' }] }])
-      expect(result.systemInstruction).toBeUndefined()
-      expect(result.tools).toBeUndefined()
-      expect(result.generationConfig?.maxOutputTokens).toBeUndefined()
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect((result.contents as Content[])[0]).toEqual({ role: 'user', parts: [{ text: 'Hello' }] })
+      expect(result.config?.systemInstruction).toBeUndefined()
+      expect(result.config?.tools).toBeUndefined()
+      expect(result.config?.maxOutputTokens).toBeUndefined()
     })
 
     it('[Easy] should map basic text messages (chat)', () => {
@@ -118,15 +128,13 @@ describe('Google Mapper', () => {
           { role: 'user', content: 'How are you?' }
         ]
       }
-      const { googleMappedParams, isChat } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as StartChatParams & { contents: Part[] }
-      expect(isChat).toBe(true)
-      expect(result.history).toEqual([
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents).toEqual([
         { role: 'user', parts: [{ text: 'Hi' }] },
-        { role: 'model', parts: [{ text: 'Hello there' }] }
+        { role: 'model', parts: [{ text: 'Hello there' }] },
+        { role: 'user', parts: [{ text: 'How are you?' }] }
       ])
-      expect(result.contents).toEqual([{ text: 'How are you?' }])
-      expect(result.systemInstruction).toBeUndefined()
+      expect(result.config?.systemInstruction).toBeUndefined()
     })
 
     it('[Easy] should map system instruction', () => {
@@ -137,12 +145,9 @@ describe('Google Mapper', () => {
           { role: 'user', content: 'Hello' }
         ]
       }
-      const { googleMappedParams, isChat } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as StartChatParams & { contents: Part[] } // Chat due to system prompt
-      expect(isChat).toBe(true)
-      expect(result.systemInstruction).toEqual({ role: 'system', parts: [{ text: 'Be concise.' }] })
-      expect(result.history).toEqual([]) // System prompt doesn't go in history
-      expect(result.contents).toEqual([{ text: 'Hello' }])
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.config?.systemInstruction).toEqual({ role: 'user', parts: [{ text: 'Be concise.' }] })
+      expect(result.contents).toEqual([{ role: 'user', parts: [{ text: 'Hello' }] }])
     })
 
     it('[Easy] should map user message with text and image', () => {
@@ -159,10 +164,8 @@ describe('Google Mapper', () => {
           }
         ]
       }
-      const { googleMappedParams, isChat } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as GenerateContentRequest
-      expect(isChat).toBe(false)
-      expect(result.contents[0].parts).toEqual([
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect((result.contents as Content[])[0].parts).toEqual([
         { text: 'What is this?' },
         { inlineData: { mimeType: 'image/jpeg', data: 'imgdata' } }
       ])
@@ -181,17 +184,15 @@ describe('Google Mapper', () => {
           { role: 'user', content: 'Did it work?' }
         ]
       }
-      const { googleMappedParams, isChat } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as StartChatParams & { contents: Part[] }
-      expect(isChat).toBe(true)
-      expect(result.history).toEqual([
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents).toEqual([
         { role: 'user', parts: [{ text: 'Call the tool.' }] },
         {
           role: 'model',
           parts: [{ text: 'Okay, calling it.' }, { functionCall: { name: 'my_tool', args: { arg: 1 } } }]
-        }
+        },
+        { role: 'user', parts: [{ text: 'Did it work?' }] }
       ])
-      expect(result.contents).toEqual([{ text: 'Did it work?' }])
     })
 
     it('[Easy] should map tool result message', () => {
@@ -207,14 +208,12 @@ describe('Google Mapper', () => {
           { role: 'tool', toolCallId: 'call_123', content: '{"result": "success"}' }
         ]
       }
-      const { googleMappedParams, isChat } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as StartChatParams & { contents: Part[] }
-      expect(isChat).toBe(true)
-      expect(result.history).toEqual([
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents).toEqual([
         { role: 'user', parts: [{ text: 'Call the tool.' }] },
-        { role: 'model', parts: [{ functionCall: { name: 'my_tool', args: {} } }] }
+        { role: 'model', parts: [{ functionCall: { name: 'my_tool', args: {} } }] },
+        { role: 'function', parts: [{ functionResponse: { name: 'my_tool', response: { result: 'success' } } }] }
       ])
-      expect(result.contents).toEqual([{ functionResponse: { name: 'my_tool', response: { result: 'success' } } }])
     })
 
     it('[Easy] should map tools correctly', () => {
@@ -232,17 +231,15 @@ describe('Google Mapper', () => {
           }
         ]
       }
-      const { googleMappedParams } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as GenerateContentRequest
-      expect(result.tools).toBeDefined()
-      expect(result.tools).toHaveLength(1)
-      expect((result.tools![0] as FunctionDeclarationsTool).functionDeclarations).toEqual([
-        {
-          name: 'get_weather',
-          description: 'Gets weather',
-          parameters: { type: 'object', properties: { location: { type: 'string' } }, required: ['location'] }
-        }
-      ])
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.config?.tools).toBeDefined()
+      expect(result.config?.tools).toHaveLength(1)
+      const functionDecl = result.config?.tools?.[0]?.functionDeclarations?.[0]
+      expect(functionDecl?.name).toBe('get_weather')
+      expect(functionDecl?.description).toBe('Gets weather')
+      expect(functionDecl?.parameters?.type).toBe('OBJECT')
+      expect(functionDecl?.parameters?.required).toEqual(['location'])
+      expect(functionDecl?.parameters?.properties?.location?.type).toBe('STRING')
     })
 
     it('[Easy] should map grounding tool', () => {
@@ -251,11 +248,10 @@ describe('Google Mapper', () => {
         messages: [{ role: 'user', content: 'Explain this.' }],
         grounding: { enabled: true, source: 'web' }
       }
-      const { googleMappedParams } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as GenerateContentRequest
-      expect(result.tools).toBeDefined()
-      expect(result.tools).toHaveLength(1)
-      expect((result.tools![0] as GoogleSearchRetrievalTool).googleSearchRetrieval).toEqual({})
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.config?.tools).toBeDefined()
+      expect(result.config?.tools).toHaveLength(1)
+      expect(result.config?.tools?.[0]?.googleSearchRetrieval).toEqual({})
     })
 
     it('[Easy] should map generationConfig (maxTokens, temp, topP, stop)', () => {
@@ -267,13 +263,12 @@ describe('Google Mapper', () => {
         topP: 0.8,
         stop: ['\n']
       }
-      const { googleMappedParams } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as GenerateContentRequest
-      expect(result.generationConfig).toBeDefined()
-      expect(result.generationConfig?.maxOutputTokens).toBe(100)
-      expect(result.generationConfig?.temperature).toBe(0.5)
-      expect(result.generationConfig?.topP).toBe(0.8)
-      expect(result.generationConfig?.stopSequences).toEqual(['\n'])
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.config).toBeDefined()
+      expect(result.config?.maxOutputTokens).toBe(100)
+      expect(result.config?.temperature).toBe(0.5)
+      expect(result.config?.topP).toBe(0.8)
+      expect(result.config?.stopSequences).toEqual(['\n'])
     })
 
     it('[Easy] should map responseFormat (JSON)', () => {
@@ -283,9 +278,8 @@ describe('Google Mapper', () => {
         responseFormat: { type: 'json_object' }
       }
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const { googleMappedParams } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as GenerateContentRequest
-      expect(result.generationConfig?.responseMimeType).toBe('application/json')
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.config?.responseMimeType).toBe('application/json')
       warnSpy.mockRestore()
     })
 
@@ -335,29 +329,25 @@ describe('Google Mapper', () => {
         messages: [{ role: 'user', content: 'Explain.' }],
         grounding: { enabled: true, source: 'invalid-source' as any }
       }
-      const { googleMappedParams } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as GenerateContentRequest
-      expect((result.tools![0] as GoogleSearchRetrievalTool).googleSearchRetrieval).toBeDefined()
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.config?.tools?.[0]?.googleSearchRetrieval).toBeDefined()
       expect(warnSpy).toHaveBeenCalledWith(
         "Only 'web' grounding source currently mapped for Google Search Retrieval. Ignoring source: invalid-source"
       )
       warnSpy.mockRestore()
     })
 
-    it('[Medium] should warn for responseFormat schema presence', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+    it('[Medium] should map responseFormat with schema', () => {
       const params: GenerateParams = {
         ...baseParams,
         messages: [{ role: 'user', content: 'JSON please.' }],
-        responseFormat: { type: 'json_object', schema: { type: 'object' } }
+        responseFormat: { type: 'json_object', schema: { type: 'object', properties: { name: { type: 'string' } } } }
       }
-      const { googleMappedParams } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as GenerateContentRequest
-      expect(result.generationConfig?.responseMimeType).toBe('application/json')
-      expect(warnSpy).toHaveBeenCalledWith(
-        'Google JSON mode requested via responseFormat. Ensure schema is described in the prompt. `schema` parameter is ignored for Google GenerationConfig.'
-      )
-      warnSpy.mockRestore()
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.config?.responseMimeType).toBe('application/json')
+      expect(result.config?.responseSchema).toBeDefined()
+      expect(result.config?.responseSchema.type).toBe('OBJECT')
+      expect(result.config?.responseSchema.properties?.name?.type).toBe('STRING')
     })
 
     it('[Medium] should map tool result with non-JSON string content', () => {
@@ -374,14 +364,11 @@ describe('Google Mapper', () => {
         ]
       }
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
-      const { googleMappedParams } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as StartChatParams & { contents: Part[] }
-      expect(result.history).toEqual([
-        { role: 'user', parts: [{ text: 'Call tool.' }] },
-        { role: 'model', parts: [{ functionCall: { name: 'string_tool', args: {} } }] }
-      ])
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
       expect(result.contents).toEqual([
-        { functionResponse: { name: 'string_tool', response: { content: 'Tool result was just this string.' } } }
+        { role: 'user', parts: [{ text: 'Call tool.' }] },
+        { role: 'model', parts: [{ functionCall: { name: 'string_tool', args: {} } }] },
+        { role: 'function', parts: [{ functionResponse: { name: 'string_tool', response: { content: 'Tool result was just this string.' } } }] }
       ])
       // FIX: Adjust assertion to be less strict about the exact warning message, check for the key part.
       expect(warnSpy).toHaveBeenCalledWith(
@@ -390,40 +377,6 @@ describe('Google Mapper', () => {
         )
       )
       warnSpy.mockRestore()
-    })
-
-    it('[Medium] should determine isChat=true with only system prompt', () => {
-      const params: GenerateParams = {
-        ...baseParams,
-        messages: [
-          { role: 'system', content: 'System instruction' },
-          { role: 'user', content: 'Hello' }
-        ]
-      }
-      const { isChat } = mapper.mapToProviderParams(params)
-      expect(isChat).toBe(true)
-    })
-
-    it('[Medium] should determine isChat=true with history', () => {
-      const params: GenerateParams = {
-        ...baseParams,
-        messages: [
-          { role: 'user', content: 'Hi' },
-          { role: 'assistant', content: 'Hello' },
-          { role: 'user', content: 'Follow up' }
-        ]
-      }
-      const { isChat } = mapper.mapToProviderParams(params)
-      expect(isChat).toBe(true)
-    })
-
-    it('[Medium] should determine isChat=false with only single user message', () => {
-      const params: GenerateParams = {
-        ...baseParams,
-        messages: [{ role: 'user', content: 'Hi' }]
-      }
-      const { isChat } = mapper.mapToProviderParams(params)
-      expect(isChat).toBe(false)
     })
 
     it('[Hard] should throw MappingError if final user message is empty', () => {
@@ -457,10 +410,10 @@ describe('Google Mapper', () => {
       expect(() => mapper.mapToProviderParams(paramsAssistant)).toThrow(MappingError)
       expect(() => mapper.mapToProviderParams(paramsSystem)).toThrow(MappingError)
       expect(() => mapper.mapToProviderParams(paramsAssistant)).toThrow(
-        "Invalid role for the final message in a Google chat turn: 'model'. Expected 'user' or 'tool'."
+        "Invalid role for the final message: 'model'. Expected 'user' or 'tool'."
       )
       expect(() => mapper.mapToProviderParams(paramsSystem)).toThrow(
-        "Invalid role for the final message in a Google chat turn: 'system'. Expected 'user' or 'tool'."
+        "Invalid role for the final message: 'system'. Expected 'user' or 'tool'."
       )
     })
 
@@ -474,12 +427,12 @@ describe('Google Mapper', () => {
           { role: 'user', content: 'Second message' }
         ]
       }
-      const { googleMappedParams, isChat } = mapper.mapToProviderParams(params)
-      const result = googleMappedParams as StartChatParams & { contents: Part[] }
-      expect(isChat).toBe(true)
-      expect(result.history).toEqual([{ role: 'user', parts: [{ text: 'First message' }] }])
-      expect(result.contents).toEqual([{ text: 'Second message' }])
-      expect(warnSpy).toHaveBeenCalledWith("Skipping history message with role 'model' due to empty content parts.")
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents).toEqual([
+        { role: 'user', parts: [{ text: 'First message' }] },
+        { role: 'user', parts: [{ text: 'Second message' }] }
+      ])
+      expect(warnSpy).toHaveBeenCalledWith("Skipping message with role 'model' due to empty content parts.")
       warnSpy.mockRestore()
     })
   })
@@ -573,7 +526,7 @@ describe('Google Mapper', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
       const response: GenerateContentResponse = {
         promptFeedback: {
-          blockReason: BlockReason.SAFETY,
+          blockReason: BlockedReason.SAFETY,
           safetyRatings: [{ category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, probability: HarmProbability.MEDIUM }]
         }
       }
@@ -636,7 +589,7 @@ describe('Google Mapper', () => {
     it('[Medium] should map OTHER block reason', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
       const response: GenerateContentResponse = {
-        promptFeedback: { blockReason: BlockReason.OTHER, safetyRatings: [] }
+        promptFeedback: { blockReason: BlockedReason.OTHER, safetyRatings: [] }
       }
       const result = mapper.mapFromProviderResponse(response, modelUsed)
       expect(result.finishReason).toBe('error')
@@ -675,23 +628,18 @@ describe('Google Mapper', () => {
 
     it('[Easy] should map single string input', () => {
       const params: EmbedParams = { ...baseEmbedParams, input: 'Embed this' }
-      const result = mapper.mapToEmbedParams(params) as EmbedContentRequest
+      const result = mapper.mapToEmbedParams(params)
       expect(result.model).toBe(`models/${model}`)
-      expect(result.content).toEqual({ parts: [{ text: 'Embed this' }], role: 'user' })
+      expect(result.contents).toEqual(['Embed this'])
     })
 
     it('[Easy] should map string array input (batch)', () => {
       const params: EmbedParams = { ...baseEmbedParams, input: ['Text 1', 'Text 2'] }
-      const result = mapper.mapToEmbedParams(params) as BatchEmbedContentsRequest
-      expect(result.requests).toHaveLength(2)
-      expect(result.requests[0]).toEqual({
-        model: `models/${model}`,
-        content: { parts: [{ text: 'Text 1' }], role: 'user' }
-      })
-      expect(result.requests[1]).toEqual({
-        model: `models/${model}`,
-        content: { parts: [{ text: 'Text 2' }], role: 'user' }
-      })
+      const result = mapper.mapToEmbedParams(params)
+      expect(result.model).toBe(`models/${model}`)
+      expect(result.contents).toHaveLength(2)
+      expect(result.contents[0]).toEqual('Text 1')
+      expect(result.contents[1]).toEqual('Text 2')
     })
 
     it('[Medium] should throw MappingError for empty string input', () => {
@@ -700,17 +648,18 @@ describe('Google Mapper', () => {
       expect(() => mapper.mapToEmbedParams(params)).toThrow('Input text for Google embedding cannot be empty.')
     })
 
-    it('[Medium] should throw MappingError for empty array input', () => {
+    it('[Medium] should handle empty array input', () => {
       const params: EmbedParams = { ...baseEmbedParams, input: [] }
-      expect(() => mapper.mapToEmbedParams(params)).toThrow(MappingError)
-      expect(() => mapper.mapToEmbedParams(params)).toThrow('Input text for Google embedding cannot be empty.')
+      const result = mapper.mapToEmbedParams(params)
+      expect(result.model).toBe(`models/${model}`)
+      expect(result.contents).toEqual([])
     })
   })
 
   describe('mapFromEmbedResponse', () => {
     const modelUsed = 'embedding-001-test'
-    const mockSingleResponse: EmbedContentResponse = { embedding: { values: [0.1, 0.2] } }
-    const mockBatchResponse: BatchEmbedContentsResponse = { embeddings: [{ values: [0.3, 0.4] }] }
+    const mockSingleResponse: any = { embeddings: [{ values: [0.1, 0.2] }] }
+    const mockBatchResponse: any = { embeddings: [{ values: [0.3, 0.4] }] }
 
     beforeEach(() => {
       mockMapFromGoogleEmbedResponse.mockClear()
@@ -724,18 +673,21 @@ describe('Google Mapper', () => {
       expect(mockMapFromGoogleEmbedBatchResponse).not.toHaveBeenCalled()
     })
 
-    it('[Easy] should delegate to mapFromGoogleEmbedBatchResponse for batch response', () => {
+    it('[Easy] should delegate to mapFromGoogleEmbedResponse for batch response', () => {
       mapper.mapFromEmbedResponse(mockBatchResponse, modelUsed)
-      expect(mockMapFromGoogleEmbedBatchResponse).toHaveBeenCalledTimes(1)
-      expect(mockMapFromGoogleEmbedBatchResponse).toHaveBeenCalledWith(mockBatchResponse, modelUsed)
-      expect(mockMapFromGoogleEmbedResponse).not.toHaveBeenCalled()
+      expect(mockMapFromGoogleEmbedResponse).toHaveBeenCalledTimes(1)
+      expect(mockMapFromGoogleEmbedResponse).toHaveBeenCalledWith(mockBatchResponse, modelUsed)
     })
 
     it('[Medium] should throw MappingError for unknown response structure', () => {
       const unknownResponse = { someOtherField: 'value' }
+      // Configure the mock to throw the expected error
+      mockMapFromGoogleEmbedResponse.mockImplementation(() => {
+        throw new MappingError('Invalid embedding response structure from Google.', Provider.Google)
+      })
       expect(() => mapper.mapFromEmbedResponse(unknownResponse, modelUsed)).toThrow(MappingError)
       expect(() => mapper.mapFromEmbedResponse(unknownResponse, modelUsed)).toThrow(
-        'Unknown Google embedding response structure.'
+        'Invalid embedding response structure from Google.'
       )
     })
   })
@@ -801,8 +753,8 @@ describe('Google Mapper', () => {
         type: 'final_usage',
         data: { usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, cachedContentTokenCount: undefined } }
       })
-      expect(results[5].type).toBe('final_result')
-      expect((results[5] as any).data.result).toEqual(
+      assertChunkType(results[5], 'final_result')
+      expect(results[5].data.result).toEqual(
         expect.objectContaining({
           content: 'Hello world',
           finishReason: 'stop',
@@ -824,23 +776,24 @@ describe('Google Mapper', () => {
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(7) // start, tool_start, tool_delta, tool_done, stop, usage, final
-      expect(results[1].type).toBe('tool_call_start')
-      expect((results[1] as any).data.toolCall.function.name).toBe(toolName)
-      const toolCallId = (results[1] as any).data.toolCall.id
 
-      expect(results[2].type).toBe('tool_call_delta')
-      expect((results[2] as any).data.id).toBe(toolCallId)
-      expect((results[2] as any).data.functionArgumentChunk).toBe('{"a":1}')
+      assertChunkType(results[1], 'tool_call_start')
+      expect(results[1].data.toolCall.function.name).toBe(toolName)
+      const toolCallId = results[1].data.toolCall.id
 
-      expect(results[3].type).toBe('tool_call_done')
-      expect((results[3] as any).data.id).toBe(toolCallId)
+      assertChunkType(results[2], 'tool_call_delta')
+      expect(results[2].data.id).toBe(toolCallId)
+      expect(results[2].data.functionArgumentChunk).toBe('{"a":1}')
 
-      expect(results[4].type).toBe('message_stop')
-      expect((results[4] as any).data.finishReason).toBe('tool_calls')
+      assertChunkType(results[3], 'tool_call_done')
+      expect(results[3].data.id).toBe(toolCallId)
+
+      assertChunkType(results[4], 'message_stop')
+      expect(results[4].data.finishReason).toBe('tool_calls')
 
       expect(results[5].type).toBe('final_usage')
-      expect(results[6].type).toBe('final_result')
-      const finalResult = (results[6] as any).data.result
+      assertChunkType(results[6], 'final_result')
+      const finalResult = results[6].data.result
       expect(finalResult.content).toBeNull()
       expect(finalResult.finishReason).toBe('tool_calls')
       expect(finalResult.toolCalls).toHaveLength(1)
@@ -883,9 +836,9 @@ describe('Google Mapper', () => {
       expect(results).toHaveLength(6) // start, delta, stop, usage, final
       expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'content_filter' } })
       expect(results[4].type).toBe('final_usage')
-      expect(results[5].type).toBe('final_result')
-      expect((results[5] as any).data.result.finishReason).toBe('content_filter')
-      expect((results[5] as any).data.result.content).toBe('Unsafe \n\nThis response was blocked by the AI provider\'s safety filters. Please modify your request and try again.')
+      assertChunkType(results[5], 'final_result')
+      expect(results[5].data.result.finishReason).toBe('content_filter')
+      expect(results[5].data.result.content).toBe('Unsafe \n\nThis response was blocked by the AI provider\'s safety filters. Please modify your request and try again.')
     })
 
     it('[Hard] should handle stream with citations', async () => {
@@ -904,11 +857,11 @@ describe('Google Mapper', () => {
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(8) // start, delta(cite_delta, cite_done), delta, stop, usage, final
-      expect(results[2].type).toBe('citation_delta')
-      expect((results[2] as any).data.citation.sourceId).toBe('cite1.com')
+      assertChunkType(results[2], 'citation_delta')
+      expect(results[2].data.citation.sourceId).toBe('cite1.com')
       expect(results[3].type).toBe('citation_done')
-      expect(results[7].type).toBe('final_result')
-      const finalResult = (results[7] as any).data.result
+      assertChunkType(results[7], 'final_result')
+      const finalResult = results[7].data.result
       expect(finalResult.content).toBe('Grounded text.')
       expect(finalResult.citations).toHaveLength(1)
       expect(finalResult.citations[0].sourceId).toBe('cite1.com')
@@ -925,15 +878,15 @@ describe('Google Mapper', () => {
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(7) // start, json_delta, json_delta, json_done, stop, usage, final
-      expect(results[1].type).toBe('json_delta')
-      expect((results[1] as any).data.delta).toBe('{"key":')
-      expect(results[2].type).toBe('json_delta')
-      expect((results[2] as any).data.delta).toBe(' "value"}')
-      expect(results[3].type).toBe('json_done')
-      expect((results[3] as any).data.snapshot).toBe(jsonString)
-      expect((results[3] as any).data.parsed).toEqual({ key: 'value' })
-      expect(results[6].type).toBe('final_result')
-      const finalResult = (results[6] as any).data.result
+      assertChunkType(results[1], 'json_delta')
+      expect(results[1].data.delta).toBe('{"key":')
+      assertChunkType(results[2], 'json_delta')
+      expect(results[2].data.delta).toBe(' "value"}')
+      assertChunkType(results[3], 'json_done')
+      expect(results[3].data.snapshot).toBe(jsonString)
+      expect(results[3].data.parsed).toEqual({ key: 'value' })
+      assertChunkType(results[6], 'final_result')
+      const finalResult = results[6].data.result
       expect(finalResult.content).toBe(jsonString)
       expect(finalResult.parsedContent).toEqual({ key: 'value' })
     })

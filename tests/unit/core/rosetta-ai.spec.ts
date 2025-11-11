@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import Groq from 'groq-sdk'
 import OpenAI, { AzureOpenAI } from 'openai'
-import { GoogleGenerativeAI } from '@google/generative-ai' // Import Google client
+import { GoogleGenAI } from '@google/genai' // Import Google client
 import { z } from 'zod' // Import Zod
 import {
   RosettaAI,
@@ -44,7 +44,7 @@ import { AzureOpenAIMapper } from '../../../src/core/mapping/azure.openai.mapper
 
 // Mock the underlying SDK clients
 jest.mock('@anthropic-ai/sdk')
-jest.mock('@google/generative-ai')
+jest.mock('@google/genai')
 jest.mock('groq-sdk')
 jest.mock('openai') // Mocks both OpenAI and AzureOpenAI constructors
 
@@ -362,7 +362,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
     }
     ;(Anthropic as jest.Mock).mockReturnValue(mockAnthropicClientInstance)
     ;(Groq as jest.Mock).mockReturnValue(mockGroqClientInstance) // Mock Groq constructor
-    ;(GoogleGenerativeAI as jest.Mock).mockReturnValue(mockGoogleClientInstance) // Mock Google constructor
+    ;(GoogleGenAI as jest.Mock).mockReturnValue(mockGoogleClientInstance) // Mock Google constructor
     // Mock other clients as needed
   })
 
@@ -638,7 +638,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       }
       ;(Anthropic as jest.Mock).mockImplementation(() => mockAnthropicClientInstance)
       ;(Groq as jest.Mock).mockImplementation(() => mockGroqClientInstance) // Mock Groq constructor
-      ;(GoogleGenerativeAI as jest.Mock).mockImplementation(() => mockGoogleClientInstance) // Mock Google constructor
+      ;(GoogleGenAI as jest.Mock).mockImplementation(() => mockGoogleClientInstance) // Mock Google constructor
       // Mock other clients as needed
       const validationError = new ToolArgumentValidationError('Invalid args', [], 'get_weather', 'call_1')
       mockOpenAIMapperInstance.mapToProviderParams.mockReturnValue({ mapped: 'openai_params', model: 'gpt-4o-mini' })
@@ -1610,7 +1610,9 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
     })
   })
 
-  describe('getGoogleModel (internal)', () => {
+  // Note: getGoogleModel tests skipped - method removed in @google/genai migration
+  // New SDK uses centralized API (models.generateContent) instead of model instances
+  describe.skip('getGoogleModel (internal)', () => {
     let rosetta: RosettaAI
     let mockGoogleClientInstance: any
 
@@ -1618,7 +1620,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       mockGoogleClientInstance = {
         getGenerativeModel: jest.fn().mockReturnValue({ mocked: 'google-model-instance' })
       }
-      ;(GoogleGenerativeAI as jest.Mock).mockReturnValue(mockGoogleClientInstance)
+      ;(GoogleGenAI as jest.Mock).mockReturnValue(mockGoogleClientInstance)
       rosetta = new RosettaAI({ googleApiKey: 'key' })
     })
 
@@ -1650,7 +1652,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       })
       ;(rosettaWithGlobalOpts as any).getGoogleModel('gemini-pro', undefined) // No request options passed
       // Need to get the client instance associated with rosettaWithGlobalOpts
-      const clientInstance = (GoogleGenerativeAI as jest.Mock).mock.results[1].value
+      const clientInstance = (GoogleGenAI as jest.Mock).mock.results[1].value
       expect(clientInstance.getGenerativeModel).toHaveBeenCalledWith(
         expect.any(Object), // model/safety
         { apiVersion: 'v1alpha' } // request options from global config
