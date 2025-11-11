@@ -9,7 +9,8 @@ import {
   BlockedReason,
   Tool,
   Candidate,
-  Content
+  Content,
+  EmbedContentParameters
 } from '@google/genai'
 import { GoogleMapper } from '../../../../src/core/mapping/google.mapper'
 import * as GoogleEmbedMapper from '../../../../src/core/mapping/google.embed.mapper'
@@ -617,14 +618,14 @@ describe('Google Mapper', () => {
 
     it('[Easy] should map single string input', () => {
       const params: EmbedParams = { ...baseEmbedParams, input: 'Embed this' }
-      const result = mapper.mapToEmbedParams(params) as any
+      const result = mapper.mapToEmbedParams(params)
       expect(result.model).toBe(`models/${model}`)
       expect(result.contents).toEqual(['Embed this'])
     })
 
     it('[Easy] should map string array input (batch)', () => {
       const params: EmbedParams = { ...baseEmbedParams, input: ['Text 1', 'Text 2'] }
-      const result = mapper.mapToEmbedParams(params) as any
+      const result = mapper.mapToEmbedParams(params)
       expect(result.model).toBe(`models/${model}`)
       expect(result.contents).toHaveLength(2)
       expect(result.contents[0]).toEqual('Text 1')
@@ -639,7 +640,7 @@ describe('Google Mapper', () => {
 
     it('[Medium] should handle empty array input', () => {
       const params: EmbedParams = { ...baseEmbedParams, input: [] }
-      const result = mapper.mapToEmbedParams(params) as any
+      const result = mapper.mapToEmbedParams(params)
       expect(result.model).toBe(`models/${model}`)
       expect(result.contents).toEqual([])
     })
