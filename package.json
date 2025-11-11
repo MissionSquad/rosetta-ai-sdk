@@ -50,7 +50,8 @@
     "example:custom-novita": "ts-node examples/custom-provider-novita.ts",
     "example:custom-gpustack": "ts-node examples/custom-provider-gpustack.ts",
     "example:custom-lms": "ts-node examples/custom-provider-lmstudio.ts",
-    "example:custom-elevenlabs": "ts-node examples/custom-provider-elevenlabs.ts"
+    "example:custom-elevenlabs": "ts-node examples/custom-provider-elevenlabs.ts",
+    "example:responses": "ts-node examples/responses-api.ts"
   },
   "engines": {
     "node": ">=20.0.0"
