@@ -563,7 +563,7 @@ describe('Azure OpenAI Mapper (V2)', () => {
 
   describe('wrapProviderError', () => {
     it('[Easy] should delegate error wrapping to common function', () => {
-      const underlying = new OpenAI.APIError(400, {}, '', {})
+      const underlying = new OpenAI.APIError(400, {}, '', new Headers())
       mapper.wrapProviderError(underlying, Provider.OpenAI)
       expect(mockWrapOpenAIError).toHaveBeenCalledTimes(1)
       expect(mockWrapOpenAIError).toHaveBeenCalledWith(underlying, Provider.OpenAI)

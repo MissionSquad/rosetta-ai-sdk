@@ -370,10 +370,10 @@ describe('OpenAI Common Mapping Utilities', () => {
 
   describe('wrapOpenAIError', () => {
     it('[Hard] should wrap different OpenAI APIError subtypes', () => {
-      const rateLimitError = new OpenAI.RateLimitError(429, { message: 'Rate limited' }, 'Rate Limit', {})
-      const authError = new OpenAI.AuthenticationError(401, { message: 'Invalid key' }, 'Auth Error', {})
-      const badRequestError = new OpenAI.BadRequestError(400, { message: 'Bad input' }, 'Bad Request', {})
-      const genericApiError = new OpenAI.APIError(500, { message: 'Server error' }, 'Server Error', {})
+      const rateLimitError = new OpenAI.RateLimitError(429, { message: 'Rate limited' }, 'Rate Limit', new Headers())
+      const authError = new OpenAI.AuthenticationError(401, { message: 'Invalid key' }, 'Auth Error', new Headers())
+      const badRequestError = new OpenAI.BadRequestError(400, { message: 'Bad input' }, 'Bad Request', new Headers())
+      const genericApiError = new OpenAI.APIError(500, { message: 'Server error' }, 'Server Error', new Headers())
 
       const wrappedRateLimit = wrapOpenAIError(rateLimitError, Provider.OpenAI)
       const wrappedAuth = wrapOpenAIError(authError, Provider.OpenAI)
