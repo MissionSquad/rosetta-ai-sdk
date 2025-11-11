@@ -29,7 +29,10 @@ import {
   StreamChunk,
   RosettaModelList,
   ModelListingSourceConfig,
-  RosettaVoiceList
+  RosettaVoiceList,
+  CreateResponseParams,
+  ResponseResult,
+  ResponsesStreamChunk
 } from '../types'
 import { OpenAICompletion, OpenAICompletionChoice } from '../types/openai.types' // Import the new types
 import { ConfigurationError, ProviderAPIError, UnsupportedFeatureError, RosettaAIError, MappingError } from '../errors'
@@ -47,6 +50,7 @@ import { mapTokenUsage } from './mapping/common.utils'
 import { prepareAudioUpload } from './utils'
 import { listModelsForProvider } from './listing/model.lister'
 import * as GroqAudioMapper from './mapping/groq.audio.mapper'
+import * as OpenAIResponsesMapper from './mapping/openai.responses.mapper'
 
 dotenvConfig()
 
@@ -987,6 +991,116 @@ export class RosettaAI {
         throw error
       }
       throw this.wrapProviderError(error, providerKey)
+    }
+  }
+
+  /**
+   * Creates a Response using OpenAI's Responses API.
+   * This is a stateful, agent-ready interface separate from Chat Completions.
+   *
+   * Key features:
+   * - Stateful conversations via previous_response_id (no history replay)
+   * - Separates instructions (developer intent) from input (user content)
+   * - Built-in tools (web_search, file_search, image_generation, code_interpreter)
+   * - Custom function tools
+   *
+   * @param params - The parameters for creating a response.
+   * @returns A promise resolving to the response result.
+   * @throws {ConfigurationError} If OpenAI provider is not configured.
+   * @throws {UnsupportedFeatureError} If used with a non-OpenAI provider.
+   * @throws {InvalidToolDefinitionError} If a tool definition is invalid.
+   * @throws {ToolArgumentValidationError} If tool arguments fail validation.
+   * @throws {ProviderAPIError} If the OpenAI API returns an error.
+   * @throws {MappingError} If response mapping fails.
+   */
+  public async createResponse(params: CreateResponseParams): Promise<ResponseResult> {
+    // Validate provider is OpenAI
+    if (params.provider !== Provider.OpenAI && params.provider !== 'openai') {
+      throw new UnsupportedFeatureError(
+        params.provider as any,
+        'Responses API (OpenAI-only feature)'
+      )
+    }
+
+    try {
+      // Get OpenAI client
+      const client = this.getClientForProvider(Provider.OpenAI) as OpenAI
+
+      // Determine model
+      const model = params.model ?? this.config.defaultModels?.[Provider.OpenAI] ?? 'gpt-4o'
+
+      // Map parameters
+      const mappedParams = OpenAIResponsesMapper.mapToOpenAIResponsesParams({
+        ...params,
+        model,
+        stream: false
+      })
+
+      // Call OpenAI Responses API
+      // Note: The OpenAI SDK may not have responses.create yet, so we'll use a generic approach
+      // This assumes the SDK will be updated or we use the REST API directly
+      const response = await (client as any).responses.create(mappedParams)
+
+      // Map response back
+      return OpenAIResponsesMapper.mapFromOpenAIResponsesResponse(response, params.tools)
+    } catch (error) {
+      if (error instanceof RosettaAIError) {
+        throw error
+      }
+      throw this.wrapProviderError(error, Provider.OpenAI)
+    }
+  }
+
+  /**
+   * Creates a streaming Response using OpenAI's Responses API.
+   * Yields semantic events (not just content deltas) for agent-ready interactions.
+   *
+   * @param params - The parameters for creating a streaming response.
+   * @returns An async iterable yielding semantic event chunks.
+   * @throws {ConfigurationError} If OpenAI provider is not configured.
+   * @throws {UnsupportedFeatureError} If used with a non-OpenAI provider.
+   * @throws {InvalidToolDefinitionError} If a tool definition is invalid.
+   * @throws {ToolArgumentValidationError} If tool arguments fail validation (yielded as error).
+   * @throws {ProviderAPIError} If the OpenAI API returns an error (yielded as error).
+   * @throws {MappingError} If response mapping fails (yielded as error).
+   */
+  public async *streamResponse(params: CreateResponseParams): AsyncIterable<ResponsesStreamChunk> {
+    // Validate provider is OpenAI
+    if (params.provider !== Provider.OpenAI && params.provider !== 'openai') {
+      const error = new UnsupportedFeatureError(
+        params.provider as any,
+        'Responses API (OpenAI-only feature)'
+      )
+      yield { type: 'error', data: { error } }
+      return
+    }
+
+    try {
+      // Get OpenAI client
+      const client = this.getClientForProvider(Provider.OpenAI) as OpenAI
+
+      // Determine model
+      const model = params.model ?? this.config.defaultModels?.[Provider.OpenAI] ?? 'gpt-4o'
+
+      // Map parameters
+      const mappedParams = OpenAIResponsesMapper.mapToOpenAIResponsesParams({
+        ...params,
+        model,
+        stream: true
+      })
+
+      // Call OpenAI Responses API streaming
+      // Note: The OpenAI SDK may not have responses.create yet, so we'll use a generic approach
+      const stream = await (client as any).responses.create(mappedParams)
+
+      // Map and yield stream chunks
+      yield* OpenAIResponsesMapper.mapOpenAIResponsesStream(stream, params.tools)
+    } catch (error) {
+      const wrappedError = error instanceof RosettaAIError
+        ? error
+        : this.wrapProviderError(error, Provider.OpenAI)
+      yield { type: 'error', data: { error: wrappedError } }
+      return
     }
   }
 

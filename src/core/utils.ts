@@ -1,6 +1,5 @@
 import { Readable } from 'stream'
 import { toFile } from 'openai'
-import { FileLike } from 'openai/uploads'
 import { RosettaAudioData } from '../types'
 
 /**
@@ -9,10 +8,10 @@ import { RosettaAudioData } from '../types'
  * Returns a type compatible with both OpenAI and Groq upload parameters.
  *
  * @param audio The audio data object containing data, filename, and mimeType.
- * @returns A promise resolving to an object compatible with SDK file parameters (FileLike for Buffers, ReadableStream for streams).
+ * @returns A promise resolving to an object compatible with SDK file parameters.
  * @throws {TypeError} if the audio data type is not Buffer or NodeJS.ReadableStream.
  */
-export async function prepareAudioUpload(audio: RosettaAudioData): Promise<FileLike | NodeJS.ReadableStream> {
+export async function prepareAudioUpload(audio: RosettaAudioData): Promise<Awaited<ReturnType<typeof toFile>> | NodeJS.ReadableStream> {
   // Return the union of possible compatible types
   const { data, filename, mimeType } = audio
 

@@ -743,7 +743,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
     })
 
     it('should throw error wrapped by the mapper', async () => {
-      const apiError = new OpenAI.APIError(400, { message: 'Bad Request' }, 'Error', {})
+      const apiError = new OpenAI.APIError(400, { message: 'Bad Request' }, 'Error', new Headers())
       mockOpenAIClientInstance.chat.completions.create.mockRejectedValue(apiError)
       const wrappedError = new ProviderAPIError('Wrapped by mapper', Provider.OpenAI, 400)
       mockOpenAIMapperInstance.wrapProviderError.mockReturnValue(wrappedError) // Mock the mapper's wrap function
@@ -961,7 +961,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
     })
 
     it('should yield error chunk if client call fails', async () => {
-      const apiError = new OpenAI.APIError(500, { message: 'Server Error' }, 'Error', {})
+      const apiError = new OpenAI.APIError(500, { message: 'Server Error' }, 'Error', new Headers())
       mockOpenAIClientInstance.chat.completions.create.mockRejectedValue(apiError)
       const wrappedError = new ProviderAPIError('Wrapped', Provider.OpenAI)
       // Mock the wrapProviderError on the *mapper instance*
@@ -1330,7 +1330,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
     })
 
     it('[Medium] should yield error chunk if client call fails for streamSpeech', async () => {
-      const apiError = new OpenAI.APIError(500, {}, '', {})
+      const apiError = new OpenAI.APIError(500, {}, '', new Headers())
       mockOpenAIClientInstance.audio.speech.create.mockRejectedValue(apiError)
       const wrappedError = new ProviderAPIError('Wrapped TTS Error', Provider.OpenAI)
       // Mock the wrapProviderError on the *mapper instance*
@@ -1556,8 +1556,8 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
   describe('wrapProviderError', () => {
     it('should delegate error wrapping to the correct mapper', () => {
       const rosetta = new RosettaAI({ openaiApiKey: 'key', groqApiKey: 'key' })
-      const openaiError = new OpenAI.APIError(400, {}, '', {})
-      const groqError = new Groq.APIError(401, {}, '', {})
+      const openaiError = new OpenAI.APIError(400, {}, '', new Headers())
+      const groqError = new Groq.APIError(401, {}, '', new Headers())
 
       // Mock the wrapProviderError method on the instances retrieved from the map
       const openaiMapperInstance = (rosetta as any).mappers.get(Provider.OpenAI)

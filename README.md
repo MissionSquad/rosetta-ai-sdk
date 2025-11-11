@@ -801,6 +801,231 @@ async function safeGenerate() {
 safeGenerate()
 ```
 
+### OpenAI Responses API (Stateful Interface)
+
+RosettaAI provides access to OpenAI's **Responses API** as a separate, OpenAI-specific interface. This is a stateful, agent-ready API designed for modern AI interactions.
+
+**Key Differences from Chat Completions:**
+
+- **Stateful conversations:** Use `previous_response_id` to chain turns without replaying message history
+- **Separated concerns:** `instructions` (developer/system intent) + `input` (user content)
+- **Built-in tools:** `web_search`, `file_search`, `image_generation`, `code_interpreter`
+- **Semantic streaming:** Rich event types beyond simple content deltas
+- **OpenAI-only:** Not available for other providers (by design)
+
+#### Basic Usage
+
+```typescript
+import { RosettaAI, Provider } from 'rosetta-ai-sdk'
+// ... initialization ...
+
+// Simple response
+const result = await rosetta.createResponse({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  instructions: 'You are a helpful coding assistant',
+  input: 'Explain async/await in JavaScript',
+  max_tokens: 200
+})
+
+console.log(result.output_text)
+console.log(`Response ID: ${result.id}`) // Use for stateful conversations
+```
+
+#### Stateful Conversations
+
+```typescript
+// First turn
+const turn1 = await rosetta.createResponse({
+  provider: Provider.OpenAI,
+  instructions: 'You are a math tutor',
+  input: 'What is 15 + 27?'
+})
+
+console.log(turn1.output_text) // "15 + 27 = 42"
+
+// Second turn - reference previous response (no history replay!)
+const turn2 = await rosetta.createResponse({
+  provider: Provider.OpenAI,
+  instructions: 'You are a math tutor',
+  input: 'Now multiply that by 3',
+  previous_response_id: turn1.id // Stateful!
+})
+
+console.log(turn2.output_text) // "42 × 3 = 126"
+```
+
+#### Built-in Tools
+
+```typescript
+// Web search
+const result = await rosetta.createResponse({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  input: 'What are the latest TypeScript features?',
+  tools: [{ type: 'web_search' }],
+  tool_choice: 'auto'
+})
+
+// Image generation
+const imageResult = await rosetta.createResponse({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  input: 'Generate a logo with a mountain and sun',
+  tools: [
+    {
+      type: 'image_generation',
+      options: { size: '1024x1024', quality: 'hd' }
+    }
+  ],
+  tool_choice: { type: 'image_generation' }
+})
+
+// Code interpreter
+const codeResult = await rosetta.createResponse({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  input: 'Analyze this CSV data: ...',
+  tools: [{ type: 'code_interpreter' }]
+})
+```
+
+#### Custom Function Tools
+
+```typescript
+import { ResponsesTool } from 'rosetta-ai-sdk'
+import { z } from 'zod'
+
+const getWeatherTool: ResponsesTool = {
+  type: 'function',
+  name: 'getCurrentWeather',
+  description: 'Get current weather for a location',
+  parameters: {
+    type: 'object',
+    properties: {
+      location: { type: 'string' },
+      unit: { type: 'string', enum: ['celsius', 'fahrenheit'] }
+    },
+    required: ['location']
+  },
+  zodSchema: z.object({
+    location: z.string(),
+    unit: z.enum(['celsius', 'fahrenheit']).optional()
+  })
+}
+
+const result = await rosetta.createResponse({
+  provider: Provider.OpenAI,
+  input: "What's the weather in San Francisco?",
+  tools: [getWeatherTool],
+  tool_choice: 'auto'
+})
+
+if (result.tool_calls) {
+  for (const call of result.tool_calls) {
+    const args = JSON.parse(call.function.arguments)
+    // Execute your function...
+    const weather = await getCurrentWeather(args)
+
+    // Continue conversation with result
+    const followUp = await rosetta.createResponse({
+      provider: Provider.OpenAI,
+      input: JSON.stringify(weather),
+      previous_response_id: result.id
+    })
+  }
+}
+```
+
+#### Structured Output
+
+```typescript
+const result = await rosetta.createResponse({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  instructions: 'Extract package information',
+  input: 'Install typescript version 5.5.4',
+  response_format: {
+    type: 'json_schema',
+    json_schema: {
+      name: 'PackageInfo',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          package_name: { type: 'string' },
+          version: { type: 'string' }
+        },
+        required: ['package_name', 'version'],
+        additionalProperties: false
+      }
+    }
+  }
+})
+
+const parsed = JSON.parse(result.output_text)
+console.log(parsed) // { package_name: 'typescript', version: '5.5.4' }
+```
+
+#### Streaming Responses
+
+```typescript
+const stream = rosetta.streamResponse({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  instructions: 'You are a creative writer',
+  input: 'Write a haiku about TypeScript',
+  stream: true
+})
+
+for await (const chunk of stream) {
+  switch (chunk.type) {
+    case 'response.created':
+      console.log(`Stream started: ${chunk.data.id}`)
+      break
+
+    case 'response.output_text.delta':
+      process.stdout.write(chunk.data.delta)
+      break
+
+    case 'response.output_text.done':
+      console.log('\n[Text complete]')
+      break
+
+    case 'response.tool_call.start':
+      console.log(`\nTool call: ${chunk.data.name}`)
+      break
+
+    case 'response.tool_call.delta':
+      process.stdout.write(chunk.data.delta)
+      break
+
+    case 'response.tool_call.done':
+      console.log(`\nTool call complete: ${chunk.data.arguments}`)
+      break
+
+    case 'response.completed':
+      console.log(`\nUsage: ${JSON.stringify(chunk.data.usage)}`)
+      break
+
+    case 'response.failed':
+      console.error(`Failed: ${chunk.data.error.message}`)
+      break
+
+    case 'error':
+      console.error(`Error: ${chunk.data.error.message}`)
+      break
+  }
+}
+```
+
+**When to use Responses API vs Chat Completions:**
+
+- **Use Responses API** for: Agent applications, stateful conversations, built-in tools, complex workflows
+- **Use Chat Completions** for: Provider-agnostic code, simple Q&A, maximum portability
+
+See `examples/responses-api.ts` for a complete demonstration.
+
 ## API Reference
 
 Detailed documentation for all exported classes, methods, types, and interfaces is available via JSDoc comments within the source code. Use your IDE's IntelliSense or generate HTML documentation using [TypeDoc](https://typedoc.org/).
@@ -814,6 +1039,7 @@ Key exports include:
 - **Core Results:** `GenerateResult`, `EmbedResult`, `TranscriptionResult`, `RosettaModel`, `RosettaModelList`
 - **Streaming:** `StreamChunk`, `AudioStreamChunk`
 - **Common Types:** `ProviderKey`, `RosettaMessage`, `RosettaContentPart`, `RosettaImageData`, `RosettaAudioData`, `RosettaTool`, `RosettaToolCallRequest`, `TokenUsage`, `Citation`
+- **Responses API (OpenAI):** `CreateResponseParams`, `ResponseResult`, `ResponsesStreamChunk`, `ResponsesTool`, `ResponsesInputItem`, `ResponsesToolChoice`, `ResponsesFormat`
 - **Errors:** `RosettaAIError`, `ConfigurationError`, `ProviderAPIError`, `UnsupportedFeatureError`, `MappingError`, `InvalidToolDefinitionError`, `ToolArgumentValidationError`
 
 ## Examples
@@ -828,6 +1054,7 @@ Runnable examples demonstrating various features can be found in the `/examples`
 - `audio.ts`: Text-to-Speech and Speech-to-Text/Translation.
 - `structured-output.ts`: Requesting and validating JSON output.
 - `list-models.ts`: Listing available models for configured providers.
+- `responses-api.ts`: OpenAI Responses API with stateful conversations, built-in tools, and semantic streaming.
 - `custom-provider-*.ts`: Examples for integrating custom OpenAI-compatible providers (Novita, GPUStack, LM Studio).
 
 **To run an example:**
@@ -835,7 +1062,7 @@ Runnable examples demonstrating various features can be found in the `/examples`
 1.  Ensure you have configured your API keys in a `.env` file (see Configuration).
 2.  Make sure any required sample files (e.g., `logo.png`, `sample_audio.mp3`) exist in the `examples` directory if needed by the specific example.
 3.  Run the build command: `npm run build`
-4.  Execute the example using: `npm run example:<name>` (e.g., `npm run example:basic`, `npm run example:stream`, `npm run example:listmodels`).
+4.  Execute the example using: `npm run example:<name>` (e.g., `npm run example:basic`, `npm run example:stream`, `npm run example:responses`, `npm run example:listmodels`).
 
 ## Development
 
