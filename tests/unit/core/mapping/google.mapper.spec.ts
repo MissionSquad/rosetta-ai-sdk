@@ -63,6 +63,16 @@ async function collectStreamChunks(stream: AsyncIterable<StreamChunk>): Promise<
   return chunks
 }
 
+// Type-safe helpers to extract specific StreamChunk variants
+function assertChunkType<T extends StreamChunk['type']>(
+  chunk: StreamChunk,
+  type: T
+): asserts chunk is Extract<StreamChunk, { type: T }> {
+  if (chunk.type !== type) {
+    throw new Error(`Expected chunk type '${type}' but got '${chunk.type}'`)
+  }
+}
+
 // Helper to create mock candidate
 const createMockCandidate = (
   parts: Part[],
@@ -743,8 +753,8 @@ describe('Google Mapper', () => {
         type: 'final_usage',
         data: { usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, cachedContentTokenCount: undefined } }
       })
-      expect(results[5].type).toBe('final_result')
-      expect((results[5] as any).data.result).toEqual(
+      assertChunkType(results[5], 'final_result')
+      expect(results[5].data.result).toEqual(
         expect.objectContaining({
           content: 'Hello world',
           finishReason: 'stop',
@@ -766,23 +776,24 @@ describe('Google Mapper', () => {
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(7) // start, tool_start, tool_delta, tool_done, stop, usage, final
-      expect(results[1].type).toBe('tool_call_start')
-      expect((results[1] as any).data.toolCall.function.name).toBe(toolName)
-      const toolCallId = (results[1] as any).data.toolCall.id
 
-      expect(results[2].type).toBe('tool_call_delta')
-      expect((results[2] as any).data.id).toBe(toolCallId)
-      expect((results[2] as any).data.functionArgumentChunk).toBe('{"a":1}')
+      assertChunkType(results[1], 'tool_call_start')
+      expect(results[1].data.toolCall.function.name).toBe(toolName)
+      const toolCallId = results[1].data.toolCall.id
 
-      expect(results[3].type).toBe('tool_call_done')
-      expect((results[3] as any).data.id).toBe(toolCallId)
+      assertChunkType(results[2], 'tool_call_delta')
+      expect(results[2].data.id).toBe(toolCallId)
+      expect(results[2].data.functionArgumentChunk).toBe('{"a":1}')
 
-      expect(results[4].type).toBe('message_stop')
-      expect((results[4] as any).data.finishReason).toBe('tool_calls')
+      assertChunkType(results[3], 'tool_call_done')
+      expect(results[3].data.id).toBe(toolCallId)
+
+      assertChunkType(results[4], 'message_stop')
+      expect(results[4].data.finishReason).toBe('tool_calls')
 
       expect(results[5].type).toBe('final_usage')
-      expect(results[6].type).toBe('final_result')
-      const finalResult = (results[6] as any).data.result
+      assertChunkType(results[6], 'final_result')
+      const finalResult = results[6].data.result
       expect(finalResult.content).toBeNull()
       expect(finalResult.finishReason).toBe('tool_calls')
       expect(finalResult.toolCalls).toHaveLength(1)
@@ -825,9 +836,9 @@ describe('Google Mapper', () => {
       expect(results).toHaveLength(6) // start, delta, stop, usage, final
       expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'content_filter' } })
       expect(results[4].type).toBe('final_usage')
-      expect(results[5].type).toBe('final_result')
-      expect((results[5] as any).data.result.finishReason).toBe('content_filter')
-      expect((results[5] as any).data.result.content).toBe('Unsafe \n\nThis response was blocked by the AI provider\'s safety filters. Please modify your request and try again.')
+      assertChunkType(results[5], 'final_result')
+      expect(results[5].data.result.finishReason).toBe('content_filter')
+      expect(results[5].data.result.content).toBe('Unsafe \n\nThis response was blocked by the AI provider\'s safety filters. Please modify your request and try again.')
     })
 
     it('[Hard] should handle stream with citations', async () => {
@@ -846,11 +857,11 @@ describe('Google Mapper', () => {
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(8) // start, delta(cite_delta, cite_done), delta, stop, usage, final
-      expect(results[2].type).toBe('citation_delta')
-      expect((results[2] as any).data.citation.sourceId).toBe('cite1.com')
+      assertChunkType(results[2], 'citation_delta')
+      expect(results[2].data.citation.sourceId).toBe('cite1.com')
       expect(results[3].type).toBe('citation_done')
-      expect(results[7].type).toBe('final_result')
-      const finalResult = (results[7] as any).data.result
+      assertChunkType(results[7], 'final_result')
+      const finalResult = results[7].data.result
       expect(finalResult.content).toBe('Grounded text.')
       expect(finalResult.citations).toHaveLength(1)
       expect(finalResult.citations[0].sourceId).toBe('cite1.com')
@@ -867,15 +878,15 @@ describe('Google Mapper', () => {
       const results = await collectStreamChunks(stream)
 
       expect(results).toHaveLength(7) // start, json_delta, json_delta, json_done, stop, usage, final
-      expect(results[1].type).toBe('json_delta')
-      expect((results[1] as any).data.delta).toBe('{"key":')
-      expect(results[2].type).toBe('json_delta')
-      expect((results[2] as any).data.delta).toBe(' "value"}')
-      expect(results[3].type).toBe('json_done')
-      expect((results[3] as any).data.snapshot).toBe(jsonString)
-      expect((results[3] as any).data.parsed).toEqual({ key: 'value' })
-      expect(results[6].type).toBe('final_result')
-      const finalResult = (results[6] as any).data.result
+      assertChunkType(results[1], 'json_delta')
+      expect(results[1].data.delta).toBe('{"key":')
+      assertChunkType(results[2], 'json_delta')
+      expect(results[2].data.delta).toBe(' "value"}')
+      assertChunkType(results[3], 'json_done')
+      expect(results[3].data.snapshot).toBe(jsonString)
+      expect(results[3].data.parsed).toEqual({ key: 'value' })
+      assertChunkType(results[6], 'final_result')
+      const finalResult = results[6].data.result
       expect(finalResult.content).toBe(jsonString)
       expect(finalResult.parsedContent).toEqual({ key: 'value' })
     })
