@@ -512,10 +512,16 @@ export class RosettaAI {
           const betasFromOptions = params.providerOptions?.anthropicBetas
           const betas = betasFromOptions ?? betasFromSuffix
           
-          providerResponse = await (client as Anthropic).messages.create(
-            mappedParams,
-            betas ? { headers: { 'anthropic-beta': betas.toString() } } : undefined
-          )
+          if (betas && betas.length > 0) {
+            // Use beta API when betas are specified
+            providerResponse = await (client as Anthropic).beta.messages.create({
+              ...mappedParams,
+              betas
+            })
+          } else {
+            // Use regular API when no betas
+            providerResponse = await (client as Anthropic).messages.create(mappedParams)
+          }
         } else if (providerKey === Provider.Google) {
           // New SDK uses a unified API - no need to distinguish chat vs generateContent
           const googleParams = mappedParams as GenerateContentParameters
@@ -619,10 +625,16 @@ export class RosettaAI {
           const betasFromOptions = params.providerOptions?.anthropicBetas
           const betas = betasFromOptions ?? betasFromSuffix
           
-          providerStream = await (client as Anthropic).messages.create(
-            mappedParams,
-            betas ? { headers: { 'anthropic-beta': betas.toString() } } : undefined
-          )
+          if (betas && betas.length > 0) {
+            // Use beta API when betas are specified
+            providerStream = await (client as Anthropic).beta.messages.create({
+              ...mappedParams,
+              betas
+            })
+          } else {
+            // Use regular API when no betas
+            providerStream = await (client as Anthropic).messages.create(mappedParams)
+          }
         } else if (providerKey === Provider.Google) {
           // New SDK returns AsyncGenerator directly from generateContentStream
           const googleParams = mappedParams as GenerateContentParameters
