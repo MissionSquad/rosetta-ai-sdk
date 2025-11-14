@@ -24,6 +24,8 @@ export interface RosettaModelProperties {
   training_data_cutoff?: string
   /** Anthropic specific: Maximum completion tokens potentially available under specific conditions. */
   extended_max_completion_tokens?: number
+  /** Beta features required for this model (e.g., for Anthropic's extended context window) */
+  beta_features?: string[]
   // Add any other observed optional properties here
 }
 

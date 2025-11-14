@@ -719,7 +719,7 @@ describe('Anthropic Mapper', () => {
         500,
         { error: { type: 'server_error', message: 'Internal failure' } },
         'Server Error',
-        {}
+        new Headers()
       )
       const events: RawMessageStreamEvent[] = [
         baseMessageStart,
@@ -803,7 +803,7 @@ describe('Anthropic Mapper', () => {
         429,
         { error: { type: 'rate_limit_error', message: 'Limit exceeded' } },
         'Rate Limit',
-        {}
+        new Headers()
       )
       const wrapped = mapper.wrapProviderError(underlying, Provider.Anthropic)
       expect(wrapped).toBeInstanceOf(ProviderAPIError)
