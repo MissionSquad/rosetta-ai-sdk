@@ -33,7 +33,7 @@ async function runStreamingChat() {
     const model =
       rosetta.config.defaultModels?.[providerToTest] ??
       (providerToTest === Provider.Anthropic
-        ? 'claude-3-haiku-20240307'
+        ? 'claude-sonnet-4-5:1m'
         : providerToTest === Provider.Google
         ? 'gemini-1.5-flash-latest'
         : providerToTest === Provider.Groq

@@ -506,7 +506,22 @@ export class RosettaAI {
         let providerResponse: any
 
         if (providerKey === Provider.Anthropic) {
-          providerResponse = await (client as Anthropic).messages.create(mappedParams)
+          // Detect :1m suffix for extended context or use explicit betas from providerOptions
+          const is1MContext = params.model?.endsWith(':1m') ?? false
+          const betasFromSuffix = is1MContext ? ['context-1m-2025-08-07'] : undefined
+          const betasFromOptions = params.providerOptions?.anthropicBetas
+          const betas = betasFromOptions ?? betasFromSuffix
+          
+          if (betas && betas.length > 0) {
+            // Use beta API when betas are specified
+            providerResponse = await (client as Anthropic).beta.messages.create({
+              ...mappedParams,
+              betas
+            })
+          } else {
+            // Use regular API when no betas
+            providerResponse = await (client as Anthropic).messages.create(mappedParams)
+          }
         } else if (providerKey === Provider.Google) {
           // New SDK uses a unified API - no need to distinguish chat vs generateContent
           const googleParams = mappedParams as GenerateContentParameters
@@ -604,7 +619,22 @@ export class RosettaAI {
         let providerStream: any
 
         if (providerKey === Provider.Anthropic) {
-          providerStream = await (client as Anthropic).messages.create(mappedParams)
+          // Detect :1m suffix for extended context or use explicit betas from providerOptions
+          const is1MContext = params.model?.endsWith(':1m') ?? false
+          const betasFromSuffix = is1MContext ? ['context-1m-2025-08-07'] : undefined
+          const betasFromOptions = params.providerOptions?.anthropicBetas
+          const betas = betasFromOptions ?? betasFromSuffix
+          
+          if (betas && betas.length > 0) {
+            // Use beta API when betas are specified
+            providerStream = await (client as Anthropic).beta.messages.create({
+              ...mappedParams,
+              betas
+            })
+          } else {
+            // Use regular API when no betas
+            providerStream = await (client as Anthropic).messages.create(mappedParams)
+          }
         } else if (providerKey === Provider.Google) {
           // New SDK returns AsyncGenerator directly from generateContentStream
           const googleParams = mappedParams as GenerateContentParameters

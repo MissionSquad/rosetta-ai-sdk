@@ -39,6 +39,8 @@ export interface ProviderOptions {
     category: 'HARM_CATEGORY_HARASSMENT' | 'HARM_CATEGORY_HATE_SPEECH' | 'HARM_CATEGORY_SEXUALLY_EXPLICIT' | 'HARM_CATEGORY_DANGEROUS_CONTENT'
     threshold: 'BLOCK_NONE' | 'BLOCK_ONLY_HIGH' | 'BLOCK_MEDIUM_AND_ABOVE' | 'BLOCK_LOW_AND_ABOVE'
   }>
+  /** Anthropic-specific: Beta features to enable (e.g., ['context-1m-2025-08-07']) */
+  anthropicBetas?: string[]
   // Add other provider-specific config options here as needed
 }
 

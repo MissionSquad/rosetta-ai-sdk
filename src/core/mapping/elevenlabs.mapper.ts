@@ -16,10 +16,8 @@ import { ProviderAPIError, MappingError } from '../../errors'
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import type { ElevenLabsClient as ElevenLabsClientType } from '@elevenlabs/elevenlabs-js'
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js'
-import type { TextToSpeechRequest } from '@elevenlabs/elevenlabs-js/api/resources/textToSpeech/client/requests/TextToSpeechRequest'
-import type { StreamTextToSpeechRequest } from '@elevenlabs/elevenlabs-js/api/resources/textToSpeech/client/requests/StreamTextToSpeechRequest'
+import type { StreamTextToSpeechRequest, BodyTextToSpeechFull as TextToSpeechRequest } from '@elevenlabs/elevenlabs-js/api/resources/textToSpeech/client/requests'
 import type { BodySpeechToTextV1SpeechToTextPost } from '@elevenlabs/elevenlabs-js/api/resources/speechToText/client/requests'
-import type { FileLike as ElevenFileLike } from '@elevenlabs/elevenlabs-js/core/file'
 import { TextToSpeechConvertRequestOutputFormat } from '@elevenlabs/elevenlabs-js/api/resources/textToSpeech/types'
 import type { SpeechToTextConvertResponse } from '@elevenlabs/elevenlabs-js/api/resources/speechToText/types'
 import type { SpeechToTextChunkResponseModel } from '@elevenlabs/elevenlabs-js/api/types/SpeechToTextChunkResponseModel'
@@ -307,9 +305,9 @@ export class ElevenLabsMapper extends BaseCustomMapper {
       throw new MappingError('STT model_id is required (set TranscribeParams.model or defaultSttModel).', this.provider)
     }
 
-    // Build ElevenLabs FileLike from RosettaAudioData (Buffer or Node Readable)
+    // Build ElevenLabs file parameter from RosettaAudioData (Buffer or Node Readable)
     const data = originalParams.audio.data
-    let file: ElevenFileLike | undefined
+    let file: Buffer | Readable | undefined
     if (Buffer.isBuffer(data)) {
       file = data
     } else if (data instanceof Readable) {
