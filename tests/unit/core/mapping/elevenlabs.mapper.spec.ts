@@ -11,24 +11,21 @@ import {
 import { CustomProviderConfig } from '../../../../src/types/custom.types'
 import { MappingError, ProviderAPIError } from '../../../../src/errors'
 
-// Create a mock client that will be reused across all instances
-const mockClientInstance = {
-  textToSpeech: {
-    convert: jest.fn(),
-    stream: jest.fn()
-  },
-  speechToText: {
-    convert: jest.fn()
-  },
-  voices: {
-    getAll: jest.fn()
-  }
-}
-
-// Mock the ElevenLabs SDK to always return the same instance
+// Mock the ElevenLabs SDK
 jest.mock('@elevenlabs/elevenlabs-js', () => {
   return {
-    ElevenLabsClient: jest.fn().mockImplementation(() => mockClientInstance)
+    ElevenLabsClient: jest.fn().mockImplementation(() => ({
+      textToSpeech: {
+        convert: jest.fn(),
+        stream: jest.fn()
+      },
+      speechToText: {
+        convert: jest.fn()
+      },
+      voices: {
+        getAll: jest.fn()
+      }
+    }))
   }
 })
 
@@ -41,27 +38,13 @@ async function collectAudioStreamChunks(stream: AsyncIterable<AudioStreamChunk>)
   return chunks
 }
 
-// Helper to create a mock Node.js Readable stream
-function createMockNodeReadable(chunks: Buffer[]): Readable {
-  let index = 0
-  return new Readable({
-    read() {
-      if (index < chunks.length) {
-        this.push(chunks[index++])
-      } else {
-        this.push(null) // End of stream
-      }
-    }
-  })
-}
-
-// Helper to create a mock Web ReadableStream
-function createMockWebReadableStream(chunks: Buffer[]): ReadableStream<Uint8Array> {
+// Helper to create a mock readable stream
+function createMockReadableStream(chunks: Buffer[]): ReadableStream<Uint8Array> {
   let index = 0
   return new ReadableStream({
     pull(controller) {
       if (index < chunks.length) {
-        controller.enqueue(new Uint8Array(chunks[index++]))
+        controller.enqueue(chunks[index++])
       } else {
         controller.close()
       }
@@ -72,6 +55,7 @@ function createMockWebReadableStream(chunks: Buffer[]): ReadableStream<Uint8Arra
 describe('ElevenLabsMapper', () => {
   let mapper: ElevenLabsMapper
   let mockConfig: CustomProviderConfig
+  let mockClient: any
 
   beforeEach(() => {
     mockConfig = {
@@ -85,16 +69,18 @@ describe('ElevenLabsMapper', () => {
 
     mapper = new ElevenLabsMapper(mockConfig)
 
-    // Clear all mock call history but keep the same instance
+    // Get the mock client instance
+    const { ElevenLabsClient } = require('@elevenlabs/elevenlabs-js')
+    mockClient = new ElevenLabsClient()
+
     jest.clearAllMocks()
   })
 
   describe('Text-to-Speech (TTS)', () => {
     describe('Non-streaming TTS', () => {
       it('should generate speech with basic parameters', async () => {
-        const mockChunks = [Buffer.from('fake-audio-data')]
-        const mockStream = createMockNodeReadable(mockChunks)
-        mockClientInstance.textToSpeech.convert.mockResolvedValue(mockStream)
+        const mockAudioBuffer = Buffer.from('fake-audio-data')
+        mockClient.textToSpeech.convert.mockResolvedValue(mockAudioBuffer)
 
         const params: SpeechParams = {
           provider: 'elevenlabs',
@@ -107,7 +93,7 @@ describe('ElevenLabsMapper', () => {
         const result = await mapper.executeGenerateSpeech({}, 'test-api-key', mockConfig, params)
 
         expect(result).toBeInstanceOf(Buffer)
-        expect(mockClientInstance.textToSpeech.convert).toHaveBeenCalledWith(
+        expect(mockClient.textToSpeech.convert).toHaveBeenCalledWith(
           '21m00Tcm4TlvDq8ikWAM',
           expect.objectContaining({
             text: 'Hello world',
@@ -118,9 +104,8 @@ describe('ElevenLabsMapper', () => {
       })
 
       it('should apply text normalization by default', async () => {
-        const mockChunks = [Buffer.from('fake-audio-data')]
-        const mockStream = createMockNodeReadable(mockChunks)
-        mockClientInstance.textToSpeech.convert.mockResolvedValue(mockStream)
+        const mockAudioBuffer = Buffer.from('fake-audio-data')
+        mockClient.textToSpeech.convert.mockResolvedValue(mockAudioBuffer)
 
         const params: SpeechParams = {
           provider: 'elevenlabs',
@@ -131,7 +116,7 @@ describe('ElevenLabsMapper', () => {
 
         await mapper.executeGenerateSpeech({}, 'test-api-key', mockConfig, params)
 
-        expect(mockClientInstance.textToSpeech.convert).toHaveBeenCalledWith(
+        expect(mockClient.textToSpeech.convert).toHaveBeenCalledWith(
           '21m00Tcm4TlvDq8ikWAM',
           expect.objectContaining({
             text: 'The price is 42.50 dollars'
@@ -140,9 +125,8 @@ describe('ElevenLabsMapper', () => {
       })
 
       it('should skip text normalization when disabled', async () => {
-        const mockChunks = [Buffer.from('fake-audio-data')]
-        const mockStream = createMockNodeReadable(mockChunks)
-        mockClientInstance.textToSpeech.convert.mockResolvedValue(mockStream)
+        const mockAudioBuffer = Buffer.from('fake-audio-data')
+        mockClient.textToSpeech.convert.mockResolvedValue(mockAudioBuffer)
 
         const params: SpeechParams = {
           provider: 'elevenlabs',
@@ -154,7 +138,7 @@ describe('ElevenLabsMapper', () => {
 
         await mapper.executeGenerateSpeech({}, 'test-api-key', mockConfig, params)
 
-        expect(mockClientInstance.textToSpeech.convert).toHaveBeenCalledWith(
+        expect(mockClient.textToSpeech.convert).toHaveBeenCalledWith(
           '21m00Tcm4TlvDq8ikWAM',
           expect.objectContaining({
             text: 'The price is $42.50'
@@ -163,9 +147,8 @@ describe('ElevenLabsMapper', () => {
       })
 
       it('should include voice settings from ttsOptions', async () => {
-        const mockChunks = [Buffer.from('fake-audio-data')]
-        const mockStream = createMockNodeReadable(mockChunks)
-        mockClientInstance.textToSpeech.convert.mockResolvedValue(mockStream)
+        const mockAudioBuffer = Buffer.from('fake-audio-data')
+        mockClient.textToSpeech.convert.mockResolvedValue(mockAudioBuffer)
 
         const params: SpeechParams = {
           provider: 'elevenlabs',
@@ -182,7 +165,7 @@ describe('ElevenLabsMapper', () => {
 
         await mapper.executeGenerateSpeech({}, 'test-api-key', mockConfig, params)
 
-        expect(mockClientInstance.textToSpeech.convert).toHaveBeenCalledWith(
+        expect(mockClient.textToSpeech.convert).toHaveBeenCalledWith(
           '21m00Tcm4TlvDq8ikWAM',
           expect.objectContaining({
             voiceSettings: {
@@ -216,10 +199,9 @@ describe('ElevenLabsMapper', () => {
         }
 
         const configWithoutModel = { ...mockConfig, defaultTtsModel: undefined }
-        const mapperWithoutModel = new ElevenLabsMapper(configWithoutModel)
 
         await expect(
-          mapperWithoutModel.executeGenerateSpeech({}, 'test-api-key', configWithoutModel, params)
+          mapper.executeGenerateSpeech({}, 'test-api-key', configWithoutModel, params)
         ).rejects.toThrow(MappingError)
       })
     })
@@ -227,8 +209,8 @@ describe('ElevenLabsMapper', () => {
     describe('Streaming TTS', () => {
       it('should stream audio chunks', async () => {
         const mockChunks = [Buffer.from('chunk1'), Buffer.from('chunk2'), Buffer.from('chunk3')]
-        const mockStream = createMockNodeReadable(mockChunks)
-        mockClientInstance.textToSpeech.stream.mockResolvedValue(mockStream)
+        const mockStream = createMockReadableStream(mockChunks)
+        mockClient.textToSpeech.stream.mockResolvedValue(mockStream)
 
         const params: SpeechParams = {
           provider: 'elevenlabs',
@@ -280,7 +262,7 @@ describe('ElevenLabsMapper', () => {
             { text: 'test', start: 0.4, end: 0.6, type: 'word', speaker_id: 'speaker_0' }
           ]
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioBuffer = Buffer.from('fake-audio-data')
         const audioData: RosettaAudioData = {
@@ -301,7 +283,7 @@ describe('ElevenLabsMapper', () => {
         expect(result.language).toBe('en')
         expect(result.words).toHaveLength(4)
         expect(result.model).toBe('scribe_v1')
-        expect(mockClientInstance.speechToText.convert).toHaveBeenCalledWith(
+        expect(mockClient.speechToText.convert).toHaveBeenCalledWith(
           expect.objectContaining({
             modelId: 'scribe_v1',
             file: audioBuffer
@@ -315,7 +297,7 @@ describe('ElevenLabsMapper', () => {
           languageCode: 'en',
           words: []
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioStream = new Readable({
           read() {
@@ -339,7 +321,7 @@ describe('ElevenLabsMapper', () => {
         const result = await mapper.executeTranscribe({}, 'test-api-key', mockConfig, params)
 
         expect(result.text).toBe('Transcription from stream')
-        expect(mockClientInstance.speechToText.convert).toHaveBeenCalledWith(
+        expect(mockClient.speechToText.convert).toHaveBeenCalledWith(
           expect.objectContaining({
             file: audioStream
           })
@@ -352,7 +334,7 @@ describe('ElevenLabsMapper', () => {
           languageCode: 'fr',
           words: []
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioBuffer = Buffer.from('fake-audio-data')
         const audioData: RosettaAudioData = {
@@ -370,7 +352,7 @@ describe('ElevenLabsMapper', () => {
 
         await mapper.executeTranscribe({}, 'test-api-key', mockConfig, params)
 
-        expect(mockClientInstance.speechToText.convert).toHaveBeenCalledWith(
+        expect(mockClient.speechToText.convert).toHaveBeenCalledWith(
           expect.objectContaining({
             languageCode: 'fr'
           })
@@ -392,7 +374,7 @@ describe('ElevenLabsMapper', () => {
             { text: 'responds', start: 1.5, end: 2.0, type: 'word', speaker_id: 'speaker_1' }
           ]
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioBuffer = Buffer.from('fake-audio-data')
         const audioData: RosettaAudioData = {
@@ -410,7 +392,7 @@ describe('ElevenLabsMapper', () => {
 
         const result = await mapper.executeTranscribe({}, 'test-api-key', mockConfig, params)
 
-        expect(mockClientInstance.speechToText.convert).toHaveBeenCalledWith(
+        expect(mockClient.speechToText.convert).toHaveBeenCalledWith(
           expect.objectContaining({
             diarize: true
           })
@@ -427,7 +409,7 @@ describe('ElevenLabsMapper', () => {
           languageCode: 'en',
           words: []
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioBuffer = Buffer.from('fake-audio-data')
         const audioData: RosettaAudioData = {
@@ -444,7 +426,7 @@ describe('ElevenLabsMapper', () => {
 
         await mapper.executeTranscribe({}, 'test-api-key', mockConfig, params)
 
-        expect(mockClientInstance.speechToText.convert).toHaveBeenCalledWith(
+        expect(mockClient.speechToText.convert).toHaveBeenCalledWith(
           expect.not.objectContaining({
             diarize: expect.anything()
           })
@@ -463,7 +445,7 @@ describe('ElevenLabsMapper', () => {
             { text: 'world', start: 1.2, end: 1.5, type: 'word', speaker_id: 'speaker_0' }
           ]
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioBuffer = Buffer.from('fake-audio-data')
         const audioData: RosettaAudioData = {
@@ -481,7 +463,7 @@ describe('ElevenLabsMapper', () => {
 
         const result = await mapper.executeTranscribe({}, 'test-api-key', mockConfig, params)
 
-        expect(mockClientInstance.speechToText.convert).toHaveBeenCalledWith(
+        expect(mockClient.speechToText.convert).toHaveBeenCalledWith(
           expect.objectContaining({
             tagAudioEvents: true
           })
@@ -496,7 +478,7 @@ describe('ElevenLabsMapper', () => {
           languageCode: 'en',
           words: []
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioBuffer = Buffer.from('fake-audio-data')
         const audioData: RosettaAudioData = {
@@ -513,7 +495,7 @@ describe('ElevenLabsMapper', () => {
 
         await mapper.executeTranscribe({}, 'test-api-key', mockConfig, params)
 
-        expect(mockClientInstance.speechToText.convert).toHaveBeenCalledWith(
+        expect(mockClient.speechToText.convert).toHaveBeenCalledWith(
           expect.not.objectContaining({
             tagAudioEvents: expect.anything()
           })
@@ -532,7 +514,7 @@ describe('ElevenLabsMapper', () => {
             { text: 'world', start: 1.2, end: 1.5, type: 'word', speaker_id: 'speaker_1' }
           ]
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioBuffer = Buffer.from('fake-audio-data')
         const audioData: RosettaAudioData = {
@@ -551,7 +533,7 @@ describe('ElevenLabsMapper', () => {
 
         await mapper.executeTranscribe({}, 'test-api-key', mockConfig, params)
 
-        expect(mockClientInstance.speechToText.convert).toHaveBeenCalledWith(
+        expect(mockClient.speechToText.convert).toHaveBeenCalledWith(
           expect.objectContaining({
             diarize: true,
             tagAudioEvents: true
@@ -576,7 +558,7 @@ describe('ElevenLabsMapper', () => {
             }
           ]
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioBuffer = Buffer.from('fake-audio-data')
         const audioData: RosettaAudioData = {
@@ -614,10 +596,9 @@ describe('ElevenLabsMapper', () => {
         }
 
         const configWithoutModel = { ...mockConfig, defaultSttModel: undefined }
-        const mapperWithoutModel = new ElevenLabsMapper(configWithoutModel)
 
         await expect(
-          mapperWithoutModel.executeTranscribe({}, 'test-api-key', configWithoutModel, params)
+          mapper.executeTranscribe({}, 'test-api-key', configWithoutModel, params)
         ).rejects.toThrow(MappingError)
       })
 
@@ -625,7 +606,7 @@ describe('ElevenLabsMapper', () => {
         const mockResponse = {
           message: 'Transcription started, will be sent to webhook'
         }
-        mockClientInstance.speechToText.convert.mockResolvedValue(mockResponse)
+        mockClient.speechToText.convert.mockResolvedValue(mockResponse)
 
         const audioBuffer = Buffer.from('fake-audio-data')
         const audioData: RosettaAudioData = {
@@ -672,7 +653,7 @@ describe('ElevenLabsMapper', () => {
         }
       ]
 
-      mockClientInstance.voices.getAll.mockResolvedValue({ voices: mockVoices })
+      mockClient.voices.getAll.mockResolvedValue({ voices: mockVoices })
 
       const result: RosettaVoiceList = await mapper.executeListVoices('test-api-key', mockConfig)
 
@@ -686,7 +667,7 @@ describe('ElevenLabsMapper', () => {
     })
 
     it('should handle empty voice list', async () => {
-      mockClientInstance.voices.getAll.mockResolvedValue({ voices: [] })
+      mockClient.voices.getAll.mockResolvedValue({ voices: [] })
 
       const result = await mapper.executeListVoices('test-api-key', mockConfig)
 

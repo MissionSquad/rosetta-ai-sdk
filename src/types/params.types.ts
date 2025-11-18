@@ -158,11 +158,6 @@ interface BaseAudioParams {
   diarize?: boolean
   /** Optional: Tag non-speech audio events (e.g., laughter, applause). Provider-specific, e.g., ElevenLabs. */
   tagAudioEvents?: boolean
-  /**
-   * Additional provider-specific parameters to pass through to the provider API.
-   * Mapped fields take precedence over extraParams in case of collision.
-   */
-  extraParams?: Record<string, unknown>
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
 }
