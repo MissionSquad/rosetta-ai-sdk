@@ -153,7 +153,14 @@ export class ElevenLabsMapper extends BaseCustomMapper {
     super(config)
   }
 
-  /** Create or reuse the ElevenLabs client. Options verified against engineering guide. */
+  /**
+   * Create or reuse the ElevenLabs client.
+   * Initializes the client with API key from explicit parameter, config, or environment variable.
+   *
+   * @param explicitApiKey - Optional API key to use instead of configured key
+   * @returns Initialized ElevenLabs client instance
+   * @throws {ProviderAPIError} If no API key is available
+   */
   private getClient(explicitApiKey?: string): ElevenLabsClientType {
     if (this._client) return this._client
 
@@ -175,7 +182,23 @@ export class ElevenLabsMapper extends BaseCustomMapper {
     return this._client
   }
 
-  /** Non-streaming TTS: return a Buffer of synthesized audio. */
+  /**
+   * Non-streaming Text-to-Speech: Returns a Buffer of synthesized audio.
+   *
+   * Supports ElevenLabs-specific features:
+   * - 70+ languages with multilingual v2/v3 models
+   * - Voice settings (stability, similarity_boost, style, useSpeakerBoost)
+   * - Text normalization for numbers, currencies, URLs
+   * - Multiple output formats (mp3, opus, pcm, wav)
+   *
+   * @param _mappedParams - Pre-mapped params (unused)
+   * @param apiKey - ElevenLabs API key
+   * @param _providerConfig - Provider configuration (unused)
+   * @param originalParams - Original speech generation parameters
+   * @returns Buffer containing the complete audio file
+   * @throws {MappingError} If voice ID or model is not specified
+   * @throws {ProviderAPIError} If the ElevenLabs API returns an error
+   */
   override async executeGenerateSpeech(
     _mappedParams: TextToSpeechRequest,
     apiKey: string | undefined,
@@ -223,7 +246,16 @@ export class ElevenLabsMapper extends BaseCustomMapper {
     }
   }
 
-  /** Streaming TTS: yield AudioStreamChunk events as bytes are produced. */
+  /**
+   * Streaming Text-to-Speech: Yields audio chunks as they are generated.
+   * Provides lower latency and faster time-to-first-byte compared to non-streaming.
+   *
+   * @param _mappedParams - Pre-mapped params (unused)
+   * @param apiKey - ElevenLabs API key
+   * @param _providerConfig - Provider configuration (unused)
+   * @param originalParams - Original speech generation parameters
+   * @yields AudioStreamChunk events (audio_chunk, audio_stop, or error)
+   */
   override async *executeStreamSpeech(
     _mappedParams: StreamTextToSpeechRequest,
     apiKey: string | undefined,
@@ -291,7 +323,23 @@ export class ElevenLabsMapper extends BaseCustomMapper {
     }
   }
 
-  /** Synchronous STT Transcription via speechToText.convert */
+  /**
+   * Synchronous STT Transcription via speechToText.convert
+   *
+   * Supports ElevenLabs-specific features:
+   * - Speaker diarization: Identify up to 32 different speakers
+   * - Audio event tagging: Tag non-speech sounds like laughter, applause
+   * - Word-level timestamps with speaker IDs
+   * - 99 language support
+   *
+   * @param _mappedParams - Pre-mapped params (unused, we use originalParams directly)
+   * @param apiKey - ElevenLabs API key
+   * @param _providerConfig - Provider configuration (unused in this implementation)
+   * @param originalParams - Original transcription parameters
+   * @returns TranscriptionResult with text, language, words (with timestamps/speakers), and raw response
+   * @throws {MappingError} If model is not configured or response format is unexpected
+   * @throws {ProviderAPIError} If the ElevenLabs API returns an error
+   */
   override async executeTranscribe(
     _mappedParams: BodySpeechToTextV1SpeechToTextPost,
     apiKey: string | undefined,
@@ -320,10 +368,13 @@ export class ElevenLabsMapper extends BaseCustomMapper {
       ...(originalParams.language ? { languageCode: originalParams.language } : {})
     }
 
-    // Only include optional flags if explicitly desired by upstream (avoid assumptions)
-    // if (originalParams.timestampGranularities?.includes('word')) {
-    //   request['diarize'] = true // Enable if word-level timestamps require diarization in your product context
-    // }
+    // Add optional ElevenLabs-specific parameters
+    if (originalParams.diarize !== undefined) {
+      sttReq.diarize = originalParams.diarize
+    }
+    if (originalParams.tagAudioEvents !== undefined) {
+      sttReq.tagAudioEvents = originalParams.tagAudioEvents
+    }
 
     try {
       const response = await client.speechToText.convert(sttReq)
@@ -366,7 +417,15 @@ export class ElevenLabsMapper extends BaseCustomMapper {
     }
   }
 
-  /** Lists available voices for the authenticated ElevenLabs account. */
+  /**
+   * Lists available voices for the authenticated ElevenLabs account.
+   * Includes default voices, community voices, and custom cloned voices.
+   *
+   * @param apiKey - ElevenLabs API key
+   * @param _providerConfig - Provider configuration (unused)
+   * @returns RosettaVoiceList containing all available voices with metadata
+   * @throws {ProviderAPIError} If the ElevenLabs API returns an error
+   */
   override async executeListVoices(
     apiKey: string | undefined,
     _providerConfig: CustomProviderConfig

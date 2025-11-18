@@ -133,6 +133,10 @@ interface BaseAudioParams {
    * Mapped fields take precedence over extraParams in case of collision.
    */
   extraParams?: Record<string, unknown>
+  /** Optional: Enable speaker diarization (identify different speakers). Provider-specific, e.g., ElevenLabs. */
+  diarize?: boolean
+  /** Optional: Tag non-speech audio events (e.g., laughter, applause). Provider-specific, e.g., ElevenLabs. */
+  tagAudioEvents?: boolean
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
 }

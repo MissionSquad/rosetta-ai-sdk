@@ -16,15 +16,17 @@ Built with Node.js v20+ and TypeScript v5.5+ in mind, it emphasizes type safety,
   - Anthropic
   - Google Generative AI
   - Groq
+  - ElevenLabs (TTS & STT)
   - Custom OpenAI-Compatible Providers (e.g., LM Studio, Novita, GPUStack)
 - **Core Functionality:**
   - Chat Completions (Streaming & Non-Streaming)
   - Text Embeddings
   - Tool Use / Function Calling
   - Multimodal Input (Images)
-  - Text-to-Speech (TTS) via OpenAI/Azure
-  - Speech-to-Text (STT) via OpenAI/Azure & Groq
+  - Text-to-Speech (TTS) via OpenAI/Azure, Groq, and ElevenLabs
+  - Speech-to-Text (STT) via OpenAI/Azure, Groq, and ElevenLabs
   - Audio Translation via OpenAI/Azure & Groq
+  - Voice Listing (ElevenLabs)
   - Model Listing (Built-in & Custom Providers)
 - **Advanced Features (Provider-dependent):**
   - JSON Mode / Structured Output (OpenAI/Azure direct support, others via prompting)
@@ -39,20 +41,22 @@ Built with Node.js v20+ and TypeScript v5.5+ in mind, it emphasizes type safety,
 
 This matrix provides a general guide to feature support across providers. Provider capabilities and model support change frequently, so always consult the official provider documentation for the latest details. Custom provider support depends on their specific API implementation.
 
-| Feature             | OpenAI (Azure) | Anthropic | Google | Groq | Custom (OpenAI-Compat) | Notes                                  |
-| :------------------ | :------------: | :-------: | :----: | :--: | :--------------------: | :------------------------------------- |
-| Chat (Generate)     |       ✅       |    ✅     |   ✅   |  ✅  |           ✅           |                                        |
-| Chat (Stream)       |       ✅       |    ✅     |   ✅   |  ✅  |           ✅           |                                        |
-| Image Input         |       ✅       |    ✅     |   ✅   |  ⚠️  |           ⚠️           | Groq/Custom support varies by model    |
-| Tool Use            |       ✅       |    ✅     |   ✅   |  ✅  |           ✅           | Implementation details differ slightly |
-| Embeddings          |       ✅       |    ❌     |   ✅   |  ✅  |           ⚠️           | Custom support varies                  |
-| JSON Mode           |       ✅       |    ❌     |   ⚠️   |  ⚠️  |           ✅           | OpenAI/Azure best; others via prompt   |
-| Grounding/Citations |       ❌       |    ❌     |   ✅   |  ❌  |           ❌           | Via Google Search tool integration     |
-| Thinking Steps      |       ❌       |    ✅     |   ❌   |  ❌  |           ❌           | Anthropic specific feature             |
-| TTS                 |       ✅       |    ❌     |   ❌   |  ✅  |           ❌           | Via OpenAI/Azure and Groq Audio APIs   |
-| STT                 |       ✅       |    ❌     |   ⚠️   |  ✅  |           ❌           | Google requires separate Speech client |
-| STT (Translate)     |       ✅       |    ❌     |   ❌   |  ✅  |           ❌           | To English                             |
-| Model Listing       |       ✅       |    ✅     |   ✅   |  ✅  |           ✅           | Custom via OpenAI-compat `/models`     |
+| Feature             | OpenAI (Azure) | Anthropic | Google | Groq | ElevenLabs | Custom (OpenAI-Compat) | Notes                                  |
+| :------------------ | :------------: | :-------: | :----: | :--: | :--------: | :--------------------: | :------------------------------------- |
+| Chat (Generate)     |       ✅       |    ✅     |   ✅   |  ✅  |     ❌     |           ✅           |                                        |
+| Chat (Stream)       |       ✅       |    ✅     |   ✅   |  ✅  |     ❌     |           ✅           |                                        |
+| Image Input         |       ✅       |    ✅     |   ✅   |  ⚠️  |     ❌     |           ⚠️           | Groq/Custom support varies by model    |
+| Tool Use            |       ✅       |    ✅     |   ✅   |  ✅  |     ❌     |           ✅           | Implementation details differ slightly |
+| Embeddings          |       ✅       |    ❌     |   ✅   |  ✅  |     ❌     |           ⚠️           | Custom support varies                  |
+| JSON Mode           |       ✅       |    ❌     |   ⚠️   |  ⚠️  |     ❌     |           ✅           | OpenAI/Azure best; others via prompt   |
+| Grounding/Citations |       ❌       |    ❌     |   ✅   |  ❌  |     ❌     |           ❌           | Via Google Search tool integration     |
+| Thinking Steps      |       ❌       |    ✅     |   ❌   |  ❌  |     ❌     |           ❌           | Anthropic specific feature             |
+| TTS                 |       ✅       |    ❌     |   ❌   |  ✅  |     ✅     |           ❌           | High-quality TTS with 70+ languages    |
+| TTS (Streaming)     |       ✅       |    ❌     |   ❌   |  ❌  |     ✅     |           ❌           | Real-time audio streaming              |
+| STT                 |       ✅       |    ❌     |   ⚠️   |  ✅  |     ✅     |           ❌           | 99 languages, diarization, timestamps  |
+| STT (Translate)     |       ✅       |    ❌     |   ❌   |  ✅  |     ❌     |           ❌           | To English                             |
+| Voice Listing       |       ❌       |    ❌     |   ❌   |  ❌  |     ✅     |           ❌           | List available TTS voices              |
+| Model Listing       |       ✅       |    ✅     |   ✅   |  ✅  |     ❌     |           ✅           | Custom via OpenAI-compat `/models`     |
 
 ✅ = Supported | ⚠️ = Partial/Limited/Via Prompting/Varies | ❌ = Not Supported
 
@@ -823,6 +827,150 @@ async function processAudio(audioPath: string) {
 // Ensure you have an audio file (e.g., sample_audio.mp3) or use the TTS output
 processAudio(path.join(__dirname, 'sample_audio.mp3')) // Provide path to your audio file
 ```
+
+#### ElevenLabs Audio Provider
+
+ElevenLabs provides state-of-the-art Text-to-Speech (TTS) and Speech-to-Text (STT) capabilities with advanced features. To use ElevenLabs, configure it as a custom provider.
+
+**Setup:**
+
+1. Install the ElevenLabs SDK:
+```bash
+npm install @elevenlabs/elevenlabs-js
+```
+
+2. Set your API key in `.env`:
+```dotenv
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+ROSETTA_DEFAULT_TTS_ELEVENLABS_MODEL=eleven_flash_v2_5  # Optional
+ROSETTA_DEFAULT_STT_ELEVENLABS_MODEL=scribe_v1         # Optional
+```
+
+3. Configure the ElevenLabs provider:
+```typescript
+import { RosettaAI, RosettaAIConfig, CustomProviderConfig } from 'rosetta-ai-sdk'
+import { ElevenLabsMapper } from 'rosetta-ai-sdk' // Exported from main package
+
+const elevenlabsConfig: CustomProviderConfig = {
+  providerKey: 'elevenlabs',
+  mapper: ElevenLabsMapper,
+  supportedFeatures: ['tts', 'stt', 'list_voices'],
+  apiKey: process.env.ELEVENLABS_API_KEY,
+  defaultTtsModel: 'eleven_flash_v2_5',  // or 'eleven_multilingual_v2'
+  defaultSttModel: 'scribe_v1'
+}
+
+const rosetta = new RosettaAI({
+  customProviders: [elevenlabsConfig]
+})
+```
+
+**Text-to-Speech with ElevenLabs:**
+
+```typescript
+import { SpeechParams } from 'rosetta-ai-sdk'
+import fs from 'fs/promises'
+
+async function elevenlabsTTS() {
+  const params: SpeechParams = {
+    provider: 'elevenlabs',
+    model: 'eleven_flash_v2_5', // Low latency model
+    input: 'Hello from ElevenLabs! This is high-quality, natural-sounding speech.',
+    voice: '21m00Tcm4TlvDq8ikWAM', // Rachel voice (use listVoices to find voice IDs)
+    responseFormat: 'mp3',
+    ttsOptions: {
+      stability: 0.5,          // 0-1: Lower = more variable/expressive
+      similarityBoost: 0.75,   // 0-1: Higher = closer to original voice
+      style: 0.3,              // 0-1: Exaggeration of style (v3 models)
+      useSpeakerBoost: true    // Boost clarity for low-quality audio
+    }
+  }
+
+  // Non-streaming
+  const audioBuffer = await rosetta.generateSpeech(params)
+  await fs.writeFile('elevenlabs_output.mp3', audioBuffer)
+
+  // Streaming (for lower latency)
+  const stream = rosetta.streamSpeech(params)
+  const chunks: Buffer[] = []
+  for await (const chunk of stream) {
+    if (chunk.type === 'audio_chunk') chunks.push(chunk.data)
+  }
+  await fs.writeFile('elevenlabs_streamed.mp3', Buffer.concat(chunks))
+}
+```
+
+**Speech-to-Text with ElevenLabs:**
+
+ElevenLabs STT supports 99 languages with advanced features:
+- **Speaker Diarization**: Identify up to 32 different speakers
+- **Audio Event Tagging**: Detect laughter, applause, and other sounds
+- **Word-level Timestamps**: Precise timing for each word
+- **High Accuracy**: State-of-the-art Scribe v1 model
+
+```typescript
+import { TranscribeParams, RosettaAudioData } from 'rosetta-ai-sdk'
+import fs from 'fs/promises'
+
+async function elevenlabsSTT() {
+  const audioBuffer = await fs.readFile('conversation.mp3')
+  const audioData: RosettaAudioData = {
+    data: audioBuffer,
+    filename: 'conversation.mp3',
+    mimeType: 'audio/mpeg'
+  }
+
+  const params: TranscribeParams = {
+    provider: 'elevenlabs',
+    model: 'scribe_v1',
+    audio: audioData,
+    language: 'en',              // Optional: ISO-639-1 language code
+    diarize: true,               // Enable speaker identification
+    tagAudioEvents: true         // Tag non-speech sounds like [laughter]
+  }
+
+  const result = await rosetta.transcribe(params)
+
+  console.log('Transcription:', result.text)
+  console.log('Language:', result.language)
+
+  // Access word-level details with speaker IDs and timestamps
+  if (result.words) {
+    result.words.forEach((word: any) => {
+      console.log(`[${word.speaker_id}] ${word.text} (${word.start}s - ${word.end}s)`)
+    })
+  }
+}
+```
+
+**List Available Voices:**
+
+```typescript
+async function listElevenLabsVoices() {
+  const voices = await rosetta.listVoices('elevenlabs')
+
+  console.log(`Found ${voices.data.length} voices:`)
+  voices.data.forEach(voice => {
+    console.log(`- ${voice.name} (${voice.id})`)
+    console.log(`  Description: ${voice.description}`)
+    console.log(`  Category: ${voice.category}`)
+    console.log(`  Preview: ${voice.previewUrl}`)
+  })
+}
+```
+
+**Supported ElevenLabs Models:**
+
+- **TTS Models:**
+  - `eleven_flash_v2_5` - Fastest, lowest latency (~75ms), recommended for real-time
+  - `eleven_turbo_v2_5` - Balanced quality and speed (~250ms)
+  - `eleven_multilingual_v2` - High quality, 70+ languages
+  - `eleven_v3` - Most expressive and emotionally rich
+
+- **STT Model:**
+  - `scribe_v1` - State-of-the-art transcription with 99 language support
+
+For more details, see the [ElevenLabs example](./examples/custom-provider-elevenlabs.ts).
 
 ### Model Listing
 
