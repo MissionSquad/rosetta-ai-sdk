@@ -116,6 +116,10 @@ interface BaseAudioParams {
   responseFormat?: 'json' | 'text' | 'srt' | 'verbose_json' | 'vtt' // Check provider specifics
   /** Optional: Granularity of timestamps (word or segment level). Support varies. */
   timestampGranularities?: ('word' | 'segment')[]
+  /** Optional: Enable speaker diarization (identify different speakers). Provider-specific, e.g., ElevenLabs. */
+  diarize?: boolean
+  /** Optional: Tag non-speech audio events (e.g., laughter, applause). Provider-specific, e.g., ElevenLabs. */
+  tagAudioEvents?: boolean
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
 }
