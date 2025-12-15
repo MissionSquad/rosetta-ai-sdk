@@ -260,7 +260,8 @@ export class ElevenLabsMapper extends BaseCustomMapper {
     _mappedParams: StreamTextToSpeechRequest,
     apiKey: string | undefined,
     _providerConfig: CustomProviderConfig,
-    originalParams: SpeechParams
+    originalParams: SpeechParams,
+    abortSignal?: AbortSignal
   ): AsyncIterable<AudioStreamChunk> {
     const client = this.getClient(apiKey)
 
@@ -292,13 +293,14 @@ export class ElevenLabsMapper extends BaseCustomMapper {
       if (opts && typeof opts === 'object') {
         const voiceSettings: Record<string, unknown> = {}
         if (typeof opts.stability === 'number') voiceSettings.stability = opts.stability
-        if (typeof opts.similarityBoost === 'number') voiceSettings.similarityBoost = opts.similarityBoost
-        if (typeof opts.style === 'number') voiceSettings.style = opts.style
-        if (typeof opts.useSpeakerBoost === 'boolean') voiceSettings.useSpeakerBoost = opts.useSpeakerBoost
-        if (Object.keys(voiceSettings).length > 0) {
-          ;(streamReq as any).voiceSettings = voiceSettings
-        }
+      if (typeof opts.similarityBoost === 'number') voiceSettings.similarityBoost = opts.similarityBoost
+      if (typeof opts.style === 'number') voiceSettings.style = opts.style
+      if (typeof opts.useSpeakerBoost === 'boolean') voiceSettings.useSpeakerBoost = opts.useSpeakerBoost
+      if (Object.keys(voiceSettings).length > 0) {
+        ;(streamReq as any).voiceSettings = voiceSettings
       }
+    }
+      if (abortSignal?.aborted) return
       stream = await client.textToSpeech.stream(voiceId, streamReq)
     } catch (e) {
       const wrapped = this.wrapProviderError(e, this.provider)
@@ -308,6 +310,14 @@ export class ElevenLabsMapper extends BaseCustomMapper {
 
     try {
       for await (const chunk of iterateStreamChunks(stream)) {
+        if (abortSignal?.aborted) {
+          if (typeof (stream as any)?.abort === 'function') {
+            try {
+              ;(stream as any).abort()
+            } catch {}
+          }
+          break
+        }
         if (chunk instanceof Uint8Array) {
           yield { type: 'audio_chunk', data: Buffer.from(chunk) }
         } else if (typeof chunk === 'string') {

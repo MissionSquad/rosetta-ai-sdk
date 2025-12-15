@@ -192,7 +192,8 @@ export interface IProviderMapper {
     mappedParams: any,
     apiKey: string | undefined,
     providerConfig: CustomProviderConfig,
-    originalParams: GenerateParams // Pass original params for access to tools
+    originalParams: GenerateParams, // Pass original params for access to tools
+    abortSignal?: AbortSignal
   ): AsyncIterable<StreamChunk>
 
   /**
@@ -243,7 +244,8 @@ export interface IProviderMapper {
     mappedParams: any,
     apiKey: string | undefined,
     providerConfig: CustomProviderConfig,
-    originalParams: SpeechParams
+    originalParams: SpeechParams,
+    abortSignal?: AbortSignal
   ): AsyncIterable<AudioStreamChunk>
 
   /**
