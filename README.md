@@ -375,6 +375,29 @@ try {
 }
 ```
 
+##### Cancelling streaming requests (all providers)
+
+Both `stream()` (text/chat) and `streamSpeech()` (audio) return a **cancellable async iterable**. Call `stream.cancel(reason?)` to stop iteration and abort the upstream provider request. You can also access the underlying `AbortSignal` via `stream.signal` if you need to attach your own handlers.
+
+```ts
+const stream = rosetta.stream({ provider: Provider.OpenAI, model: 'gpt-4o-mini', messages })
+
+setTimeout(() => stream.cancel('no longer needed'), 2_000)
+
+for await (const chunk of stream) {
+  // handle chunk
+}
+```
+
+Provider wiring:
+
+- **OpenAI / Azure OpenAI / Groq / Anthropic / OpenAI-compatible custom providers:** Streaming chat requests are issued with `{ signal: stream.signal }`, so canceling aborts the HTTP request immediately.
+- **Google Generative AI:** The async generator from `generateContentStream` is closed when `stream.cancel()` is called.
+- **OpenAI streaming text-to-speech:** The abort signal is passed to `audio.speech.create`, and the response body iterator closes when canceled.
+- **ElevenLabs streaming TTS (custom provider):** Streams check the shared abort signal and invoke the SDK's `abort()` helper when available before yielding an `audio_stop` event.
+
+The same cancel behavior applies to any custom mapper you register; the SDK forwards the abort signal and a cleanup hook so mapper implementations can release their streaming resources.
+
 #### `stream()` (Streaming)
 
 Use `stream` to process responses chunk-by-chunk, ideal for real-time applications.
