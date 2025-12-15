@@ -4,6 +4,16 @@ import { Citation, ProviderKey } from './common.types' // Import ProviderKey
 // import { Provider } from './common.types' // Removed
 
 /**
+ * Async iterable that can be cancelled via an exposed method and tracked with an AbortSignal.
+ */
+export type CancellableAsyncIterable<T> = AsyncIterable<T> & {
+  /** Abort further streaming and attempt to cancel the underlying request. */
+  cancel: (reason?: any) => void
+  /** Signal that becomes aborted when `cancel` is invoked. */
+  signal: AbortSignal
+}
+
+/**
  * Discriminated union representing the different types of events
  * yielded by the `RosettaAI.stream` async generator.
  */
