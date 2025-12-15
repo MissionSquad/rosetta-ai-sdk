@@ -930,10 +930,13 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       expect(mockOpenAIMapperInstance.mapToProviderParams).toHaveBeenCalledWith(
         expect.objectContaining({ provider: Provider.OpenAI, stream: true })
       )
-      expect(mockOpenAIClientInstance.chat.completions.create).toHaveBeenCalledWith({
-        mapped: 'openai_params',
-        model: 'gpt-4o-mini'
-      }) // Check client call args
+      expect(mockOpenAIClientInstance.chat.completions.create).toHaveBeenCalledWith(
+        {
+          mapped: 'openai_params',
+          model: 'gpt-4o-mini'
+        },
+        { signal: expect.any(AbortSignal) }
+      ) // Check client call args and abort support
       // Check mock calls - should receive the full params object now
       expect(mockOpenAIMapperInstance.mapProviderStream).toHaveBeenCalledWith(
         expect.any(Object), // Raw stream
@@ -1291,7 +1294,8 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
         false // isAzure
       )
       expect(mockOpenAIClientInstance.audio.speech.create).toHaveBeenCalledWith(
-        expect.objectContaining({ input: 'Stream audio', voice: 'fable' })
+        expect.objectContaining({ input: 'Stream audio', voice: 'fable' }),
+        { signal: expect.any(AbortSignal) }
       )
       expect(chunks).toHaveLength(3) // chunk1, chunk2, stop
       expect(chunks[0].type).toBe('audio_chunk')
