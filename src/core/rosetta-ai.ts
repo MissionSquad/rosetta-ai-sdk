@@ -27,6 +27,7 @@ import {
   TranslateParams,
   TranscriptionResult,
   StreamChunk,
+  CancellableAsyncIterable,
   RosettaModelList,
   ModelListingSourceConfig,
   RosettaVoiceList,
@@ -505,6 +506,8 @@ export class RosettaAI {
         const client = this.getClientForProvider(providerKey) // Safe cast here
         let providerResponse: any
 
+        // Abort is forwarded through the SDK options for every built-in provider;
+        // mapper implementations do not need provider-specific cancellation hooks.
         if (providerKey === Provider.Anthropic) {
           // Detect :1m suffix for extended context or use explicit betas from providerOptions
           const is1MContext = params.model?.endsWith(':1m') ?? false
@@ -566,12 +569,96 @@ export class RosettaAI {
     }
   }
 
+  private createCancellableStream<T>(
+    factory: (signal: AbortSignal, registerAbort: (abortFn: () => void) => void) => AsyncIterable<T>
+  ): CancellableAsyncIterable<T> {
+    const controller = new AbortController()
+    let abortFn: (() => void) | undefined
+    let cancelled = false
+
+    const registerAbort = (fn: () => void) => {
+      abortFn = fn
+      if (cancelled) abortFn?.()
+    }
+
+    const triggerAbort = (reason?: any) => {
+      if (cancelled) return
+      cancelled = true
+      abortFn?.()
+      if (!controller.signal.aborted) {
+        controller.abort(reason)
+      }
+    }
+
+    const wrapped = (async function* (signal: AbortSignal, source: AsyncIterable<T>) {
+      try {
+        for await (const chunk of source) {
+          if (signal.aborted) {
+            triggerAbort()
+            break
+          }
+          yield chunk
+        }
+      } finally {
+        if (signal.aborted && !cancelled) {
+          triggerAbort()
+        }
+      }
+    })(controller.signal, factory(controller.signal, registerAbort))
+
+    return Object.assign(wrapped, {
+      cancel: triggerAbort,
+      signal: controller.signal
+    })
+  }
+
+  private abortStreamResource(resource: any, reason?: any): void {
+    try {
+      if (!resource) return
+      if (typeof resource.abort === 'function') {
+        resource.abort(reason)
+        return
+      }
+      if (resource.controller && typeof resource.controller.abort === 'function') {
+        resource.controller.abort(reason)
+        return
+      }
+      if (typeof resource.cancel === 'function') {
+        resource.cancel(reason)
+        return
+      }
+      if (typeof resource.return === 'function') {
+        resource.return(undefined)
+        return
+      }
+      if (resource.body && typeof resource.body.cancel === 'function') {
+        resource.body.cancel(reason)
+      }
+    } catch (abortError) {
+      console.warn('Failed to abort stream resource', abortError)
+    }
+  }
+
+  private async *forwardCancellableStream<T>(
+    source: AsyncIterable<T>,
+    signal: AbortSignal,
+    onAbort?: () => void
+  ): AsyncIterable<T> {
+    for await (const chunk of source) {
+      if (signal.aborted) {
+        onAbort?.()
+        break
+      }
+      yield chunk
+    }
+  }
+
   /**
    * Generates a streaming response.
    * Supports both built-in and custom providers.
    *
    * @param params - The parameters for the streaming generation request.
-   * @returns An async iterable yielding stream chunks.
+   * @returns A cancellable async iterable yielding stream chunks.
    * @throws {ConfigurationError} If the provider or model is not configured (yielded as error chunk).
    * @throws {UnsupportedFeatureError} If a requested feature is not supported (yielded as error chunk).
    * @throws {InvalidToolDefinitionError} If a provided tool definition is invalid (yielded as error chunk).
@@ -579,7 +666,17 @@ export class RosettaAI {
    * @throws {ProviderAPIError} If the provider's API returns an error during setup or streaming (yielded as error chunk).
    * @throws {MappingError} If internal mapping fails during setup or streaming (yielded as error chunk).
    */
-  public async *stream(params: GenerateParams): AsyncIterable<StreamChunk> {
+  public stream(params: GenerateParams): CancellableAsyncIterable<StreamChunk> {
+    return this.createCancellableStream<StreamChunk>((abortSignal, registerAbort) =>
+      this.streamInternal(params, abortSignal, registerAbort)
+    )
+  }
+
+  private async *streamInternal(
+    params: GenerateParams,
+    abortSignal: AbortSignal,
+    registerAbort: (abortFn: () => void) => void
+  ): AsyncIterable<StreamChunk> {
     const providerKey = params.provider // Now ProviderKey
     let mapper: IProviderMapper
     let isCustom: boolean
@@ -588,6 +685,8 @@ export class RosettaAI {
     let model: string | undefined
 
     try {
+      if (abortSignal.aborted) return
+
       mapper = this.getMapper(providerKey)
       isCustom = !this.isBuiltInProvider(providerKey)
       customConfig = isCustom ? this.customProviderConfigs.get(providerKey) : undefined
@@ -612,7 +711,11 @@ export class RosettaAI {
       // --- Execute ---
       if (isCustom && mapper.executeStream && customConfig) {
         // Custom Provider Execution Path
-        yield* mapper.executeStream(mappedParams, apiKey, customConfig, params)
+        const customStream = mapper.executeStream(mappedParams, apiKey, customConfig, params, abortSignal)
+        registerAbort(() => this.abortStreamResource(customStream))
+        yield* this.forwardCancellableStream(customStream, abortSignal, () =>
+          this.abortStreamResource(customStream)
+        )
       } else if (this.isBuiltInProvider(providerKey)) {
         // Built-in Provider Execution Path
         const client = this.getClientForProvider(providerKey)
@@ -624,25 +727,32 @@ export class RosettaAI {
           const betasFromSuffix = is1MContext ? ['context-1m-2025-08-07'] : undefined
           const betasFromOptions = params.providerOptions?.anthropicBetas
           const betas = betasFromOptions ?? betasFromSuffix
-          
+
           if (betas && betas.length > 0) {
             // Use beta API when betas are specified
-            providerStream = await (client as Anthropic).beta.messages.create({
-              ...mappedParams,
-              betas
-            })
+            providerStream = await (client as Anthropic).beta.messages.create(
+              {
+                ...mappedParams,
+                betas
+              },
+              { signal: abortSignal }
+            )
           } else {
             // Use regular API when no betas
-            providerStream = await (client as Anthropic).messages.create(mappedParams)
+            providerStream = await (client as Anthropic).messages.create(mappedParams, { signal: abortSignal })
           }
         } else if (providerKey === Provider.Google) {
           // New SDK returns AsyncGenerator directly from generateContentStream
           const googleParams = mappedParams as GenerateContentParameters
-          providerStream = await (client as GoogleGenAI).models.generateContentStream(googleParams)
+          providerStream = await (client as GoogleGenAI).models.generateContentStream(googleParams, {
+            signal: abortSignal as any
+          } as any)
         } else if (providerKey === Provider.Groq) {
-          providerStream = await (client as Groq).chat.completions.create(mappedParams)
+          providerStream = await (client as Groq).chat.completions.create(mappedParams, { signal: abortSignal } as any)
         } else if (providerKey === Provider.OpenAI) {
-          providerStream = await (client as OpenAI | AzureOpenAI).chat.completions.create(mappedParams)
+          providerStream = await (client as OpenAI | AzureOpenAI).chat.completions.create(mappedParams, {
+            signal: abortSignal
+          })
         } else {
           const _e: never = providerKey
           throw new RosettaAIError(`Unsupported built-in provider: ${_e}`)
@@ -662,8 +772,13 @@ export class RosettaAI {
             providerKey
           )
         }
-        // Pass the full params object to mapProviderStream
-        yield* mapper.mapProviderStream(providerStream as AsyncIterable<any>, params)
+
+        registerAbort(() => this.abortStreamResource(providerStream))
+        // Pass the full params object to mapProviderStream and honor cancellation
+        const mappedStream = mapper.mapProviderStream(providerStream as AsyncIterable<any>, params)
+        yield* this.forwardCancellableStream(mappedStream, abortSignal, () =>
+          this.abortStreamResource(providerStream)
+        )
       } else {
         // Custom provider without executeStream or built-in provider without mapProviderStream
         throw new ConfigurationError(
@@ -820,7 +935,17 @@ export class RosettaAI {
   }
 
   /** Generates streaming speech audio. Supports built-in (OpenAI) and custom providers. */
-  public async *streamSpeech(params: SpeechParams): AsyncIterable<AudioStreamChunk> {
+  public streamSpeech(params: SpeechParams): CancellableAsyncIterable<AudioStreamChunk> {
+    return this.createCancellableStream<AudioStreamChunk>((abortSignal, registerAbort) =>
+      this.streamSpeechInternal(params, abortSignal, registerAbort)
+    )
+  }
+
+  private async *streamSpeechInternal(
+    params: SpeechParams,
+    abortSignal: AbortSignal,
+    registerAbort: (abortFn: () => void) => void
+  ): AsyncIterable<AudioStreamChunk> {
     const providerKey = params.provider
     let mapper: IProviderMapper
     let isCustom: boolean
@@ -829,6 +954,8 @@ export class RosettaAI {
     let model: string | undefined
 
     try {
+      if (abortSignal.aborted) return
+
       mapper = this.getMapper(providerKey)
       isCustom = !this.isBuiltInProvider(providerKey)
       customConfig = isCustom ? this.customProviderConfigs.get(providerKey) : undefined
@@ -852,7 +979,11 @@ export class RosettaAI {
       // --- Execute ---
       if (isCustom && mapper.executeStreamSpeech && customConfig) {
         // Custom Provider Execution Path
-        yield* mapper.executeStreamSpeech(mappedParams, apiKey, customConfig, params)
+        const customStream = mapper.executeStreamSpeech(mappedParams, apiKey, customConfig, params, abortSignal)
+        registerAbort(() => this.abortStreamResource(customStream))
+        yield* this.forwardCancellableStream(customStream, abortSignal, () =>
+          this.abortStreamResource(customStream)
+        )
       } else if (providerKey === Provider.OpenAI) {
         // Built-in OpenAI Execution Path
         const client = this.getClientForProvider(Provider.OpenAI)
@@ -863,20 +994,29 @@ export class RosettaAI {
           response_format: effectiveParams.responseFormat ?? 'mp3',
           speed: effectiveParams.speed ?? 1.0
         }
-        const response = await (client as OpenAI | AzureOpenAI).audio.speech.create(ttsParams)
+        const response = await (client as OpenAI | AzureOpenAI).audio.speech.create(ttsParams, {
+          signal: abortSignal
+        })
 
         if (!response.body) {
           throw new MappingError('Streaming response body is null.', providerKey)
         }
 
+        registerAbort(() => this.abortStreamResource(response.body))
         for await (const chunk of response.body) {
+          if (abortSignal.aborted) {
+            this.abortStreamResource(response.body)
+            break
+          }
           if (chunk instanceof Uint8Array) {
             yield { type: 'audio_chunk', data: Buffer.from(chunk) }
           } else {
             console.warn('Received unexpected chunk type in audio stream:', typeof chunk)
           }
         }
-        yield { type: 'audio_stop' }
+        if (!abortSignal.aborted) {
+          yield { type: 'audio_stop' }
+        }
       } else {
         throw new UnsupportedFeatureError(providerKey, 'Streaming Text-to-Speech')
       }
@@ -1086,7 +1226,7 @@ export class RosettaAI {
    * Yields semantic events (not just content deltas) for agent-ready interactions.
    *
    * @param params - The parameters for creating a streaming response.
-   * @returns An async iterable yielding semantic event chunks.
+   * @returns A cancellable async iterable yielding semantic event chunks.
    * @throws {ConfigurationError} If OpenAI provider is not configured.
    * @throws {UnsupportedFeatureError} If used with a non-OpenAI provider.
    * @throws {InvalidToolDefinitionError} If a tool definition is invalid.
@@ -1094,7 +1234,17 @@ export class RosettaAI {
    * @throws {ProviderAPIError} If the OpenAI API returns an error (yielded as error).
    * @throws {MappingError} If response mapping fails (yielded as error).
    */
-  public async *streamResponse(params: CreateResponseParams): AsyncIterable<ResponsesStreamChunk> {
+  public streamResponse(params: CreateResponseParams): CancellableAsyncIterable<ResponsesStreamChunk> {
+    return this.createCancellableStream<ResponsesStreamChunk>((abortSignal, registerAbort) =>
+      this.streamResponseInternal(params, abortSignal, registerAbort)
+    )
+  }
+
+  private async *streamResponseInternal(
+    params: CreateResponseParams,
+    abortSignal: AbortSignal,
+    registerAbort: (abortFn: () => void) => void
+  ): AsyncIterable<ResponsesStreamChunk> {
     // Validate provider is OpenAI
     if (params.provider !== Provider.OpenAI && params.provider !== 'openai') {
       const error = new UnsupportedFeatureError(
@@ -1106,6 +1256,8 @@ export class RosettaAI {
     }
 
     try {
+      if (abortSignal.aborted) return
+
       // Get OpenAI client
       const client = this.getClientForProvider(Provider.OpenAI) as OpenAI
 
@@ -1120,11 +1272,12 @@ export class RosettaAI {
       })
 
       // Call OpenAI Responses API streaming
-      // Note: The OpenAI SDK may not have responses.create yet, so we'll use a generic approach
-      const stream = await (client as any).responses.create(mappedParams)
+      const stream = await (client as any).responses.create(mappedParams, { signal: abortSignal })
 
+      registerAbort(() => this.abortStreamResource(stream))
       // Map and yield stream chunks
-      yield* OpenAIResponsesMapper.mapOpenAIResponsesStream(stream, params.tools)
+      const mappedStream = OpenAIResponsesMapper.mapOpenAIResponsesStream(stream, params.tools)
+      yield* this.forwardCancellableStream(mappedStream, abortSignal, () => this.abortStreamResource(stream))
     } catch (error) {
       const wrappedError = error instanceof RosettaAIError
         ? error

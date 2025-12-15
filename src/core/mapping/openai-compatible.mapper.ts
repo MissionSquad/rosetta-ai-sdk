@@ -196,7 +196,8 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     _mappedParams: any, // Not used
     _apiKey: string | undefined, // Already configured
     _providerConfig: CustomProviderConfig, // Use this.config
-    originalParams: GenerateParams
+    originalParams: GenerateParams,
+    abortSignal?: AbortSignal
   ): AsyncIterable<StreamChunk> {
     // Feature Check
     if (!this.config.supportedFeatures.includes('stream')) {
@@ -250,7 +251,9 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     }
 
     try {
-      const stream = await this.openaiClient.chat.completions.create(openAIParams)
+      if (abortSignal?.aborted) return
+
+      const stream = await this.openaiClient.chat.completions.create(openAIParams, { signal: abortSignal })
 
       // Reuse the common OpenAI stream mapping logic
       // Pass Provider.OpenAI as the provider type expected by the common helper
