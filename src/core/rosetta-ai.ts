@@ -744,9 +744,7 @@ export class RosettaAI {
         } else if (providerKey === Provider.Google) {
           // New SDK returns AsyncGenerator directly from generateContentStream
           const googleParams = mappedParams as GenerateContentParameters
-          providerStream = await (client as GoogleGenAI).models.generateContentStream(googleParams, {
-            signal: abortSignal as any
-          } as any)
+          providerStream = await (client as GoogleGenAI).models.generateContentStream(googleParams)
         } else if (providerKey === Provider.Groq) {
           providerStream = await (client as Groq).chat.completions.create(mappedParams, { signal: abortSignal } as any)
         } else if (providerKey === Provider.OpenAI) {
