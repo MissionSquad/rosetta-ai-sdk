@@ -282,6 +282,20 @@ export class AnthropicMapper implements IProviderMapper {
       systemParam = undefined
     }
 
+    if (params.responseFormat?.type === 'json_object') {
+      throw new UnsupportedFeatureError(this.provider, 'responseFormat: json_object (use json_schema)')
+    }
+
+    const output_config =
+      params.responseFormat?.type === 'json_schema'
+        ? {
+            format: {
+              type: 'json_schema',
+              schema: params.responseFormat.json_schema.schema
+            }
+          }
+        : undefined
+
     const baseMappedParams = mapBaseParams(params)
 
     const basePayload = {
@@ -295,7 +309,8 @@ export class AnthropicMapper implements IProviderMapper {
       stop_sequences: baseMappedParams.stopSequences,
       tools: tools,
       tool_choice: anthropicToolChoice,
-      ...(thinkingParam && { thinking: thinkingParam })
+      ...(thinkingParam && { thinking: thinkingParam }),
+      ...(output_config && { output_config })
     }
 
     if (params.stream) {

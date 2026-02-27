@@ -500,6 +500,9 @@ export class RosettaAI {
         if (this._openAICompletions) {
           result.openAIResponse = this._transformToOpenAIResponse(providerKey, result.rawResponse, result)
         }
+
+        this.applyStructuredOutputParsing(params, result)
+
         return result
       } else if (this.isBuiltInProvider(providerKey)) {
         // Built-in Provider Execution Path
@@ -553,6 +556,8 @@ export class RosettaAI {
           result.openAIResponse = this._transformToOpenAIResponse(providerKey, providerResponse, result)
         }
 
+        this.applyStructuredOutputParsing(params, result)
+
         return result
       } else {
         // Custom provider without executeGenerate or built-in provider without mapFromProviderResponse
@@ -566,6 +571,20 @@ export class RosettaAI {
         throw error
       }
       throw this.wrapProviderError(error, providerKey)
+    }
+  }
+
+  private applyStructuredOutputParsing(originalParams: GenerateParams, result: GenerateResult): void {
+    const responseFormatType = originalParams.responseFormat?.type
+    if (responseFormatType !== 'json_object' && responseFormatType !== 'json_schema') return
+
+    if (typeof result.content !== 'string' || !result.content.trim()) return
+
+    try {
+      const parsed = JSON.parse(result.content)
+      result.parsedContent = parsed
+    } catch {
+      // Do not throw: provider refusals/filters can return non-JSON even when requested.
     }
   }
 

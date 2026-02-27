@@ -345,9 +345,25 @@ describe('Google Mapper', () => {
       }
       const result = mapper.mapToProviderParams(params) as GenerateContentParameters
       expect(result.config?.responseMimeType).toBe('application/json')
-      expect(result.config?.responseSchema).toBeDefined()
-      expect(result.config?.responseSchema.type).toBe('OBJECT')
-      expect(result.config?.responseSchema.properties?.name?.type).toBe('STRING')
+      expect((result.config as any)?.responseJsonSchema).toBeDefined()
+      expect((result.config as any)?.responseJsonSchema.type).toBe('OBJECT')
+      expect((result.config as any)?.responseJsonSchema.properties?.name?.type).toBe('STRING')
+    })
+
+    it('[Medium] should map responseFormat json_schema', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'JSON please.' }],
+        responseFormat: {
+          type: 'json_schema',
+          json_schema: { schema: { type: 'object', properties: { name: { type: 'string' } } } }
+        }
+      }
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.config?.responseMimeType).toBe('application/json')
+      expect((result.config as any)?.responseJsonSchema).toBeDefined()
+      expect((result.config as any)?.responseJsonSchema.type).toBe('OBJECT')
+      expect((result.config as any)?.responseJsonSchema.properties?.name?.type).toBe('STRING')
     })
 
     it('[Medium] should map tool result with non-JSON string content', () => {
