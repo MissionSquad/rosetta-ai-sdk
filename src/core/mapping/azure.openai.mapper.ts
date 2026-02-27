@@ -46,7 +46,7 @@ import {
   InvalidToolDefinitionError
 } from '../../errors'
 import { IProviderMapper } from './base.mapper'
-import { mapBaseParams, mapBaseToolChoice } from './common.utils'
+import { mapBaseParams, mapBaseToolChoice, mapToOpenAIResponseFormat } from './common.utils'
 import {
   mapContentForOpenAIRole,
   mapFromOpenAIResponse,
@@ -181,16 +181,11 @@ export class AzureOpenAIMapper implements IProviderMapper {
       openAIToolChoice = { type: 'function', function: { name: baseToolChoice.function.name } }
     }
 
-    let responseFormat: { type: 'text' | 'json_object' } | undefined
-    if (params.responseFormat?.type === 'json_object') {
-      responseFormat = { type: 'json_object' }
-      if (params.responseFormat.schema) {
-        console.warn(
-          'Azure OpenAI JSON mode: schema parameter provided in responseFormat is ignored. Describe the desired schema in the prompt.'
-        )
-      }
-    } else if (params.responseFormat?.type === 'text') {
-      responseFormat = { type: 'text' }
+    const responseFormat = mapToOpenAIResponseFormat(params.responseFormat)
+    if (params.responseFormat?.type === 'json_object' && params.responseFormat.schema) {
+      console.warn(
+        'Azure OpenAI JSON mode: schema parameter provided in responseFormat is ignored. Describe the desired schema in the prompt.'
+      )
     }
 
     if (params.thinking) throw new UnsupportedFeatureError(this.provider, 'Thinking steps')

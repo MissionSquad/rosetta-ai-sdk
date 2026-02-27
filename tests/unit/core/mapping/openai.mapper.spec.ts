@@ -268,6 +268,23 @@ describe('OpenAI Mapper', () => {
       expect(result.response_format).toEqual({ type: 'json_object' })
     })
 
+    it('[Easy] should map response_format json_schema with defaults', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'Return JSON' }],
+        responseFormat: { type: 'json_schema', json_schema: { schema: { type: 'object', properties: { a: { type: 'number' } } } } }
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.response_format).toEqual({
+        type: 'json_schema',
+        json_schema: {
+          name: 'response',
+          strict: true,
+          schema: { type: 'object', properties: { a: { type: 'number' } } }
+        }
+      })
+    })
+
     it('[Easy] should throw error for unsupported features', () => {
       const paramsThinking: GenerateParams = { ...baseParams, messages: [], thinking: true }
       const paramsGrounding: GenerateParams = { ...baseParams, messages: [], grounding: { enabled: true } }

@@ -1,6 +1,31 @@
 import { ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData } from './common.types'
 import { ProviderOptions } from './config.types'
 
+export type RosettaResponseFormat =
+  | { type: 'text' }
+  | {
+      type: 'json_object'
+      /**
+       * Optional JSON schema to guide the model's JSON output.
+       *
+       * Notes:
+       * - OpenAI ignores schema for `json_object` (JSON mode).
+       * - For `json_object`, this is treated as informational by the SDK and may be ignored by providers.
+       */
+      schema?: Record<string, unknown>
+    }
+  | {
+      type: 'json_schema'
+      json_schema: {
+        /** Optional for providers that don’t require it; required for OpenAI (SDK will default when mapping). */
+        name?: string
+        /** Defaults to true when supported (OpenAI). */
+        strict?: boolean
+        /** JSON Schema (draft-07-ish). */
+        schema: Record<string, unknown>
+      }
+    }
+
 /**
  * Parameters for generating chat completions (streaming or non-streaming).
  */
@@ -30,11 +55,7 @@ export interface GenerateParams {
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
 
   /** Request the model to respond in a specific format (e.g., JSON). Support varies by provider/model. */
-  responseFormat?: {
-    type: 'text' | 'json_object'
-    /** Optional JSON schema to guide the model's JSON output (currently informational, used in system prompt construction where applicable). */
-    schema?: Record<string, unknown>
-  }
+  responseFormat?: RosettaResponseFormat
 
   /** Request the model to provide citations or grounding for its response. Support varies by provider/model. */
   grounding?: {
