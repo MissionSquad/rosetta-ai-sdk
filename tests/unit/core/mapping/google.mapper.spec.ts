@@ -435,6 +435,49 @@ describe('Google Mapper', () => {
       expect(warnSpy).toHaveBeenCalledWith("Skipping message with role 'model' due to empty content parts.")
       warnSpy.mockRestore()
     })
+
+    describe('extraParams passthrough', () => {
+      it('should spread extraParams into the config object, not top-level', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          extraParams: {
+            topK: 40,
+            candidateCount: 2
+          }
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect((result.config as any)?.topK).toBe(40)
+        expect((result.config as any)?.candidateCount).toBe(2)
+        // Should NOT be at top level
+        expect((result as any).topK).toBeUndefined()
+        expect((result as any).candidateCount).toBeUndefined()
+      })
+
+      it('should not let extraParams override explicitly mapped config fields', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          temperature: 0.7,
+          extraParams: {
+            temperature: 0.1,
+            customParam: 'value'
+          }
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect((result.config as any)?.temperature).toBe(0.7)
+        expect((result.config as any)?.customParam).toBe('value')
+      })
+
+      it('should handle undefined extraParams gracefully', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }]
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect(result.model).toBe('gemini-1.5-flash-latest')
+      })
+    })
   })
 
   describe('mapFromProviderResponse (Generate)', () => {

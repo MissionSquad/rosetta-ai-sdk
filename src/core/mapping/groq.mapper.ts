@@ -271,7 +271,8 @@ export class GroqMapper implements IProviderMapper {
     // Use common utility for base parameters
     const baseMappedParams = mapBaseParams(params)
 
-    const payload: ChatCompletionCreateParams = {
+    const payload = {
+      ...(params.extraParams ?? {}),
       model: params.model!,
       messages: messages,
       max_tokens: baseMappedParams.maxTokens,
@@ -281,7 +282,7 @@ export class GroqMapper implements IProviderMapper {
       tools: tools,
       tool_choice: groqToolChoice,
       stream: params.stream
-    }
+    } as ChatCompletionCreateParams
 
     return payload
   }

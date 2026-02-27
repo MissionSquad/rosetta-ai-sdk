@@ -199,6 +199,7 @@ export class AzureOpenAIMapper implements IProviderMapper {
     const baseMappedParams = mapBaseParams(params)
 
     const basePayload = {
+      ...(params.extraParams ?? {}),
       model: deploymentId, // Use deployment ID as model for Azure
       messages,
       max_tokens: baseMappedParams.maxTokens,
@@ -268,6 +269,7 @@ export class AzureOpenAIMapper implements IProviderMapper {
       throw new MappingError('Invalid input type for Azure OpenAI embeddings.', this.provider)
     }
     return {
+      ...(params.extraParams ?? {}),
       model: deploymentId, // Use deployment ID as model
       input: inputData,
       encoding_format: params.encodingFormat,

@@ -435,6 +435,46 @@ describe('Groq Mapper', () => {
       expect(() => mapper.mapToProviderParams(params)).toThrow(MappingError)
       expect(() => mapper.mapToProviderParams(params)).toThrow('Conversation cannot start with an assistant message.')
     })
+
+    describe('extraParams passthrough', () => {
+      it('should spread extraParams into the provider payload', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          extraParams: {
+            repetition_penalty: 1.2,
+            seed: 123
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect((result as any).repetition_penalty).toBe(1.2)
+        expect((result as any).seed).toBe(123)
+      })
+
+      it('should not let extraParams override explicitly mapped fields', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          temperature: 0.7,
+          extraParams: {
+            temperature: 0.1,
+            custom_param: 'value'
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.temperature).toBe(0.7)
+        expect((result as any).custom_param).toBe('value')
+      })
+
+      it('should handle undefined extraParams gracefully', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }]
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.model).toBe('llama3-8b-8192')
+      })
+    })
   })
 
   describe('mapFromProviderResponse (Generate)', () => {

@@ -180,6 +180,7 @@ export class OpenAIMapper implements IProviderMapper {
     const baseMappedParams = mapBaseParams(params)
 
     const basePayload: any = {
+      ...(params.extraParams ?? {}),
       model: params.model!,
       messages,
       temperature: baseMappedParams.temperature,

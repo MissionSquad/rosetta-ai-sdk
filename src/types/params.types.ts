@@ -53,7 +53,14 @@ export interface GenerateParams {
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
 
-  // Add other common parameters like 'presence_penalty', 'frequency_penalty' if needed
+  /**
+   * Additional provider-specific parameters to pass through to the provider API.
+   * These are spread into the final provider payload under explicitly mapped fields,
+   * meaning mapped fields (temperature, topP, etc.) take precedence if there is a collision.
+   * Use this for provider-specific parameters not covered by the unified interface
+   * (e.g., repetition_penalty, presence_penalty, frequency_penalty, top_k, seed, logprobs).
+   */
+  extraParams?: Record<string, unknown>
 }
 
 /**
@@ -70,6 +77,11 @@ export interface EmbedParams {
   encodingFormat?: 'float' | 'base64' // Check provider specifics
   /** Optional: Desired dimension size for the output embeddings (OpenAI specific). */
   dimensions?: number
+  /**
+   * Additional provider-specific parameters to pass through to the provider API.
+   * Mapped fields take precedence over extraParams in case of collision.
+   */
+  extraParams?: Record<string, unknown>
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
 }
@@ -116,6 +128,11 @@ interface BaseAudioParams {
   responseFormat?: 'json' | 'text' | 'srt' | 'verbose_json' | 'vtt' // Check provider specifics
   /** Optional: Granularity of timestamps (word or segment level). Support varies. */
   timestampGranularities?: ('word' | 'segment')[]
+  /**
+   * Additional provider-specific parameters to pass through to the provider API.
+   * Mapped fields take precedence over extraParams in case of collision.
+   */
+  extraParams?: Record<string, unknown>
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
 }

@@ -30,6 +30,7 @@ Built with Node.js v20+ and TypeScript v5.5+ in mind, it emphasizes type safety,
   - JSON Mode / Structured Output (OpenAI/Azure direct support, others via prompting)
   - Grounding / Citations (Google)
   - Thinking Steps (Anthropic)
+- **Provider Passthrough:** Forward provider-specific parameters (e.g., `presence_penalty`, `top_k`, `seed`) directly to the underlying API via `extraParams`, without losing unmapped fields.
 - **Type Safe:** Leverages TypeScript's strong typing for improved developer experience, autocompletion, and compile-time error checking.
 - **Robust Error Handling:** Provides classified errors (`ConfigurationError`, `ProviderAPIError`, `UnsupportedFeatureError`, `MappingError`) for easier debugging and programmatic handling.
 - **Flexible Configuration:** Easily configure API keys and defaults via `.env` files or direct constructor arguments.
@@ -599,6 +600,131 @@ async function describeImage(imagePath: string) {
 // Ensure you have an image file (e.g., logo.png) in the same directory or provide the correct path
 describeImage(path.join(__dirname, 'logo.png'))
 ```
+
+### Structured Output (JSON Mode)
+
+Request the model to respond in structured JSON format using the `responseFormat` parameter. Support and behavior varies by provider.
+
+```typescript
+import { RosettaAI, Provider, ProviderKey } from 'rosetta-ai-sdk'
+// ... initialization ...
+
+// Basic JSON mode (OpenAI, Azure, Google, Groq)
+const result = await rosetta.generate({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o-mini',
+  messages: [
+    { role: 'system', content: 'Extract the user\'s name and age from the text. Respond in JSON with keys "name" and "age".' },
+    { role: 'user', content: 'My name is Alice and I am 30 years old.' }
+  ],
+  responseFormat: { type: 'json_object' }
+})
+
+const parsed = JSON.parse(result.content!)
+console.log(parsed) // { name: 'Alice', age: 30 }
+```
+
+For Google, you can also provide a JSON schema to guide the response structure:
+
+```typescript
+const result = await rosetta.generate({
+  provider: Provider.Google,
+  model: 'gemini-1.5-flash-latest',
+  messages: [
+    { role: 'user', content: 'Extract the name and age from: "Bob is 25 years old."' }
+  ],
+  responseFormat: {
+    type: 'json_object',
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        age: { type: 'number' }
+      },
+      required: ['name', 'age']
+    }
+  }
+})
+```
+
+Structured output is also available during streaming via `json_delta` and `json_done` chunk types:
+
+```typescript
+const stream = rosetta.stream({
+  provider: Provider.OpenAI,
+  messages: [{ role: 'user', content: 'List 3 colors as JSON array.' }],
+  responseFormat: { type: 'json_object' }
+})
+
+for await (const chunk of stream) {
+  switch (chunk.type) {
+    case 'json_delta':
+      // Partial JSON as it streams in
+      console.log('Snapshot:', chunk.data.snapshot)
+      break
+    case 'json_done':
+      // Final parsed result
+      console.log('Parsed:', chunk.data.parsed)
+      break
+  }
+}
+```
+
+**Provider Notes:**
+- **OpenAI/Azure:** `json_object` mode is supported natively. The `schema` field is informational only — describe the desired schema in the prompt.
+- **Google:** `json_object` maps to `application/json` MIME type. The `schema` field is used natively to constrain output.
+- **Groq:** JSON mode support varies; a warning is logged if unconfirmed.
+- **Anthropic:** Does not natively support `json_object` response format via the unified API. Use prompt-based guidance instead.
+
+### Extra Parameters (Provider Passthrough)
+
+The `extraParams` field allows you to pass provider-specific parameters that are not part of the unified RosettaAI interface directly through to the underlying provider API. This is useful for parameters like `presence_penalty`, `frequency_penalty`, `repetition_penalty`, `top_k`, `seed`, `logprobs`, and any other provider-specific options.
+
+```typescript
+// Example: Passing OpenAI-specific parameters
+const result = await rosetta.generate({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'Tell me a story.' }],
+  temperature: 0.7,
+  extraParams: {
+    presence_penalty: 0.6,
+    frequency_penalty: 0.3,
+    seed: 42,
+    logprobs: true,
+    top_logprobs: 3
+  }
+})
+
+// Example: Passing Anthropic-specific parameters
+const result2 = await rosetta.generate({
+  provider: Provider.Anthropic,
+  model: 'claude-3-haiku-20240307',
+  messages: [{ role: 'user', content: 'Hello' }],
+  extraParams: {
+    top_k: 40,
+    metadata: { user_id: 'user-123' }
+  }
+})
+
+// Example: Passing Google-specific parameters
+const result3 = await rosetta.generate({
+  provider: Provider.Google,
+  model: 'gemini-1.5-flash-latest',
+  messages: [{ role: 'user', content: 'Hello' }],
+  extraParams: {
+    candidateCount: 1,
+    topK: 40
+  }
+})
+```
+
+**Behavior:**
+- Extra parameters are spread into the final provider API payload.
+- Explicitly mapped fields (`temperature`, `topP`, `maxTokens`, etc.) always take precedence over colliding keys in `extraParams`.
+- For Google, `extraParams` are spread into the `config` object (where generation parameters reside), not the top-level request.
+- `extraParams` is also available on `EmbedParams` and audio params (`TranscribeParams`, `TranslateParams`).
+- The SDK does not validate `extraParams` against the provider API — you are responsible for ensuring the parameters are valid for the target provider.
 
 ### Audio (TTS, STT, Translation)
 

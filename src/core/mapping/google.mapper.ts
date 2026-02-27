@@ -483,6 +483,7 @@ export class GoogleMapper implements IProviderMapper {
 
     // Build GenerateContentConfig
     const config: GenerateContentConfig = {
+      ...(params.extraParams ?? {}),
       maxOutputTokens: baseMappedParams.maxTokens,
       temperature: baseMappedParams.temperature,
       topP: baseMappedParams.topP,
@@ -892,6 +893,7 @@ export class GoogleMapper implements IProviderMapper {
     }
 
     return {
+      ...(params.extraParams ?? {}),
       model: `models/${params.model!}`,
       contents: contents
     }

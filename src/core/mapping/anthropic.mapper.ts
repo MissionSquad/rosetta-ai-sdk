@@ -285,6 +285,7 @@ export class AnthropicMapper implements IProviderMapper {
     const baseMappedParams = mapBaseParams(params)
 
     const basePayload = {
+      ...(params.extraParams ?? {}),
       model: params.model!.replace(':1m', ''),
       messages: messages,
       system: systemParam,

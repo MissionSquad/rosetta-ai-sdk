@@ -398,6 +398,42 @@ describe('Azure OpenAI Mapper (V2)', () => {
       })
       expect(result.messages[5]).toEqual({ role: 'tool', tool_call_id: 'tA', content: '{"resA": true}' })
     })
+
+    describe('extraParams passthrough', () => {
+      it('should spread extraParams into the provider payload', () => {
+        const params: GenerateParams = {
+          ...baseGenerateParams,
+          extraParams: {
+            presence_penalty: 0.5,
+            frequency_penalty: 0.3,
+            seed: 42
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.presence_penalty).toBe(0.5)
+        expect(result.frequency_penalty).toBe(0.3)
+        expect(result.seed).toBe(42)
+      })
+
+      it('should not let extraParams override explicitly mapped fields', () => {
+        const params: GenerateParams = {
+          ...baseGenerateParams,
+          temperature: 0.7,
+          extraParams: {
+            temperature: 0.1,
+            custom_param: 'value'
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.temperature).toBe(0.7)
+        expect(result.custom_param).toBe('value')
+      })
+
+      it('should handle undefined extraParams gracefully', () => {
+        const result = mapper.mapToProviderParams(baseGenerateParams)
+        expect(result.model).toBe('default-chat-deploy')
+      })
+    })
   })
 
   describe('mapToEmbedParams', () => {
