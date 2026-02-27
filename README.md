@@ -29,9 +29,10 @@ Built with Node.js v20+ and TypeScript v5.5+ in mind, it emphasizes type safety,
   - Voice Listing (ElevenLabs)
   - Model Listing (Built-in & Custom Providers)
 - **Advanced Features (Provider-dependent):**
-  - JSON Mode / Structured Output (OpenAI/Azure direct support, others via prompting)
+  - JSON Mode / Structured Output (`json_object` and `json_schema` modes; OpenAI/Azure/Google/Anthropic)
   - Grounding / Citations (Google)
   - Thinking Steps (Anthropic)
+- **Provider Passthrough:** Forward provider-specific parameters (e.g., `presence_penalty`, `top_k`, `seed`) directly to the underlying API via `extraParams`, without losing unmapped fields.
 - **Type Safe:** Leverages TypeScript's strong typing for improved developer experience, autocompletion, and compile-time error checking.
 - **Robust Error Handling:** Provides classified errors (`ConfigurationError`, `ProviderAPIError`, `UnsupportedFeatureError`, `MappingError`) for easier debugging and programmatic handling.
 - **Flexible Configuration:** Easily configure API keys and defaults via `.env` files or direct constructor arguments.
@@ -47,7 +48,7 @@ This matrix provides a general guide to feature support across providers. Provid
 | Image Input         |       ✅       |    ✅     |   ✅   |  ⚠️  |     ❌     |           ⚠️           | Groq/Custom support varies by model    |
 | Tool Use            |       ✅       |    ✅     |   ✅   |  ✅  |     ❌     |           ✅           | Implementation details differ slightly |
 | Embeddings          |       ✅       |    ❌     |   ✅   |  ✅  |     ❌     |           ⚠️           | Custom support varies                  |
-| JSON Mode           |       ✅       |    ❌     |   ⚠️   |  ⚠️  |     ❌     |           ✅           | OpenAI/Azure best; others via prompt   |
+| JSON Mode           |       ✅       |    ⚠️     |   ⚠️   |  ⚠️  |     ❌     |           ✅           | Anthropic: `json_schema` only; see [Structured Output](#structured-output-json-mode--json-schema) |
 | Grounding/Citations |       ❌       |    ❌     |   ✅   |  ❌  |     ❌     |           ❌           | Via Google Search tool integration     |
 | Thinking Steps      |       ❌       |    ✅     |   ❌   |  ❌  |     ❌     |           ❌           | Anthropic specific feature             |
 | TTS                 |       ✅       |    ❌     |   ❌   |  ✅  |     ✅     |           ❌           | High-quality TTS with 70+ languages    |
@@ -627,11 +628,206 @@ async function describeImage(imagePath: string) {
 describeImage(path.join(__dirname, 'logo.png'))
 ```
 
+### Structured Output (JSON Mode & JSON Schema)
+
+Request the model to respond in structured JSON format using the `responseFormat` parameter. The SDK supports two structured output modes and behavior varies by provider.
+
+#### JSON Mode (`json_object`)
+
+Forces the model to produce valid JSON. Describe the desired shape in the prompt; the model is not constrained to a specific schema.
+
+```typescript
+import { RosettaAI, Provider, ProviderKey } from 'rosetta-ai-sdk'
+// ... initialization ...
+
+const result = await rosetta.generate({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o-mini',
+  messages: [
+    { role: 'system', content: 'Extract the user\'s name and age from the text. Respond in JSON with keys "name" and "age".' },
+    { role: 'user', content: 'My name is Alice and I am 30 years old.' }
+  ],
+  responseFormat: { type: 'json_object' }
+})
+
+const parsed = JSON.parse(result.content!)
+console.log(parsed) // { name: 'Alice', age: 30 }
+```
+
+For Google, you can also provide an optional JSON schema to guide the `json_object` response:
+
+```typescript
+const result = await rosetta.generate({
+  provider: Provider.Google,
+  model: 'gemini-1.5-flash-latest',
+  messages: [
+    { role: 'user', content: 'Extract the name and age from: "Bob is 25 years old."' }
+  ],
+  responseFormat: {
+    type: 'json_object',
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        age: { type: 'number' }
+      },
+      required: ['name', 'age']
+    }
+  }
+})
+```
+
+#### JSON Schema Mode (`json_schema`)
+
+Constrains the model output to conform to a specific JSON Schema. The model is guaranteed to produce output that validates against the provided schema.
+
+```typescript
+// OpenAI strict structured output
+const result = await rosetta.generate({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  messages: [
+    { role: 'user', content: 'Extract the name and age from: "Bob is 25 years old."' }
+  ],
+  responseFormat: {
+    type: 'json_schema',
+    json_schema: {
+      name: 'person_extraction',     // Required for OpenAI (SDK defaults to 'response')
+      strict: true,                   // Enable strict mode (SDK defaults to true)
+      schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          age: { type: 'number' }
+        },
+        required: ['name', 'age'],
+        additionalProperties: false
+      }
+    }
+  }
+})
+```
+
+```typescript
+// Anthropic structured output via json_schema
+const result = await rosetta.generate({
+  provider: Provider.Anthropic,
+  model: 'claude-sonnet-4-20250514',
+  messages: [
+    { role: 'user', content: 'Extract the name and age from: "Bob is 25 years old."' }
+  ],
+  responseFormat: {
+    type: 'json_schema',
+    json_schema: {
+      schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          age: { type: 'number' }
+        },
+        required: ['name', 'age']
+      }
+    }
+  }
+})
+```
+
+#### Streaming Structured Output
+
+Structured output is also available during streaming via `json_delta` and `json_done` chunk types:
+
+```typescript
+const stream = rosetta.stream({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'List 3 colors as JSON array.' }],
+  responseFormat: { type: 'json_object' }
+})
+
+for await (const chunk of stream) {
+  switch (chunk.type) {
+    case 'json_delta':
+      // Partial JSON as it streams in
+      console.log('Snapshot:', chunk.data.snapshot)
+      break
+    case 'json_done':
+      // Final parsed result
+      console.log('Parsed:', chunk.data.parsed)
+      break
+  }
+}
+```
+
+#### Provider Support
+
+| Mode | OpenAI (Azure) | Anthropic | Google | Groq | Custom (OpenAI-Compat) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| `json_object` | ✅ | ❌ | ✅ | ⚠️ | ✅ |
+| `json_schema` | ✅ | ✅ | ✅ | ❌ | ✅ |
+| Stream JSON (`json_delta`/`json_done`) | ✅ | ❌ | ✅ | ❌ | ✅ |
+
+**Provider Notes:**
+- **OpenAI/Azure:** Both `json_object` and `json_schema` are natively supported. For `json_object`, the `schema` field is informational only — describe the desired shape in the prompt. For `json_schema`, the SDK defaults `name` to `'response'` and `strict` to `true` if omitted.
+- **Anthropic:** Supports `json_schema` only (via the `output_config` API parameter). Throws `UnsupportedFeatureError` for `json_object` — use `json_schema` instead. The `name` and `strict` fields are ignored; only `schema` is sent.
+- **Google:** Both `json_object` and `json_schema` map to `application/json` MIME type. Schema is natively used to constrain output. The SDK normalizes JSON Schema for Google compatibility (removes `additionalProperties`, `$schema`, converts `anyOf`/`oneOf` to `enum` where possible).
+- **Groq:** `json_object` support is unconfirmed; a warning is logged. `json_schema` is not supported.
+- **Custom (OpenAI-Compatible):** Passes `responseFormat` through via `mapToOpenAIResponseFormat()`. Support depends on the underlying provider.
+
+### Extra Parameters (Provider Passthrough)
+
+The `extraParams` field allows you to pass provider-specific parameters that are not part of the unified RosettaAI interface directly through to the underlying provider API. This is useful for parameters like `presence_penalty`, `frequency_penalty`, `repetition_penalty`, `top_k`, `seed`, `logprobs`, and any other provider-specific options.
+
+```typescript
+// Example: Passing OpenAI-specific parameters
+const result = await rosetta.generate({
+  provider: Provider.OpenAI,
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'Tell me a story.' }],
+  temperature: 0.7,
+  extraParams: {
+    presence_penalty: 0.6,
+    frequency_penalty: 0.3,
+    seed: 42,
+    logprobs: true,
+    top_logprobs: 3
+  }
+})
+
+// Example: Passing Anthropic-specific parameters
+const result2 = await rosetta.generate({
+  provider: Provider.Anthropic,
+  model: 'claude-3-haiku-20240307',
+  messages: [{ role: 'user', content: 'Hello' }],
+  extraParams: {
+    top_k: 40,
+    metadata: { user_id: 'user-123' }
+  }
+})
+
+// Example: Passing Google-specific parameters
+const result3 = await rosetta.generate({
+  provider: Provider.Google,
+  model: 'gemini-1.5-flash-latest',
+  messages: [{ role: 'user', content: 'Hello' }],
+  extraParams: {
+    candidateCount: 1,
+    topK: 40
+  }
+})
+```
+
+**Behavior:**
+- Extra parameters are spread into the final provider API payload.
+- Explicitly mapped fields (`temperature`, `topP`, `maxTokens`, etc.) always take precedence over colliding keys in `extraParams`.
+- For Google, `extraParams` are spread into the `config` object (where generation parameters reside), not the top-level request.
+- `extraParams` is also available on `EmbedParams` and audio params (`TranscribeParams`, `TranslateParams`).
+- The SDK does not validate `extraParams` against the provider API — you are responsible for ensuring the parameters are valid for the target provider.
+
 ### Audio (TTS, STT, Translation)
 
 #### Text-to-Speech (TTS)
 
-Generate speech from text using `generateSpeech` (non-streaming) or `streamSpeech`. Currently uses OpenAI/Azure.
+Generate speech from text using `generateSpeech` (non-streaming) or `streamSpeech`. Supported by OpenAI/Azure, Groq, and ElevenLabs (see [ElevenLabs Audio Provider](#elevenlabs-audio-provider) below).
 
 ```typescript
 import { RosettaAI, Provider, SpeechParams } from 'rosetta-ai-sdk'
@@ -645,6 +841,7 @@ async function generateAudio() {
   const filePath = path.join(outputDir, 'hello.mp3')
 
   try {
+    // OpenAI TTS
     const params: SpeechParams = {
       provider: Provider.OpenAI,
       input: 'Hello from RosettaAI!',
@@ -653,12 +850,23 @@ async function generateAudio() {
       responseFormat: 'mp3'
     }
 
-    // Non-streaming
     const audioBuffer = await rosetta.generateSpeech(params)
     await fs.writeFile(filePath, audioBuffer)
     console.log(`Audio saved to ${filePath}`)
 
-    // Example: Streaming (optional)
+    // Groq TTS (wav output only)
+    const groqParams: SpeechParams = {
+      provider: Provider.Groq,
+      model: 'playai-tts',
+      input: 'Hello from Groq TTS!',
+      voice: 'Fritz-PlayAI',        // See supported voices below
+      responseFormat: 'wav'          // Groq TTS only supports wav
+    }
+
+    const groqAudio = await rosetta.generateSpeech(groqParams)
+    await fs.writeFile(path.join(outputDir, 'hello_groq.wav'), groqAudio)
+
+    // Example: Streaming TTS (OpenAI/ElevenLabs)
     // const stream = rosetta.streamSpeech(params);
     // const writeStream = (await fs.open(path.join(outputDir, 'hello_stream.mp3'), 'w')).createWriteStream();
     // for await (const chunk of stream) {
@@ -671,12 +879,18 @@ async function generateAudio() {
   }
 }
 
+// Groq supported TTS voices:
+// Arista-PlayAI, Atlas-PlayAI, Basil-PlayAI, Briggs-PlayAI, Calum-PlayAI,
+// Celeste-PlayAI, Cheyenne-PlayAI, Chip-PlayAI, Cillian-PlayAI, Deedee-PlayAI,
+// Fritz-PlayAI, Gail-PlayAI, Indigo-PlayAI, Mamaw-PlayAI, Mason-PlayAI,
+// Mikail-PlayAI, Mitch-PlayAI, Quinn-PlayAI, Thunder-PlayAI
+
 generateAudio()
 ```
 
 #### Speech-to-Text (STT) & Translation
 
-Transcribe audio to text using `transcribe` or translate audio to English using `translate`. Supported by OpenAI/Azure and Groq.
+Transcribe audio to text using `transcribe` or translate audio to English using `translate`. Supported by OpenAI/Azure, Groq, and ElevenLabs (STT only, see [ElevenLabs Audio Provider](#elevenlabs-audio-provider) below for advanced features like diarization and audio event tagging).
 
 ```typescript
 import { RosettaAI, Provider, TranscribeParams, TranslateParams, RosettaAudioData, ProviderKey } from 'rosetta-ai-sdk'
@@ -796,6 +1010,36 @@ async function elevenlabsTTS() {
   await fs.writeFile('elevenlabs_streamed.mp3', Buffer.concat(chunks))
 }
 ```
+
+**Text Normalization:**
+
+ElevenLabs TTS includes automatic text normalization that improves pronunciation of numbers, currencies, phone numbers, and URLs. This is enabled by default and can be disabled per-request:
+
+```typescript
+// Normalization is ON by default:
+// "$42.50" -> "42.50 dollars"
+// "555-555-5555" -> "5 5 5, 5 5 5, 5 5 5 5"
+// "example.com/path" -> "example dot com slash path"
+
+// Disable normalization for a specific request:
+const params: SpeechParams = {
+  provider: 'elevenlabs',
+  model: 'eleven_flash_v2_5',
+  input: 'The price is $42.50',
+  voice: '21m00Tcm4TlvDq8ikWAM',
+  ttsNormalize: false  // Send raw text to ElevenLabs
+}
+```
+
+**Output Format Mapping:**
+
+| Rosetta Format | ElevenLabs Format | Description |
+| :--- | :--- | :--- |
+| `'mp3'` | `mp3_44100_128` | Standard MP3 at 44.1kHz/128kbps |
+| `'opus'` | `opus_48000_128` | Opus at 48kHz/128kbps (web streaming) |
+| `'wav'` | `pcm_44100` | Uncompressed PCM at 44.1kHz |
+| `'pcm'` | `pcm_16000` | PCM at 16kHz (telephony) |
+| `'aac'`, `'flac'` | SDK default | Not directly supported; falls back |
 
 **Speech-to-Text with ElevenLabs:**
 

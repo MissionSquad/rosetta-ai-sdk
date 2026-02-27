@@ -101,7 +101,7 @@ async function runStructuredOutput() {
         (provider === Provider.OpenAI
           ? 'gpt-4o-mini' // GPT-4 Turbo or GPT-4o recommended for JSON mode
           : provider === Provider.Google
-          ? 'gemini-1.5-flash-latest' // Gemini models can follow JSON instructions
+          ? 'gemini-2.5-flash' // Gemini models can follow JSON instructions
           : undefined)
 
       if (!model) {

@@ -18,6 +18,7 @@ export function mapToOpenAIEmbedParams(params: EmbedParams): EmbeddingCreatePara
   }
 
   return {
+    ...(params.extraParams ?? {}),
     model: params.model!,
     input: inputData,
     encoding_format: params.encodingFormat,

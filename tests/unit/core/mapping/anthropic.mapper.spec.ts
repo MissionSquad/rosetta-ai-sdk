@@ -280,6 +280,33 @@ describe('Anthropic Mapper', () => {
       expect(result.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 })
     })
 
+    it('[Easy] should map responseFormat json_schema to output_config.format', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'Return JSON' }],
+        responseFormat: {
+          type: 'json_schema',
+          json_schema: { schema: { type: 'object', properties: { a: { type: 'number' } } } }
+        }
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.output_config).toEqual({
+        format: {
+          type: 'json_schema',
+          schema: { type: 'object', properties: { a: { type: 'number' } } }
+        }
+      })
+    })
+
+    it('[Easy] should throw UnsupportedFeatureError for responseFormat json_object', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'Return JSON' }],
+        responseFormat: { type: 'json_object' }
+      }
+      expect(() => mapper.mapToProviderParams(params)).toThrow(UnsupportedFeatureError)
+    })
+
     it('[Medium] should throw MappingError for multiple system messages', () => {
       const params: GenerateParams = {
         ...baseParams,
@@ -411,6 +438,46 @@ describe('Anthropic Mapper', () => {
           ]
         }
       ])
+    })
+
+    describe('extraParams passthrough', () => {
+      it('should spread extraParams into the provider payload', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          extraParams: {
+            top_k: 40,
+            metadata: { user_id: 'abc' }
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.top_k).toBe(40)
+        expect(result.metadata).toEqual({ user_id: 'abc' })
+      })
+
+      it('should not let extraParams override explicitly mapped fields', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          temperature: 0.7,
+          extraParams: {
+            temperature: 0.1,
+            custom_param: 'value'
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.temperature).toBe(0.7)
+        expect(result.custom_param).toBe('value')
+      })
+
+      it('should handle undefined extraParams gracefully', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }]
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.model).toBe('claude-3-haiku-20240307')
+      })
     })
   })
 

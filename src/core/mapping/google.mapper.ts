@@ -469,13 +469,15 @@ export class GoogleMapper implements IProviderMapper {
     }
 
     let responseMimeType: string | undefined
-    let responseSchema: any | undefined
+    let responseJsonSchema: any | undefined
     if (params.responseFormat?.type === 'json_object') {
       responseMimeType = 'application/json'
       if (params.responseFormat.schema) {
-        const cleanedSchema = this.cleanSchemaForGoogle(params.responseFormat.schema)
-        responseSchema = cleanedSchema
+        responseJsonSchema = this.cleanSchemaForGoogle(params.responseFormat.schema)
       }
+    } else if (params.responseFormat?.type === 'json_schema') {
+      responseMimeType = 'application/json'
+      responseJsonSchema = this.cleanSchemaForGoogle(params.responseFormat.json_schema.schema)
     }
 
     // Use common utility for base parameters
@@ -483,12 +485,13 @@ export class GoogleMapper implements IProviderMapper {
 
     // Build GenerateContentConfig
     const config: GenerateContentConfig = {
+      ...(params.extraParams ?? {}),
       maxOutputTokens: baseMappedParams.maxTokens,
       temperature: baseMappedParams.temperature,
       topP: baseMappedParams.topP,
       stopSequences: baseMappedParams.stopSequences,
       responseMimeType: responseMimeType,
-      responseSchema: responseSchema,
+      responseJsonSchema: responseJsonSchema,
       tools: finalTools,
       systemInstruction: systemInstruction,
       // Safety settings: use custom settings if provided, otherwise default to BLOCK_MEDIUM_AND_ABOVE
@@ -892,6 +895,7 @@ export class GoogleMapper implements IProviderMapper {
     }
 
     return {
+      ...(params.extraParams ?? {}),
       model: `models/${params.model!}`,
       contents: contents
     }

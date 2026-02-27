@@ -103,7 +103,7 @@ describe('Google Mapper', () => {
   describe('mapToProviderParams (Generate)', () => {
     const baseParams: GenerateParams = {
       provider: Provider.Google,
-      model: 'gemini-1.5-flash-latest',
+      model: 'gemini-2.5-flash',
       messages: []
     }
 
@@ -345,9 +345,25 @@ describe('Google Mapper', () => {
       }
       const result = mapper.mapToProviderParams(params) as GenerateContentParameters
       expect(result.config?.responseMimeType).toBe('application/json')
-      expect(result.config?.responseSchema).toBeDefined()
-      expect(result.config?.responseSchema.type).toBe('OBJECT')
-      expect(result.config?.responseSchema.properties?.name?.type).toBe('STRING')
+      expect((result.config as any)?.responseJsonSchema).toBeDefined()
+      expect((result.config as any)?.responseJsonSchema.type).toBe('OBJECT')
+      expect((result.config as any)?.responseJsonSchema.properties?.name?.type).toBe('STRING')
+    })
+
+    it('[Medium] should map responseFormat json_schema', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'JSON please.' }],
+        responseFormat: {
+          type: 'json_schema',
+          json_schema: { schema: { type: 'object', properties: { name: { type: 'string' } } } }
+        }
+      }
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.config?.responseMimeType).toBe('application/json')
+      expect((result.config as any)?.responseJsonSchema).toBeDefined()
+      expect((result.config as any)?.responseJsonSchema.type).toBe('OBJECT')
+      expect((result.config as any)?.responseJsonSchema.properties?.name?.type).toBe('STRING')
     })
 
     it('[Medium] should map tool result with non-JSON string content', () => {
@@ -435,10 +451,53 @@ describe('Google Mapper', () => {
       expect(warnSpy).toHaveBeenCalledWith("Skipping message with role 'model' due to empty content parts.")
       warnSpy.mockRestore()
     })
+
+    describe('extraParams passthrough', () => {
+      it('should spread extraParams into the config object, not top-level', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          extraParams: {
+            topK: 40,
+            candidateCount: 2
+          }
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect((result.config as any)?.topK).toBe(40)
+        expect((result.config as any)?.candidateCount).toBe(2)
+        // Should NOT be at top level
+        expect((result as any).topK).toBeUndefined()
+        expect((result as any).candidateCount).toBeUndefined()
+      })
+
+      it('should not let extraParams override explicitly mapped config fields', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          temperature: 0.7,
+          extraParams: {
+            temperature: 0.1,
+            customParam: 'value'
+          }
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect((result.config as any)?.temperature).toBe(0.7)
+        expect((result.config as any)?.customParam).toBe('value')
+      })
+
+      it('should handle undefined extraParams gracefully', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }]
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect(result.model).toBe('gemini-2.5-flash')
+      })
+    })
   })
 
   describe('mapFromProviderResponse (Generate)', () => {
-    const modelUsed = 'gemini-1.5-flash-latest-test'
+    const modelUsed = 'gemini-2.5-flash-test'
 
     it('[Easy] should map basic text response', () => {
       const response: GenerateContentResponse = {

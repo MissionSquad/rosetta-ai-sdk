@@ -629,6 +629,29 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       )
     })
 
+    it('should parse JSON into parsedContent when structured output is requested', async () => {
+      const params: GenerateParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Return JSON' }],
+        responseFormat: {
+          type: 'json_schema',
+          json_schema: { schema: { type: 'object', properties: { a: { type: 'number' } } } }
+        }
+      }
+
+      mockOpenAIMapperInstance.mapToProviderParams.mockReturnValue({ mapped: 'openai_params', model: 'gpt-4o-mini' })
+      mockOpenAIMapperInstance.mapFromProviderResponse.mockReturnValue({
+        content: '{"a":1}',
+        parsedContent: null,
+        finishReason: 'stop',
+        model: 'gpt-4o-mini'
+      } as unknown as GenerateResult)
+
+      const result = await rosetta.generate(params)
+      expect(result.parsedContent).toEqual({ a: 1 })
+    })
+
     it('should throw errors from mapFromProviderResponse (e.g., ToolArgumentValidationError)', async () => {
       const params: GenerateParams = {
         provider: Provider.OpenAI,
@@ -1688,11 +1711,11 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
     }
     const mockGroqModelList: RosettaModelList = {
       object: 'list',
-      data: [{ id: 'llama3-8b-8192', object: 'model', owned_by: 'meta', provider: Provider.Groq }]
+      data: [{ id: 'llama-3.1-8b-instant', object: 'model', owned_by: 'meta', provider: Provider.Groq }]
     }
     const mockAnthropicModelList: RosettaModelList = {
       object: 'list',
-      data: [{ id: 'claude-3-haiku', object: 'model', owned_by: 'anthropic', provider: Provider.Anthropic }]
+      data: [{ id: 'claude-haiku-4-5', object: 'model', owned_by: 'anthropic', provider: Provider.Anthropic }]
     }
     const mockCustomModelList: RosettaModelList = {
       object: 'list',

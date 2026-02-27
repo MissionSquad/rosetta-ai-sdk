@@ -268,6 +268,23 @@ describe('OpenAI Mapper', () => {
       expect(result.response_format).toEqual({ type: 'json_object' })
     })
 
+    it('[Easy] should map response_format json_schema with defaults', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'Return JSON' }],
+        responseFormat: { type: 'json_schema', json_schema: { schema: { type: 'object', properties: { a: { type: 'number' } } } } }
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.response_format).toEqual({
+        type: 'json_schema',
+        json_schema: {
+          name: 'response',
+          strict: true,
+          schema: { type: 'object', properties: { a: { type: 'number' } } }
+        }
+      })
+    })
+
     it('[Easy] should throw error for unsupported features', () => {
       const paramsThinking: GenerateParams = { ...baseParams, messages: [], thinking: true }
       const paramsGrounding: GenerateParams = { ...baseParams, messages: [], grounding: { enabled: true } }
@@ -474,6 +491,58 @@ describe('OpenAI Mapper', () => {
       }
       const result = mapper.mapToProviderParams(params)
       expect(result.messages[1]).toEqual({ role: 'assistant', content: '' }) // Maps to empty string
+    })
+
+    describe('extraParams passthrough', () => {
+      it('should spread extraParams into the provider payload', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          extraParams: {
+            presence_penalty: 0.5,
+            frequency_penalty: 0.3,
+            seed: 42
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.presence_penalty).toBe(0.5)
+        expect(result.frequency_penalty).toBe(0.3)
+        expect(result.seed).toBe(42)
+      })
+
+      it('should not let extraParams override explicitly mapped fields', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          temperature: 0.7,
+          extraParams: {
+            temperature: 0.1,
+            custom_param: 'value'
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.temperature).toBe(0.7)
+        expect(result.custom_param).toBe('value')
+      })
+
+      it('should handle undefined extraParams gracefully', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }]
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.model).toBe('gpt-4o-mini')
+      })
+
+      it('should handle empty extraParams gracefully', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          extraParams: {}
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.model).toBe('gpt-4o-mini')
+      })
     })
   })
 

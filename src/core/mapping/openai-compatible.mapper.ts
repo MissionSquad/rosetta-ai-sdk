@@ -28,7 +28,7 @@ import {
   mapRoleToOpenAI,
   wrapOpenAIError
 } from './openai.common' // Reuse common OpenAI mapping logic
-import { mapBaseToolChoice } from '../mapping/common.utils'
+import { mapBaseToolChoice, mapToOpenAIResponseFormat } from '../mapping/common.utils'
 import { MappingError, RosettaAIError, ConfigurationError, UnsupportedFeatureError } from '../../errors'
 import { mapToOpenAIEmbedParams, mapFromOpenAIEmbedResponse } from './openai.embed.mapper'
 
@@ -167,6 +167,7 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     const effectiveMaxTokens = normalizedMct ?? normalizedMt
 
     const openAIParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+      ...(originalParams.extraParams ?? {}),
       model: model,
       messages: messages,
       ...(hasMct ? { max_completion_tokens: effectiveMaxTokens } : {}), // only use max_completion_tokens if sent
@@ -176,7 +177,6 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
       tools,
       tool_choice,
       top_p: originalParams.topP,
-      // Add other compatible parameters if needed (e.g., stop, seed)
       ...(originalParams.stop ? { stop: originalParams.stop } : {})
     }
 
@@ -235,6 +235,7 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     const effectiveMaxTokens = normalizedMct ?? normalizedMt
 
     const openAIParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+      ...(originalParams.extraParams ?? {}),
       model: model,
       messages: messages,
       ...(hasMct ? { max_completion_tokens: effectiveMaxTokens } : {}), // only use max_completion_tokens if sent
@@ -245,9 +246,10 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
       tools,
       tool_choice,
       top_p: originalParams.topP,
-      // Add other compatible parameters if needed
       ...(originalParams.stop != null ? { stop: originalParams.stop } : {}),
-      ...(originalParams.responseFormat != null ? { response_format: originalParams.responseFormat } : {})
+      ...(originalParams.responseFormat != null
+        ? { response_format: mapToOpenAIResponseFormat(originalParams.responseFormat) }
+        : {})
     }
 
     try {

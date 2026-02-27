@@ -27,6 +27,7 @@ export function mapToGroqEmbedParams(params: EmbedParams): EmbeddingCreateParams
   }
 
   return {
+    ...(params.extraParams ?? {}),
     model: params.model!,
     input: inputData, // Pass string or array
     encoding_format: params.encodingFormat // Pass float or undefined

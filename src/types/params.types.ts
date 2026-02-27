@@ -1,6 +1,31 @@
 import { ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData } from './common.types'
 import { ProviderOptions } from './config.types'
 
+export type RosettaResponseFormat =
+  | { type: 'text' }
+  | {
+      type: 'json_object'
+      /**
+       * Optional JSON schema to guide the model's JSON output.
+       *
+       * Notes:
+       * - OpenAI ignores schema for `json_object` (JSON mode).
+       * - For `json_object`, this is treated as informational by the SDK and may be ignored by providers.
+       */
+      schema?: Record<string, unknown>
+    }
+  | {
+      type: 'json_schema'
+      json_schema: {
+        /** Optional for providers that don’t require it; required for OpenAI (SDK will default when mapping). */
+        name?: string
+        /** Defaults to true when supported (OpenAI). */
+        strict?: boolean
+        /** JSON Schema (draft-07-ish). */
+        schema: Record<string, unknown>
+      }
+    }
+
 /**
  * Parameters for generating chat completions (streaming or non-streaming).
  */
@@ -30,11 +55,7 @@ export interface GenerateParams {
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
 
   /** Request the model to respond in a specific format (e.g., JSON). Support varies by provider/model. */
-  responseFormat?: {
-    type: 'text' | 'json_object'
-    /** Optional JSON schema to guide the model's JSON output (currently informational, used in system prompt construction where applicable). */
-    schema?: Record<string, unknown>
-  }
+  responseFormat?: RosettaResponseFormat
 
   /** Request the model to provide citations or grounding for its response. Support varies by provider/model. */
   grounding?: {
@@ -53,7 +74,14 @@ export interface GenerateParams {
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
 
-  // Add other common parameters like 'presence_penalty', 'frequency_penalty' if needed
+  /**
+   * Additional provider-specific parameters to pass through to the provider API.
+   * These are spread into the final provider payload under explicitly mapped fields,
+   * meaning mapped fields (temperature, topP, etc.) take precedence if there is a collision.
+   * Use this for provider-specific parameters not covered by the unified interface
+   * (e.g., repetition_penalty, presence_penalty, frequency_penalty, top_k, seed, logprobs).
+   */
+  extraParams?: Record<string, unknown>
 }
 
 /**
@@ -70,6 +98,11 @@ export interface EmbedParams {
   encodingFormat?: 'float' | 'base64' // Check provider specifics
   /** Optional: Desired dimension size for the output embeddings (OpenAI specific). */
   dimensions?: number
+  /**
+   * Additional provider-specific parameters to pass through to the provider API.
+   * Mapped fields take precedence over extraParams in case of collision.
+   */
+  extraParams?: Record<string, unknown>
   /** Provider-specific options overriding global config for this call. */
   providerOptions?: ProviderOptions
 }
@@ -116,6 +149,11 @@ interface BaseAudioParams {
   responseFormat?: 'json' | 'text' | 'srt' | 'verbose_json' | 'vtt' // Check provider specifics
   /** Optional: Granularity of timestamps (word or segment level). Support varies. */
   timestampGranularities?: ('word' | 'segment')[]
+  /**
+   * Additional provider-specific parameters to pass through to the provider API.
+   * Mapped fields take precedence over extraParams in case of collision.
+   */
+  extraParams?: Record<string, unknown>
   /** Optional: Enable speaker diarization (identify different speakers). Provider-specific, e.g., ElevenLabs. */
   diarize?: boolean
   /** Optional: Tag non-speech audio events (e.g., laughter, applause). Provider-specific, e.g., ElevenLabs. */

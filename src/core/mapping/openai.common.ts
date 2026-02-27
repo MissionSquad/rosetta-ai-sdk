@@ -419,8 +419,17 @@ export async function* mapOpenAIStream(
               try {
                 parsedArgs = JSON.parse(rawArguments)
               } catch (parseError) {
+                // When finish_reason is 'length', the LLM ran out of output tokens and
+                // truncated the JSON mid-stream. Provide a specific, actionable message.
+                const truncated = reason === 'length'
+                const hint = truncated
+                  ? ` The LLM output was truncated (finish_reason=length) — the tool call arguments exceeded the model's remaining output token budget. Consider increasing max_tokens or reducing argument size (e.g. shorter systemPrompt).`
+                  : ''
+                const argsPreview = rawArguments.length > 200
+                  ? rawArguments.slice(0, 200) + `... (${rawArguments.length} chars total)`
+                  : rawArguments
                 throw new MappingError(
-                  `Failed to parse arguments for tool '${tc.function!.name}' (ID: ${tc.id})`,
+                  `Failed to parse arguments for tool '${tc.function!.name}' (ID: ${tc.id}).${hint} Raw args preview: ${argsPreview}`,
                   provider,
                   'mapOpenAIStream validation',
                   parseError

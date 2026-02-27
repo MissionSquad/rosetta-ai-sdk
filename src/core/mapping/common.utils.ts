@@ -138,6 +138,48 @@ export function mapBaseToolChoice(
   return undefined // Return undefined if toolChoice is not set
 }
 
+export type OpenAIResponseFormatParam =
+  | { type: 'text' }
+  | { type: 'json_object' }
+  | {
+      type: 'json_schema'
+      json_schema: {
+        name: string
+        strict: boolean
+        schema: Record<string, unknown>
+      }
+    }
+
+/**
+ * Normalize Rosetta's responseFormat into OpenAI Chat Completions `response_format`.
+ *
+ * This is used for OpenAI and OpenAI-compatible providers.
+ */
+export function mapToOpenAIResponseFormat(
+  responseFormat: GenerateParams['responseFormat']
+): OpenAIResponseFormatParam | undefined {
+  if (!responseFormat) return undefined
+
+  if (responseFormat.type === 'text') return { type: 'text' }
+
+  if (responseFormat.type === 'json_object') {
+    return { type: 'json_object' }
+  }
+
+  if (responseFormat.type === 'json_schema') {
+    return {
+      type: 'json_schema',
+      json_schema: {
+        name: responseFormat.json_schema.name ?? 'response',
+        strict: responseFormat.json_schema.strict ?? true,
+        schema: responseFormat.json_schema.schema
+      }
+    }
+  }
+
+  return undefined
+}
+
 /**
  * Placeholder for mapping base content parts.
  * Due to role constraints (e.g., images only for user), this is complex
