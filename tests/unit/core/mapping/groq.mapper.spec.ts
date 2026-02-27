@@ -85,7 +85,7 @@ describe('Groq Mapper', () => {
   describe('mapToProviderParams (Generate)', () => {
     const baseParams: GenerateParams = {
       provider: Provider.Groq,
-      model: 'llama3-8b-8192',
+      model: 'llama-3.1-8b-instant',
       messages: [{ role: 'user', content: 'Placeholder' }] // Add placeholder
     }
 
@@ -104,7 +104,7 @@ describe('Groq Mapper', () => {
         { role: 'user', content: 'Hello' },
         { role: 'assistant', content: 'Hi.' }
       ])
-      expect(result.model).toBe('llama3-8b-8192')
+      expect(result.model).toBe('llama-3.1-8b-instant')
       expect(result.stream).toBeUndefined()
     })
 
@@ -472,20 +472,20 @@ describe('Groq Mapper', () => {
           messages: [{ role: 'user', content: 'Hello' }]
         }
         const result = mapper.mapToProviderParams(params)
-        expect(result.model).toBe('llama3-8b-8192')
+        expect(result.model).toBe('llama-3.1-8b-instant')
       })
     })
   })
 
   describe('mapFromProviderResponse (Generate)', () => {
-    const modelUsed = 'llama3-8b-8192-test'
+    const modelUsed = 'llama-3.1-8b-instant-test'
 
     it('[Easy] should map basic text response', () => {
       const response: Groq.Chat.Completions.ChatCompletion = {
         id: 'chat_123',
         object: 'chat.completion',
         created: 1700000000,
-        model: 'llama3-8b-8192-test-id',
+        model: 'llama-3.1-8b-instant-test-id',
         choices: [
           {
             index: 0,
@@ -501,7 +501,7 @@ describe('Groq Mapper', () => {
       expect(result.toolCalls).toBeUndefined()
       expect(result.finishReason).toBe('stop')
       expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 })
-      expect(result.model).toBe('llama3-8b-8192-test-id')
+      expect(result.model).toBe('llama-3.1-8b-instant-test-id')
     })
 
     it('[Easy] should map response with tool calls', () => {

@@ -35,9 +35,9 @@ async function runStreamingChat() {
       (providerToTest === Provider.Anthropic
         ? 'claude-sonnet-4-5:1m'
         : providerToTest === Provider.Google
-        ? 'gemini-1.5-flash-latest'
+        ? 'gemini-2.5-flash'
         : providerToTest === Provider.Groq
-        ? 'llama3-8b-8192'
+        ? 'llama-3.1-8b-instant'
         : providerToTest === Provider.OpenAI
         ? 'gpt-4o-mini'
         : undefined)

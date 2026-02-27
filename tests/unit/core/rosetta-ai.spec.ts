@@ -1684,11 +1684,11 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
     }
     const mockGroqModelList: RosettaModelList = {
       object: 'list',
-      data: [{ id: 'llama3-8b-8192', object: 'model', owned_by: 'meta', provider: Provider.Groq }]
+      data: [{ id: 'llama-3.1-8b-instant', object: 'model', owned_by: 'meta', provider: Provider.Groq }]
     }
     const mockAnthropicModelList: RosettaModelList = {
       object: 'list',
-      data: [{ id: 'claude-3-haiku', object: 'model', owned_by: 'anthropic', provider: Provider.Anthropic }]
+      data: [{ id: 'claude-haiku-4-5', object: 'model', owned_by: 'anthropic', provider: Provider.Anthropic }]
     }
     const mockCustomModelList: RosettaModelList = {
       object: 'list',

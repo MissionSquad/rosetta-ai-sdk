@@ -29,11 +29,11 @@ async function runBasicChat() {
         const model =
           rosetta.config.defaultModels?.[provider] ??
           (provider === Provider.Anthropic
-            ? 'claude-3-haiku-20240307'
+            ? 'claude-haiku-4-5'
             : provider === Provider.Google
-            ? 'gemini-1.5-flash-latest'
+            ? 'gemini-2.5-flash'
             : provider === Provider.Groq
-            ? 'llama3-8b-8192'
+            ? 'llama-3.1-8b-instant'
             : provider === Provider.OpenAI
             ? 'gpt-4o-mini'
             : undefined) // Fallback model IDs

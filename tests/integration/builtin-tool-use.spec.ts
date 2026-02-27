@@ -71,9 +71,9 @@ describeIf(hasOpenAIKey || hasAnthropicKey || hasGoogleKey || hasGroqKey)(
           // Use a model known to support tools for the provider
           model:
             provider === Provider.Anthropic
-              ? 'claude-3-5-sonnet-latest' // Sonnet/Opus recommended
+              ? 'claude-sonnet-4-6' // Sonnet/Opus recommended
               : provider === Provider.Google
-              ? 'gemini-1.5-flash-latest' // Flash/Pro support tools
+              ? 'gemini-2.5-flash' // Flash/Pro support tools
               : provider === Provider.Groq
               ? 'llama-3.3-70b-versatile' // Groq Llama3.1 supports tools
               : 'gpt-4o-mini', // Default to GPT-4o mini for OpenAI/Azure
@@ -145,9 +145,9 @@ describeIf(hasOpenAIKey || hasAnthropicKey || hasGoogleKey || hasGroqKey)(
           provider: provider,
           model:
             provider === Provider.Anthropic
-              ? 'claude-3-5-sonnet-latest'
+              ? 'claude-haiku-4-5'
               : provider === Provider.Google
-              ? 'gemini-1.5-flash-latest'
+              ? 'gemini-2.5-flash'
               : provider === Provider.Groq
               ? 'llama-3.3-70b-versatile'
               : 'gpt-4o-mini',
@@ -249,11 +249,11 @@ describeIf(hasOpenAIKey || hasAnthropicKey || hasGoogleKey || hasGroqKey)(
           provider: provider,
           model:
             provider === Provider.Anthropic
-              ? 'claude-3-haiku-20240307' // Use cheaper models for non-tool tests
+              ? 'claude-haiku-4-5' // Use cheaper models for non-tool tests
               : provider === Provider.Google
-              ? 'gemini-1.5-flash-latest'
+              ? 'gemini-2.5-flash'
               : provider === Provider.Groq
-              ? 'llama3-8b-8192'
+              ? 'llama-3.1-8b-instant'
               : 'gpt-4o-mini',
           messages: [{ role: 'user', content: 'Tell me a short joke about TypeScript.' }],
           tools: [getWeatherTool], // Provide tool, but shouldn't be used

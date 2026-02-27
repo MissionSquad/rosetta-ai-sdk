@@ -76,9 +76,9 @@ async function runStreamingDiagnostics() {
 
 function getFallbackModel(provider: Provider): string | undefined {
     switch (provider) {
-        case Provider.Anthropic: return 'claude-3-haiku-20240307';
-        case Provider.Google: return 'gemini-1.5-flash-latest';
-        case Provider.Groq: return 'llama3-8b-8192';
+        case Provider.Anthropic: return 'claude-haiku-4-5';
+        case Provider.Google: return 'gemini-2.5-flash';
+        case Provider.Groq: return 'llama-3.1-8b-instant';
         case Provider.OpenAI: return 'gpt-4o-mini';
         default: return undefined;
     }

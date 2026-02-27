@@ -94,9 +94,9 @@ async function runImageInputChat() {
       const model =
         rosetta.config.defaultModels?.[provider] ??
         (provider === Provider.Anthropic
-          ? 'claude-3-haiku-20240307' // Haiku supports vision
+          ? 'claude-haiku-4-5' // Haiku supports vision
           : provider === Provider.Google
-          ? 'gemini-1.5-flash-latest' // Flash supports vision
+          ? 'gemini-2.5-flash' // Flash supports vision
           : provider === Provider.OpenAI
           ? 'gpt-4o-mini' // GPT-4o mini supports vision
           : undefined)

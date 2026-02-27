@@ -103,7 +103,7 @@ describe('Google Mapper', () => {
   describe('mapToProviderParams (Generate)', () => {
     const baseParams: GenerateParams = {
       provider: Provider.Google,
-      model: 'gemini-1.5-flash-latest',
+      model: 'gemini-2.5-flash',
       messages: []
     }
 
@@ -475,13 +475,13 @@ describe('Google Mapper', () => {
           messages: [{ role: 'user', content: 'Hello' }]
         }
         const result = mapper.mapToProviderParams(params) as GenerateContentParameters
-        expect(result.model).toBe('gemini-1.5-flash-latest')
+        expect(result.model).toBe('gemini-2.5-flash')
       })
     })
   })
 
   describe('mapFromProviderResponse (Generate)', () => {
-    const modelUsed = 'gemini-1.5-flash-latest-test'
+    const modelUsed = 'gemini-2.5-flash-test'
 
     it('[Easy] should map basic text response', () => {
       const response: GenerateContentResponse = {
