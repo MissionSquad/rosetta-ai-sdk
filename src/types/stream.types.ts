@@ -39,6 +39,25 @@ export type StreamChunk =
   | { type: 'thinking_delta'; data: { delta: string } }
   /** Anthropic: Signals that the model has finished its internal "thinking" process. */
   | { type: 'thinking_stop' }
+  /** Anthropic: Signals that code execution has started and provides any immediately available code. */
+  | { type: 'code_execution_start'; data: { id: string; code: string } }
+  /** Anthropic: A code execution input update, exposing the latest code delta and accumulated snapshot. */
+  | { type: 'code_execution_delta'; data: { id: string; codeDelta: string; snapshot: string } }
+  /** Anthropic: A code execution result block containing stdout/stderr and optional encrypted output metadata. */
+  | {
+      type: 'code_execution_result'
+      data: {
+        toolUseId: string
+        stdout: string
+        stderr: string
+        returnCode: number
+        encryptedStdout?: string
+        errorCode?: string
+        contentFileIds?: string[]
+      }
+    }
+  /** Anthropic: Container/session metadata for stateful code execution reuse. */
+  | { type: 'container_info'; data: { containerId: string; expiresAt?: string | null } }
 
   // --- Tool Calls ---
   /** Signals the start of a tool call request from the model. Provides the tool name and ID. */

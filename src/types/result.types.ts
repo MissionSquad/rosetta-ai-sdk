@@ -36,6 +36,11 @@ export interface GenerateResult {
   model: string
   /** The raw response object from the underlying SDK (use with caution, structure varies). */
   rawResponse?: unknown
+  /** Provider-native container/session metadata, when returned. */
+  container?: {
+    id: string
+    expiresAt?: string | null
+  }
   /**
    * If `openAICompletions` was true in the config, this field will contain the
    * response transformed into the standard OpenAI Chat Completion format.
