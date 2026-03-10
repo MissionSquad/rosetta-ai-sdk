@@ -57,6 +57,15 @@ type ServerToolUseAccumulator = {
   lastCode: string
 }
 
+type ToolUseAccumulator = {
+  id: string
+  name: string
+  jsonAccumulator: string
+  inputSnapshot: unknown
+  index: number
+  caller?: RosettaToolCaller
+}
+
 export class AnthropicMapper implements IProviderMapper {
   readonly provider = Provider.Anthropic
 
@@ -100,6 +109,31 @@ export class AnthropicMapper implements IProviderMapper {
     } catch {
       return null
     }
+  }
+
+  private tryPartialParseJSON(accumulator: string): unknown | undefined {
+    try {
+      return JSON.parse(accumulator) as unknown
+    } catch {
+      return undefined
+    }
+  }
+
+  private resolveStreamedToolInput(toolData: ToolUseAccumulator): unknown {
+    if (toolData.jsonAccumulator !== '') {
+      try {
+        return JSON.parse(toolData.jsonAccumulator) as unknown
+      } catch (parseError) {
+        throw new MappingError(
+          `Failed to parse arguments for tool '${toolData.name}' (ID: ${toolData.id})`,
+          this.provider,
+          'mapProviderStream validation',
+          parseError
+        )
+      }
+    }
+
+    return toolData.inputSnapshot ?? {}
   }
 
   private mapCodeExecutionResultChunk(block: CodeExecutionToolResultBlock): StreamChunk {
@@ -564,10 +598,7 @@ export class AnthropicMapper implements IProviderMapper {
     let finalFinishReason: string | null = null
     let thinkingStarted = false
     let model = ''
-    const toolCallArgAccumulators: Record<
-      string,
-      { id: string; name: string; args: string; index: number; caller?: RosettaToolCaller }
-    > = {}
+    const toolCallArgAccumulators: Record<string, ToolUseAccumulator> = {}
     const toolCallIdByIndex: Record<number, string> = {}
     const serverToolUseBlocks: Record<number, ServerToolUseAccumulator> = {}
     let aggregatedResult: GenerateResult | null = null
@@ -620,7 +651,8 @@ export class AnthropicMapper implements IProviderMapper {
               toolCallArgAccumulators[toolUse.id] = {
                 id: toolUse.id,
                 name: toolUse.name,
-                args: '',
+                jsonAccumulator: '',
+                inputSnapshot: toolUse.input,
                 index,
                 caller: this.extractToolCaller(toolUse.caller)
               }
@@ -684,7 +716,12 @@ export class AnthropicMapper implements IProviderMapper {
               }
               const currentToolCallId = toolCallIdByIndex[index]
               if (currentToolCallId && toolCallArgAccumulators[currentToolCallId]) {
-                toolCallArgAccumulators[currentToolCallId].args += event.delta.partial_json
+                const toolData = toolCallArgAccumulators[currentToolCallId]
+                toolData.jsonAccumulator += event.delta.partial_json
+                const partialInput = this.tryPartialParseJSON(toolData.jsonAccumulator)
+                if (partialInput !== undefined) {
+                  toolData.inputSnapshot = partialInput
+                }
                 yield {
                   type: 'tool_call_delta',
                   data: { index, id: currentToolCallId, functionArgumentChunk: event.delta.partial_json }
@@ -708,17 +745,7 @@ export class AnthropicMapper implements IProviderMapper {
               const toolDefinition = originalTools?.find(t => t.function.name === toolData.name)
 
               if (toolDefinition) {
-                let parsedArgs: any
-                try {
-                  parsedArgs = JSON.parse(toolData.args || '{}')
-                } catch (parseError) {
-                  throw new MappingError(
-                    `Failed to parse arguments for tool '${toolData.name}' (ID: ${toolData.id})`,
-                    this.provider,
-                    'mapProviderStream validation',
-                    parseError
-                  )
-                }
+                const parsedArgs = this.resolveStreamedToolInput(toolData)
                 const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
                 if (!validationResult.success) {
                   throw new ToolArgumentValidationError(
@@ -741,7 +768,10 @@ export class AnthropicMapper implements IProviderMapper {
                 aggregatedResult.toolCalls.push({
                   id: toolData.id,
                   type: 'function',
-                  function: { name: toolData.name, arguments: toolData.args }, // Store raw args
+                  function: {
+                    name: toolData.name,
+                    arguments: JSON.stringify(this.resolveStreamedToolInput(toolData))
+                  },
                   ...(toolData.caller ? { caller: toolData.caller } : {})
                 })
               }

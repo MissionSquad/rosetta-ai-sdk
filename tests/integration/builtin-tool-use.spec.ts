@@ -221,7 +221,8 @@ describeIf(hasOpenAIKey || hasAnthropicKey || hasGoogleKey || hasGroqKey)(
           expect(finalResult.toolCalls.length).toBeGreaterThanOrEqual(1)
           const weatherCall = finalResult.toolCalls.find((tc: any) => tc.function.name === 'get_current_weather')
           expect(weatherCall).toBeDefined()
-          expect(weatherCall.function.arguments).toBe(toolCallArgs)
+          expect(() => JSON.parse(weatherCall.function.arguments)).not.toThrow()
+          expect(JSON.parse(weatherCall.function.arguments)).toEqual(parsedArgs)
         } catch (error) {
           // Log errors for debugging CI issues
           console.error(`Error during ${provider} stream test:`, error)

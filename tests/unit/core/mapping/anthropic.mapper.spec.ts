@@ -12,6 +12,7 @@ import {
   InvalidToolDefinitionError,
   MappingError,
   ProviderAPIError,
+  ToolArgumentValidationError,
   UnsupportedFeatureError
 } from '../../../../src/errors'
 import Anthropic from '@anthropic-ai/sdk'
@@ -745,8 +746,158 @@ describe('Anthropic Mapper', () => {
       const finalResult = (results[7] as any).data.result
       expect(finalResult.content).toBeNull()
       expect(finalResult.toolCalls).toEqual([
-        { id: toolCallId, type: 'function', function: { name: toolName, arguments: '{"arg": 123}' } }
+        { id: toolCallId, type: 'function', function: { name: toolName, arguments: '{"arg":123}' } }
       ])
+    })
+
+    it('[Hard] should handle tool calls whose full input arrives in content_block_start', async () => {
+      const toolCallId = 'toolu_stream_start_only'
+      const toolName = 'stream_tool'
+      const toolParams: GenerateParams = {
+        ...baseOriginalParams,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: toolName,
+              parameters: { type: 'object', properties: { arg: { type: 'number' } } },
+              zodSchema: z.object({ arg: z.number() })
+            }
+          }
+        ]
+      }
+
+      const events: RawMessageStreamEvent[] = [
+        baseMessageStart,
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: 'tool_use',
+            id: toolCallId,
+            name: toolName,
+            input: { arg: 321 },
+            caller: { type: 'direct' }
+          }
+        },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 2 } },
+        { type: 'message_stop' }
+      ]
+
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), toolParams)
+      const results = await collectStreamChunks(stream)
+
+      expect(results[1]).toEqual({
+        type: 'tool_call_start',
+        data: { index: 0, toolCall: { id: toolCallId, type: 'function', function: { name: toolName } } }
+      })
+      expect(results[2]).toEqual({ type: 'tool_call_done', data: { index: 0, id: toolCallId } })
+      expect(results[5].type).toBe('final_result')
+      expect((results[5] as any).data.result.toolCalls).toEqual([
+        {
+          id: toolCallId,
+          type: 'function',
+          function: { name: toolName, arguments: '{"arg":321}' },
+          caller: { type: 'direct' }
+        }
+      ])
+    })
+
+    it('[Hard] should prefer streamed input deltas over content_block_start snapshots for tool calls', async () => {
+      const toolCallId = 'toolu_stream_delta_override'
+      const toolName = 'stream_tool'
+      const toolParams: GenerateParams = {
+        ...baseOriginalParams,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: toolName,
+              parameters: { type: 'object', properties: { arg: { type: 'number' } } },
+              zodSchema: z.object({ arg: z.number() })
+            }
+          }
+        ]
+      }
+
+      const events: RawMessageStreamEvent[] = [
+        baseMessageStart,
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: 'tool_use',
+            id: toolCallId,
+            name: toolName,
+            input: { arg: 1 },
+            caller: { type: 'direct' }
+          }
+        },
+        { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"arg":' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: ' 999}' } },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 2 } },
+        { type: 'message_stop' }
+      ]
+
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), toolParams)
+      const results = await collectStreamChunks(stream)
+
+      expect((results[7] as any).data.result.toolCalls).toEqual([
+        {
+          id: toolCallId,
+          type: 'function',
+          function: { name: toolName, arguments: '{"arg":999}' },
+          caller: { type: 'direct' }
+        }
+      ])
+    })
+
+    it('[Hard] should yield a validation error when start-only input is invalid', async () => {
+      const toolCallId = 'toolu_stream_invalid_start'
+      const toolName = 'stream_tool'
+      const toolParams: GenerateParams = {
+        ...baseOriginalParams,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: toolName,
+              parameters: { type: 'object', properties: { arg: { type: 'number' } } },
+              zodSchema: z.object({ arg: z.number() })
+            }
+          }
+        ]
+      }
+
+      const events: RawMessageStreamEvent[] = [
+        baseMessageStart,
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: 'tool_use',
+            id: toolCallId,
+            name: toolName,
+            input: {},
+            caller: { type: 'direct' }
+          }
+        },
+        { type: 'content_block_stop', index: 0 }
+      ]
+
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), toolParams)
+      const results = await collectStreamChunks(stream)
+
+      expect(results).toHaveLength(3)
+      expect(results[1]).toEqual({
+        type: 'tool_call_start',
+        data: { index: 0, toolCall: { id: toolCallId, type: 'function', function: { name: toolName } } }
+      })
+      expect(results[2].type).toBe('error')
+      const errorChunk = results[2] as { type: 'error'; data: { error: Error } }
+      expect(errorChunk.data.error).toBeInstanceOf(ToolArgumentValidationError)
     })
 
     it('[Hard] should handle thinking steps streaming', async () => {
