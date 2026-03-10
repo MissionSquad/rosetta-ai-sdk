@@ -936,6 +936,62 @@ describe('Anthropic Mapper', () => {
       })
     })
 
+    it('[Hard] should surface container info when Anthropic streams container on message_delta', async () => {
+      const toolCallId = 'toolu_stream_container_delta'
+      const toolName = 'stream_tool'
+      const toolParams: GenerateParams = {
+        ...baseOriginalParams,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: toolName,
+              parameters: { type: 'object', properties: { arg: { type: 'number' } } },
+              zodSchema: z.object({ arg: z.number() })
+            }
+          }
+        ]
+      }
+
+      const events: RawMessageStreamEvent[] = [
+        baseMessageStart,
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: 'tool_use',
+            id: toolCallId,
+            name: toolName,
+            input: { arg: 321 },
+            caller: { type: 'code_execution_20260120', tool_id: 'srvtoolu_container' }
+          }
+        },
+        { type: 'content_block_stop', index: 0 },
+        {
+          type: 'message_delta',
+          delta: {
+            container: { id: 'container_stream_delta', expires_at: '2026-03-10T12:00:00Z' },
+            stop_reason: 'tool_use',
+            stop_sequence: null
+          },
+          usage: { output_tokens: 2 }
+        },
+        { type: 'message_stop' }
+      ]
+
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), toolParams)
+      const results = await collectStreamChunks(stream)
+
+      expect(results[3]).toEqual({
+        type: 'container_info',
+        data: { containerId: 'container_stream_delta', expiresAt: '2026-03-10T12:00:00Z' }
+      })
+      expect((results[6] as any).data.result.container).toEqual({
+        id: 'container_stream_delta',
+        expiresAt: '2026-03-10T12:00:00Z'
+      })
+    })
+
     it('[Hard] should yield a validation error when start-only input is invalid', async () => {
       const toolCallId = 'toolu_stream_invalid_start'
       const toolName = 'stream_tool'
