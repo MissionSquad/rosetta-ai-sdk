@@ -857,6 +857,30 @@ export class AnthropicMapper implements IProviderMapper {
             }
             break
           case 'message_delta':
+            if (event.delta.container) {
+              const container = {
+                id: event.delta.container.id,
+                expiresAt: event.delta.container.expires_at
+              }
+              const shouldEmitContainerInfo =
+                !aggregatedResult?.container ||
+                aggregatedResult.container.id !== container.id ||
+                aggregatedResult.container.expiresAt !== container.expiresAt
+
+              if (shouldEmitContainerInfo) {
+                yield {
+                  type: 'container_info',
+                  data: {
+                    containerId: container.id,
+                    expiresAt: container.expiresAt
+                  }
+                }
+              }
+
+              if (aggregatedResult) {
+                aggregatedResult.container = container
+              }
+            }
             const deltaUsage = mapTokenUsage(event.usage)
             if (deltaUsage?.completionTokens !== undefined) {
               currentUsage = {
