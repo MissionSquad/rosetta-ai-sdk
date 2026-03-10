@@ -3,6 +3,8 @@ name: Build on PR open/push
 on:
   pull_request:
     types: [opened, synchronize]
+    paths-ignore:
+      - '**.md'
 
 jobs:
   build:

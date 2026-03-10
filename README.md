@@ -32,6 +32,7 @@ Built with Node.js v20+ and TypeScript v5.5+ in mind, it emphasizes type safety,
   - JSON Mode / Structured Output (`json_object` and `json_schema` modes; OpenAI/Azure/Google/Anthropic)
   - Grounding / Citations (Google)
   - Thinking Steps (Anthropic)
+  - Programmatic Tool Calling with container reuse and code-execution stream events (Anthropic)
 - **Provider Passthrough:** Forward provider-specific parameters (e.g., `presence_penalty`, `top_k`, `seed`) directly to the underlying API via `extraParams`, without losing unmapped fields.
 - **Type Safe:** Leverages TypeScript's strong typing for improved developer experience, autocompletion, and compile-time error checking.
 - **Robust Error Handling:** Provides classified errors (`ConfigurationError`, `ProviderAPIError`, `UnsupportedFeatureError`, `MappingError`) for easier debugging and programmatic handling.
@@ -47,6 +48,7 @@ This matrix provides a general guide to feature support across providers. Provid
 | Chat (Stream)       |       ✅       |    ✅     |   ✅   |  ✅  |     ❌     |           ✅           |                                        |
 | Image Input         |       ✅       |    ✅     |   ✅   |  ⚠️  |     ❌     |           ⚠️           | Groq/Custom support varies by model    |
 | Tool Use            |       ✅       |    ✅     |   ✅   |  ✅  |     ❌     |           ✅           | Implementation details differ slightly |
+| Programmatic Tool Calling |    ❌      |    ✅     |   ❌   |  ❌  |     ❌     |           ❌           | Anthropic only; requires provider/model support |
 | Embeddings          |       ✅       |    ❌     |   ✅   |  ✅  |     ❌     |           ⚠️           | Custom support varies                  |
 | JSON Mode           |       ✅       |    ⚠️     |   ⚠️   |  ⚠️  |     ❌     |           ✅           | Anthropic: `json_schema` only; see [Structured Output](#structured-output-json-mode--json-schema) |
 | Grounding/Citations |       ❌       |    ❌     |   ✅   |  ❌  |     ❌     |           ❌           | Via Google Search tool integration     |
@@ -504,6 +506,7 @@ try {
 Instruct models to use predefined tools (functions) to interact with external systems or data.
 
 ```typescript
+import { z } from 'zod'
 import { RosettaAI, Provider, RosettaTool, RosettaMessage, ProviderKey } from 'rosetta-ai-sdk'
 // ... initialization ...
 
@@ -517,7 +520,10 @@ const getWeatherTool: RosettaTool = {
       type: 'object',
       properties: { location: { type: 'string', description: 'City and state/country' } },
       required: ['location']
-    }
+    },
+    zodSchema: z.object({
+      location: z.string()
+    })
   }
 }
 
@@ -577,6 +583,40 @@ async function runToolConversation() {
 
 runToolConversation()
 ```
+
+#### Anthropic Programmatic Tool Calling
+
+RosettaAI also supports Anthropic's programmatic tool calling flow through the same `generate(...)` and `stream(...)` APIs. Enable it with `programmaticToolCalling: true` on a supported Anthropic model.
+
+```typescript
+const result = await rosetta.generate({
+  provider: Provider.Anthropic,
+  model: 'claude-sonnet-4-6',
+  messages: [{ role: 'user', content: 'Use tools to look up the weather in Paris.' }],
+  tools: [getWeatherTool],
+  programmaticToolCalling: true
+})
+
+if (result.toolCalls?.length) {
+  console.log(result.toolCalls[0].caller) // { type: 'code_execution_20260120', toolId: '...' } when provider-supplied
+}
+
+console.log(result.container) // { id, expiresAt? } when Anthropic returns a reusable container
+```
+
+When `programmaticToolCalling` is enabled for Anthropic:
+
+- Rosetta injects Anthropic code execution automatically and maps `RosettaTool.allowedCallers` onto Anthropic's `allowed_callers`
+- Returned tool calls may include `caller` metadata describing whether the invocation was direct or originated from code execution
+- Final results may include `container` metadata that must be reused on follow-up tool-result turns
+- Streaming may emit `container_info`, `code_execution_start`, `code_execution_delta`, and `code_execution_result` chunks in addition to the normal text and tool-call events
+
+Important constraints:
+
+- This is Anthropic-only and depends on the target model supporting programmatic tool calling
+- Do not combine it with a forced specific `toolChoice`; the Anthropic mapper rejects that combination
+- Do not pass `extraParams.disable_parallel_tool_use = true`; the Anthropic mapper rejects that combination
+- If you build your own multi-turn tool loop on top of RosettaAI, preserve Anthropic assistant `rawResponse.content` blocks by passing them back as `RosettaMessage.rawContentBlocks`, and reuse the returned `container` on the next request
 
 ### Multimodal (Image Input)
 
@@ -1440,6 +1480,13 @@ for await (const chunk of stream) {
 - **Use Chat Completions** for: Provider-agnostic code, simple Q&A, maximum portability
 
 See `examples/responses-api.ts` for a complete demonstration.
+
+For Anthropic chat streaming via `rosetta.stream(...)`, `StreamChunk` also includes programmatic tool calling events:
+
+- `container_info`
+- `code_execution_start`
+- `code_execution_delta`
+- `code_execution_result`
 
 ## API Reference
 
