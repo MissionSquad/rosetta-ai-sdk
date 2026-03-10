@@ -55,6 +55,7 @@ type ServerToolUseAccumulator = {
   id: string
   jsonAccumulator: string
   lastCode: string
+  inputSnapshot: unknown
 }
 
 type ToolUseAccumulator = {
@@ -134,6 +135,30 @@ export class AnthropicMapper implements IProviderMapper {
     }
 
     return toolData.inputSnapshot ?? {}
+  }
+
+  private resolveAccumulatedJSONInput(
+    accumulator: { id: string; jsonAccumulator: string; inputSnapshot: unknown },
+    contextLabel: string
+  ): unknown {
+    if (accumulator.jsonAccumulator !== '') {
+      try {
+        return JSON.parse(accumulator.jsonAccumulator) as unknown
+      } catch (parseError) {
+        throw new MappingError(
+          `Failed to parse streamed ${contextLabel} input (ID: ${accumulator.id})`,
+          this.provider,
+          'mapProviderStream validation',
+          parseError
+        )
+      }
+    }
+
+    return accumulator.inputSnapshot ?? {}
+  }
+
+  private cloneRawContentBlock<T>(block: T): T {
+    return JSON.parse(JSON.stringify(block)) as T
   }
 
   private mapCodeExecutionResultChunk(block: CodeExecutionToolResultBlock): StreamChunk {
@@ -601,6 +626,7 @@ export class AnthropicMapper implements IProviderMapper {
     const toolCallArgAccumulators: Record<string, ToolUseAccumulator> = {}
     const toolCallIdByIndex: Record<number, string> = {}
     const serverToolUseBlocks: Record<number, ServerToolUseAccumulator> = {}
+    const rawContentBlocksByIndex: Array<unknown | undefined> = []
     let aggregatedResult: GenerateResult | null = null
 
     try {
@@ -643,11 +669,13 @@ export class AnthropicMapper implements IProviderMapper {
             break
           case 'content_block_start':
             if (event.content_block.type === 'thinking') {
+              rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(event.content_block)
               yield { type: 'thinking_start' }
               thinkingStarted = true
             } else if (event.content_block.type === 'tool_use') {
               const toolUse = event.content_block
               const index = event.index
+              rawContentBlocksByIndex[index] = this.cloneRawContentBlock(toolUse)
               toolCallArgAccumulators[toolUse.id] = {
                 id: toolUse.id,
                 name: toolUse.name,
@@ -664,10 +692,12 @@ export class AnthropicMapper implements IProviderMapper {
             } else if (event.content_block.type === 'server_tool_use' && event.content_block.name === 'code_execution') {
               const serverToolUse = event.content_block
               const initialCode = this.extractCodeExecutionCode(serverToolUse.input)
+              rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(serverToolUse)
               serverToolUseBlocks[event.index] = {
                 id: serverToolUse.id,
                 jsonAccumulator: '',
-                lastCode: initialCode
+                lastCode: initialCode,
+                inputSnapshot: serverToolUse.input
               }
               yield {
                 type: 'code_execution_start',
@@ -677,13 +707,20 @@ export class AnthropicMapper implements IProviderMapper {
                 }
               }
             } else if (event.content_block.type === 'code_execution_tool_result') {
+              rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(event.content_block)
               yield this.mapCodeExecutionResultChunk(event.content_block)
+            } else {
+              rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(event.content_block)
             }
             break
           case 'content_block_delta':
             if (event.delta.type === 'text_delta') {
               yield { type: 'content_delta', data: { delta: event.delta.text } }
               if (aggregatedResult) aggregatedResult.content = (aggregatedResult.content ?? '') + event.delta.text
+              const rawTextBlock = rawContentBlocksByIndex[event.index] as { type?: string; text?: unknown } | undefined
+              if (rawTextBlock?.type === 'text') {
+                rawTextBlock.text = `${typeof rawTextBlock.text === 'string' ? rawTextBlock.text : ''}${event.delta.text}`
+              }
             } else if (event.delta.type === 'thinking_delta') {
               if (!thinkingStarted) {
                 yield { type: 'thinking_start' }
@@ -692,11 +729,29 @@ export class AnthropicMapper implements IProviderMapper {
               yield { type: 'thinking_delta', data: { delta: event.delta.thinking } }
               if (aggregatedResult)
                 aggregatedResult.thinkingSteps = (aggregatedResult.thinkingSteps ?? '') + event.delta.thinking
+              const rawThinkingBlock = rawContentBlocksByIndex[event.index] as
+                | { type?: string; thinking?: unknown }
+                | undefined
+              if (rawThinkingBlock?.type === 'thinking') {
+                rawThinkingBlock.thinking = `${
+                  typeof rawThinkingBlock.thinking === 'string' ? rawThinkingBlock.thinking : ''
+                }${event.delta.thinking}`
+              }
             } else if (event.delta.type === 'input_json_delta') {
               const index = event.index
               const serverToolUse = serverToolUseBlocks[index]
               if (serverToolUse) {
                 serverToolUse.jsonAccumulator += event.delta.partial_json
+                const partialInput = this.tryPartialParseJSON(serverToolUse.jsonAccumulator)
+                if (partialInput !== undefined) {
+                  serverToolUse.inputSnapshot = partialInput
+                  const rawServerToolUseBlock = rawContentBlocksByIndex[index] as
+                    | { type?: string; input?: unknown }
+                    | undefined
+                  if (rawServerToolUseBlock?.type === 'server_tool_use') {
+                    rawServerToolUseBlock.input = partialInput
+                  }
+                }
                 const parsedCode = this.tryExtractCodeFromAccumulatedJSON(serverToolUse.jsonAccumulator)
                 if (parsedCode !== null && parsedCode.startsWith(serverToolUse.lastCode)) {
                   const codeDelta = parsedCode.slice(serverToolUse.lastCode.length)
@@ -721,6 +776,10 @@ export class AnthropicMapper implements IProviderMapper {
                 const partialInput = this.tryPartialParseJSON(toolData.jsonAccumulator)
                 if (partialInput !== undefined) {
                   toolData.inputSnapshot = partialInput
+                  const rawToolUseBlock = rawContentBlocksByIndex[index] as { type?: string; input?: unknown } | undefined
+                  if (rawToolUseBlock?.type === 'tool_use') {
+                    rawToolUseBlock.input = partialInput
+                  }
                 }
                 yield {
                   type: 'tool_call_delta',
@@ -735,6 +794,13 @@ export class AnthropicMapper implements IProviderMapper {
             const stoppedEvent = event as RawContentBlockStopEvent
             const stoppedBlockIndex = stoppedEvent.index
             if (serverToolUseBlocks[stoppedBlockIndex]) {
+              const serverToolUse = serverToolUseBlocks[stoppedBlockIndex]
+              const rawServerToolUseBlock = rawContentBlocksByIndex[stoppedBlockIndex] as
+                | { type?: string; input?: unknown }
+                | undefined
+              if (rawServerToolUseBlock?.type === 'server_tool_use') {
+                rawServerToolUseBlock.input = this.resolveAccumulatedJSONInput(serverToolUse, 'server tool')
+              }
               delete serverToolUseBlocks[stoppedBlockIndex]
               break
             }
@@ -743,10 +809,10 @@ export class AnthropicMapper implements IProviderMapper {
             if (finishedToolCallId && toolCallArgAccumulators[finishedToolCallId]) {
               const toolData = toolCallArgAccumulators[finishedToolCallId]
               const toolDefinition = originalTools?.find(t => t.function.name === toolData.name)
+              const resolvedToolInput = this.resolveStreamedToolInput(toolData)
 
               if (toolDefinition) {
-                const parsedArgs = this.resolveStreamedToolInput(toolData)
-                const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
+                const validationResult = toolDefinition.function.zodSchema.safeParse(resolvedToolInput)
                 if (!validationResult.success) {
                   throw new ToolArgumentValidationError(
                     `Streamed arguments failed validation for tool '${toolData.name}'.`,
@@ -762,6 +828,13 @@ export class AnthropicMapper implements IProviderMapper {
               // Yield done chunk after validation (or skipping)
               yield { type: 'tool_call_done', data: { index: stoppedBlockIndex, id: finishedToolCallId } }
 
+              const rawToolUseBlock = rawContentBlocksByIndex[stoppedBlockIndex] as
+                | { type?: string; input?: unknown }
+                | undefined
+              if (rawToolUseBlock?.type === 'tool_use') {
+                rawToolUseBlock.input = resolvedToolInput
+              }
+
               // Add raw tool call to aggregated result
               if (aggregatedResult) {
                 aggregatedResult.toolCalls = aggregatedResult.toolCalls ?? []
@@ -770,7 +843,7 @@ export class AnthropicMapper implements IProviderMapper {
                   type: 'function',
                   function: {
                     name: toolData.name,
-                    arguments: JSON.stringify(this.resolveStreamedToolInput(toolData))
+                    arguments: JSON.stringify(resolvedToolInput)
                   },
                   ...(toolData.caller ? { caller: toolData.caller } : {})
                 })
@@ -819,6 +892,12 @@ export class AnthropicMapper implements IProviderMapper {
               aggregatedResult.finishReason = finalFinishReason
               if (aggregatedResult.content === '') aggregatedResult.content = null
               if (aggregatedResult.toolCalls?.length === 0) aggregatedResult.toolCalls = undefined
+              const rawContentBlocks = rawContentBlocksByIndex.filter(block => block !== undefined)
+              if (rawContentBlocks.length > 0) {
+                aggregatedResult.rawResponse = {
+                  content: rawContentBlocks
+                }
+              }
               yield { type: 'final_result', data: { result: aggregatedResult } }
             } else {
               console.warn('Message stop received but no aggregated result was built.')
