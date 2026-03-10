@@ -854,6 +854,88 @@ describe('Anthropic Mapper', () => {
       ])
     })
 
+    it('[Hard] should preserve streamed raw content blocks for programmatic tool replay', async () => {
+      const toolCallId = 'toolu_stream_replay'
+      const serverToolId = 'srvtoolu_stream_replay'
+      const toolName = 'stream_tool'
+      const toolParams: GenerateParams = {
+        ...baseOriginalParams,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: toolName,
+              parameters: { type: 'object', properties: { arg: { type: 'number' } } },
+              zodSchema: z.object({ arg: z.number() })
+            }
+          }
+        ]
+      }
+
+      const events: RawMessageStreamEvent[] = [
+        baseMessageStart,
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '', citations: null }
+        },
+        {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: 'Running programmatic tool...' }
+        },
+        { type: 'content_block_stop', index: 0 },
+        {
+          type: 'content_block_start',
+          index: 1,
+          content_block: {
+            type: 'server_tool_use',
+            id: serverToolId,
+            name: 'code_execution',
+            input: { code: 'result = await stream_tool({"arg": 321})' }
+          } as any
+        },
+        { type: 'content_block_stop', index: 1 },
+        {
+          type: 'content_block_start',
+          index: 2,
+          content_block: {
+            type: 'tool_use',
+            id: toolCallId,
+            name: toolName,
+            input: { arg: 321 },
+            caller: { type: 'code_execution_20260120', tool_id: serverToolId }
+          }
+        },
+        { type: 'content_block_stop', index: 2 },
+        { type: 'message_delta', delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 2 } },
+        { type: 'message_stop' }
+      ]
+
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), toolParams)
+      const results = await collectStreamChunks(stream)
+      const finalResult = (results[7] as any).data.result
+
+      expect(finalResult.rawResponse).toEqual({
+        content: [
+          { type: 'text', text: 'Running programmatic tool...', citations: null },
+          {
+            type: 'server_tool_use',
+            id: serverToolId,
+            name: 'code_execution',
+            input: { code: 'result = await stream_tool({"arg": 321})' }
+          },
+          {
+            type: 'tool_use',
+            id: toolCallId,
+            name: toolName,
+            input: { arg: 321 },
+            caller: { type: 'code_execution_20260120', tool_id: serverToolId }
+          }
+        ]
+      })
+    })
+
     it('[Hard] should yield a validation error when start-only input is invalid', async () => {
       const toolCallId = 'toolu_stream_invalid_start'
       const toolName = 'stream_tool'
