@@ -60,6 +60,11 @@ export interface RosettaMessage {
   toolCallId?: string
   /** Optional flag for tool messages indicating an error during execution. */
   isError?: boolean
+  /**
+   * Raw provider-native content blocks for assistant messages.
+   * Used when an upstream provider requires exact content-block echo-back.
+   */
+  rawContentBlocks?: unknown[]
 }
 
 /**
@@ -82,6 +87,10 @@ export interface RosettaTool<T extends z.ZodTypeAny = z.ZodTypeAny> {
     parameters: JSONSchema7 // Keep JSON Schema for provider mapping
     zodSchema: T // Add Zod schema for validation
   }
+  /**
+   * Provider-specific caller restrictions for tools that support programmatic invocation.
+   */
+  allowedCallers?: Array<'direct' | 'code_execution_20250825' | 'code_execution_20260120'>
 }
 
 /**
@@ -100,6 +109,13 @@ export interface RosettaToolCallRequest {
   function: {
     name: string
     arguments: string // Raw JSON string
+  }
+  /**
+   * Provider-specific caller metadata for tools that report invocation source.
+   */
+  caller?: {
+    type: 'direct' | 'code_execution_20250825' | 'code_execution_20260120'
+    toolId?: string
   }
 }
 

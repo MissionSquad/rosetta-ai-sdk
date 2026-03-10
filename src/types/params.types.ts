@@ -51,6 +51,15 @@ export interface GenerateParams {
    * Each tool must include a `zodSchema` for argument validation.
    */
   tools?: RosettaTool<any>[] // Use RosettaTool<any> for flexibility
+  /**
+   * Enables provider-native programmatic tool calling when supported.
+   * The Anthropic mapper uses this to inject code execution and tool caller metadata.
+   */
+  programmaticToolCalling?: boolean
+  /**
+   * Reuses an existing provider container/session for stateful code execution.
+   */
+  container?: string
   /** Controls whether the model is forced to call a tool ('required' or specific function), allowed to choose ('auto'), or prevented ('none'). */
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
 

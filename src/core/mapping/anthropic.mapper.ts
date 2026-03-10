@@ -2,14 +2,15 @@ import Anthropic, { APIError } from '@anthropic-ai/sdk'
 import {
   RawMessageStreamEvent,
   MessageParam as AnthropicMessageParam,
-  Tool as AnthropicToolParam, // Renamed import for clarity
+  ToolUnion as AnthropicToolParam,
   ThinkingConfigParam as AnthropicThinkingConfig,
   ContentBlockParam as AnthropicContentBlockParam,
   TextBlockParam as AnthropicTextBlockParam,
   ImageBlockParam as AnthropicImageBlockParam,
   RawContentBlockStopEvent,
   ToolUseBlockParam, // INPUT type for tool use
-  ToolResultBlockParam // INPUT type for tool result
+  ToolResultBlockParam, // INPUT type for tool result
+  CodeExecutionToolResultBlock
 } from '@anthropic-ai/sdk/resources/messages'
 import { Tool as AnthropicToolType } from '@anthropic-ai/sdk/resources'
 import {
@@ -48,8 +49,99 @@ import { mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
 // Type alias for the stream type from Anthropic SDK
 type AnthropicMessageStream = AsyncIterable<RawMessageStreamEvent>
 
+type RosettaToolCaller = NonNullable<RosettaToolCallRequest['caller']>
+
+type ServerToolUseAccumulator = {
+  id: string
+  jsonAccumulator: string
+  lastCode: string
+}
+
 export class AnthropicMapper implements IProviderMapper {
   readonly provider = Provider.Anthropic
+
+  private extractToolCaller(caller?: {
+    type: RosettaToolCaller['type']
+    tool_id?: string
+  }): RosettaToolCaller | undefined {
+    if (!caller) {
+      return undefined
+    }
+
+    return {
+      type: caller.type,
+      ...(('tool_id' in caller && typeof caller.tool_id === 'string') ? { toolId: caller.tool_id } : {})
+    }
+  }
+
+  private mapToolCallerToAnthropicParam(caller: RosettaToolCaller): ToolUseBlockParam['caller'] {
+    if (caller.type === 'direct') {
+      return { type: 'direct' }
+    }
+    if (caller.type === 'code_execution_20250825') {
+      return { type: 'code_execution_20250825', tool_id: caller.toolId ?? '' }
+    }
+    return { type: 'code_execution_20260120', tool_id: caller.toolId ?? '' }
+  }
+
+  private extractCodeExecutionCode(input: unknown): string {
+    if (typeof input !== 'object' || input === null || !('code' in input)) {
+      return ''
+    }
+
+    const candidate = (input as { code?: unknown }).code
+    return typeof candidate === 'string' ? candidate : ''
+  }
+
+  private tryExtractCodeFromAccumulatedJSON(accumulator: string): string | null {
+    try {
+      const parsed = JSON.parse(accumulator) as unknown
+      return this.extractCodeExecutionCode(parsed)
+    } catch {
+      return null
+    }
+  }
+
+  private mapCodeExecutionResultChunk(block: CodeExecutionToolResultBlock): StreamChunk {
+    const content = block.content
+
+    if (content.type === 'code_execution_result') {
+      return {
+        type: 'code_execution_result',
+        data: {
+          toolUseId: block.tool_use_id,
+          stdout: content.stdout,
+          stderr: content.stderr,
+          returnCode: content.return_code,
+          contentFileIds: content.content.map(output => output.file_id)
+        }
+      }
+    }
+
+    if (content.type === 'encrypted_code_execution_result') {
+      return {
+        type: 'code_execution_result',
+        data: {
+          toolUseId: block.tool_use_id,
+          stdout: '',
+          stderr: content.stderr,
+          returnCode: content.return_code,
+          encryptedStdout: content.encrypted_stdout
+        }
+      }
+    }
+
+    return {
+      type: 'code_execution_result',
+      data: {
+        toolUseId: block.tool_use_id,
+        stdout: '',
+        stderr: '',
+        returnCode: 1,
+        errorCode: content.error_code
+      }
+    }
+  }
 
   // --- Parameter Mapping ---
 
@@ -141,6 +233,11 @@ export class AnthropicMapper implements IProviderMapper {
           role: 'user',
           content: [toolResultBlock]
         })
+      } else if (msg.role === 'assistant' && Array.isArray(msg.rawContentBlocks) && msg.rawContentBlocks.length > 0) {
+        messages.push({
+          role: 'assistant',
+          content: msg.rawContentBlocks as AnthropicContentBlockParam[]
+        })
       } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
         const assistantContent = this.mapContentToAnthropic(msg.content)
         const contentBlocks: AnthropicContentBlockParam[] = []
@@ -170,7 +267,12 @@ export class AnthropicMapper implements IProviderMapper {
               type: 'tool_use',
               id: toolCall.id,
               name: toolCall.function.name,
-              input: JSON.parse(toolCall.function.arguments || '{}') // Parse arguments string
+              input: JSON.parse(toolCall.function.arguments || '{}'), // Parse arguments string
+              ...(toolCall.caller
+                ? {
+                    caller: this.mapToolCallerToAnthropicParam(toolCall.caller)
+                  }
+                : {})
             }
             contentBlocks.push(toolUseBlock)
           } catch (e) {
@@ -227,34 +329,52 @@ export class AnthropicMapper implements IProviderMapper {
     }
 
     // Map RosettaTool definitions to AnthropicToolParam
-    const tools: AnthropicToolParam[] | undefined = params.tools?.map(tool => {
-      if (tool.type !== 'function') {
-        throw new InvalidToolDefinitionError(`Unsupported tool type: ${tool.type}`, tool.function.name)
-      }
-      const inputSchemaSource = tool.function.parameters as JSONSchema7
+    const isProgrammaticToolCalling = params.programmaticToolCalling === true
+    if (isProgrammaticToolCalling && params.extraParams?.disable_parallel_tool_use === true) {
+      throw new UnsupportedFeatureError(this.provider, 'disable_parallel_tool_use with programmaticToolCalling')
+    }
 
-      // Validate that the schema type is 'object' as required by Anthropic
-      if (inputSchemaSource.type !== 'object') {
-        throw new InvalidToolDefinitionError(
-          `Invalid parameters schema for tool '${tool.function.name}'. Anthropic requires the top-level 'type' property to be exactly 'object'. Received: type='${inputSchemaSource.type}'`,
-          tool.function.name
-        )
-      }
+    const tools: AnthropicToolParam[] | undefined =
+      params.tools && params.tools.length > 0
+        ? [
+            ...(isProgrammaticToolCalling
+              ? ([{ type: 'code_execution_20260120', name: 'code_execution' }] as const)
+              : []),
+            ...params.tools.map(tool => {
+              if (tool.type !== 'function') {
+                throw new InvalidToolDefinitionError(`Unsupported tool type: ${tool.type}`, tool.function.name)
+              }
+              const inputSchemaSource = tool.function.parameters as JSONSchema7
 
-      // Ensure zodSchema exists
-      if (!tool.function.zodSchema) {
-        throw new InvalidToolDefinitionError(`Missing zodSchema for validation.`, tool.function.name)
-      }
+              // Validate that the schema type is 'object' as required by Anthropic
+              if (inputSchemaSource.type !== 'object') {
+                throw new InvalidToolDefinitionError(
+                  `Invalid parameters schema for tool '${tool.function.name}'. Anthropic requires the top-level 'type' property to be exactly 'object'. Received: type='${inputSchemaSource.type}'`,
+                  tool.function.name
+                )
+              }
 
-      // Cast is now safe because we've checked inputSchemaSource.type === 'object'
-      const inputSchema: AnthropicToolType.InputSchema = inputSchemaSource as AnthropicToolType.InputSchema
+              // Ensure zodSchema exists
+              if (!tool.function.zodSchema) {
+                throw new InvalidToolDefinitionError(`Missing zodSchema for validation.`, tool.function.name)
+              }
 
-      return {
-        name: tool.function.name,
-        description: tool.function.description,
-        input_schema: inputSchema // Assign the validated and asserted schema
-      }
-    })
+              // Cast is now safe because we've checked inputSchemaSource.type === 'object'
+              const inputSchema: AnthropicToolType.InputSchema = inputSchemaSource as AnthropicToolType.InputSchema
+
+              return {
+                name: tool.function.name,
+                description: tool.function.description,
+                input_schema: inputSchema,
+                ...(isProgrammaticToolCalling
+                  ? {
+                      allowed_callers: tool.allowedCallers ?? ['code_execution_20260120']
+                    }
+                  : {})
+              }
+            })
+          ]
+        : undefined
 
     const baseToolChoice = mapBaseToolChoice(params.toolChoice)
     let anthropicToolChoice: Anthropic.Messages.ToolChoice | undefined = undefined
@@ -264,6 +384,9 @@ export class AnthropicMapper implements IProviderMapper {
       } else if (baseToolChoice === 'required') {
         anthropicToolChoice = { type: 'any' }
       } else if (typeof baseToolChoice === 'object' && baseToolChoice.type === 'function') {
+        if (isProgrammaticToolCalling) {
+          throw new UnsupportedFeatureError(this.provider, 'forced toolChoice with programmaticToolCalling')
+        }
         anthropicToolChoice = { type: 'tool', name: baseToolChoice.function.name }
       } else {
         console.warn(`Unhandled baseToolChoice format: ${JSON.stringify(baseToolChoice)}`)
@@ -286,11 +409,11 @@ export class AnthropicMapper implements IProviderMapper {
       throw new UnsupportedFeatureError(this.provider, 'responseFormat: json_object (use json_schema)')
     }
 
-    const output_config =
+    const output_config: Anthropic.Messages.OutputConfig | undefined =
       params.responseFormat?.type === 'json_schema'
         ? {
             format: {
-              type: 'json_schema',
+              type: 'json_schema' as const,
               schema: params.responseFormat.json_schema.schema
             }
           }
@@ -310,7 +433,8 @@ export class AnthropicMapper implements IProviderMapper {
       tools: tools,
       tool_choice: anthropicToolChoice,
       ...(thinkingParam && { thinking: thinkingParam }),
-      ...(output_config && { output_config })
+      ...(output_config && { output_config }),
+      ...(params.container ? { container: params.container } : {})
     }
 
     if (params.stream) {
@@ -339,7 +463,8 @@ export class AnthropicMapper implements IProviderMapper {
           toolCalls.push({
             id: block.id,
             type: 'function',
-            function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) }
+            function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+            ...(this.extractToolCaller(block.caller) ? { caller: this.extractToolCaller(block.caller) } : {})
           })
           continue
         }
@@ -359,7 +484,8 @@ export class AnthropicMapper implements IProviderMapper {
         toolCalls.push({
           id: block.id,
           type: 'function',
-          function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) } // Return raw string args
+          function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) }, // Return raw string args
+          ...(this.extractToolCaller(block.caller) ? { caller: this.extractToolCaller(block.caller) } : {})
         })
       }
     }
@@ -415,7 +541,15 @@ export class AnthropicMapper implements IProviderMapper {
       citations: undefined,
       parsedContent: null,
       model: response.model ?? model,
-      rawResponse: response
+      rawResponse: response,
+      ...(response.container
+        ? {
+            container: {
+              id: response.container.id,
+              expiresAt: response.container.expires_at
+            }
+          }
+        : {})
     }
   }
 
@@ -430,8 +564,12 @@ export class AnthropicMapper implements IProviderMapper {
     let finalFinishReason: string | null = null
     let thinkingStarted = false
     let model = ''
-    const toolCallArgAccumulators: Record<string, { id: string; name: string; args: string; index: number }> = {}
+    const toolCallArgAccumulators: Record<
+      string,
+      { id: string; name: string; args: string; index: number; caller?: RosettaToolCaller }
+    > = {}
     const toolCallIdByIndex: Record<number, string> = {}
+    const serverToolUseBlocks: Record<number, ServerToolUseAccumulator> = {}
     let aggregatedResult: GenerateResult | null = null
 
     try {
@@ -457,6 +595,20 @@ export class AnthropicMapper implements IProviderMapper {
               parsedContent: null,
               rawResponse: undefined
             }
+            if (event.message.container) {
+              const container = {
+                id: event.message.container.id,
+                expiresAt: event.message.container.expires_at
+              }
+              yield {
+                type: 'container_info',
+                data: {
+                  containerId: container.id,
+                  expiresAt: container.expiresAt
+                }
+              }
+              aggregatedResult.container = container
+            }
             break
           case 'content_block_start':
             if (event.content_block.type === 'thinking') {
@@ -465,12 +617,35 @@ export class AnthropicMapper implements IProviderMapper {
             } else if (event.content_block.type === 'tool_use') {
               const toolUse = event.content_block
               const index = event.index
-              toolCallArgAccumulators[toolUse.id] = { id: toolUse.id, name: toolUse.name, args: '', index }
+              toolCallArgAccumulators[toolUse.id] = {
+                id: toolUse.id,
+                name: toolUse.name,
+                args: '',
+                index,
+                caller: this.extractToolCaller(toolUse.caller)
+              }
               toolCallIdByIndex[index] = toolUse.id
               yield {
                 type: 'tool_call_start',
                 data: { index, toolCall: { id: toolUse.id, type: 'function', function: { name: toolUse.name } } }
               }
+            } else if (event.content_block.type === 'server_tool_use' && event.content_block.name === 'code_execution') {
+              const serverToolUse = event.content_block
+              const initialCode = this.extractCodeExecutionCode(serverToolUse.input)
+              serverToolUseBlocks[event.index] = {
+                id: serverToolUse.id,
+                jsonAccumulator: '',
+                lastCode: initialCode
+              }
+              yield {
+                type: 'code_execution_start',
+                data: {
+                  id: serverToolUse.id,
+                  code: initialCode
+                }
+              }
+            } else if (event.content_block.type === 'code_execution_tool_result') {
+              yield this.mapCodeExecutionResultChunk(event.content_block)
             }
             break
           case 'content_block_delta':
@@ -487,6 +662,26 @@ export class AnthropicMapper implements IProviderMapper {
                 aggregatedResult.thinkingSteps = (aggregatedResult.thinkingSteps ?? '') + event.delta.thinking
             } else if (event.delta.type === 'input_json_delta') {
               const index = event.index
+              const serverToolUse = serverToolUseBlocks[index]
+              if (serverToolUse) {
+                serverToolUse.jsonAccumulator += event.delta.partial_json
+                const parsedCode = this.tryExtractCodeFromAccumulatedJSON(serverToolUse.jsonAccumulator)
+                if (parsedCode !== null && parsedCode.startsWith(serverToolUse.lastCode)) {
+                  const codeDelta = parsedCode.slice(serverToolUse.lastCode.length)
+                  if (codeDelta.length > 0) {
+                    serverToolUse.lastCode = parsedCode
+                    yield {
+                      type: 'code_execution_delta',
+                      data: {
+                        id: serverToolUse.id,
+                        codeDelta,
+                        snapshot: parsedCode
+                      }
+                    }
+                  }
+                }
+                break
+              }
               const currentToolCallId = toolCallIdByIndex[index]
               if (currentToolCallId && toolCallArgAccumulators[currentToolCallId]) {
                 toolCallArgAccumulators[currentToolCallId].args += event.delta.partial_json
@@ -502,6 +697,10 @@ export class AnthropicMapper implements IProviderMapper {
           case 'content_block_stop':
             const stoppedEvent = event as RawContentBlockStopEvent
             const stoppedBlockIndex = stoppedEvent.index
+            if (serverToolUseBlocks[stoppedBlockIndex]) {
+              delete serverToolUseBlocks[stoppedBlockIndex]
+              break
+            }
             const finishedToolCallId = toolCallIdByIndex[stoppedBlockIndex]
 
             if (finishedToolCallId && toolCallArgAccumulators[finishedToolCallId]) {
@@ -542,7 +741,8 @@ export class AnthropicMapper implements IProviderMapper {
                 aggregatedResult.toolCalls.push({
                   id: toolData.id,
                   type: 'function',
-                  function: { name: toolData.name, arguments: toolData.args } // Store raw args
+                  function: { name: toolData.name, arguments: toolData.args }, // Store raw args
+                  ...(toolData.caller ? { caller: toolData.caller } : {})
                 })
               }
               delete toolCallArgAccumulators[finishedToolCallId]
