@@ -266,7 +266,8 @@ export class AnthropicMapper implements IProviderMapper {
     let systemPrompt: string | undefined = undefined
     const messages: AnthropicMessageParam[] = []
 
-    for (const msg of params.messages) {
+    for (let i = 0; i < params.messages.length; i++) {
+      const msg = params.messages[i]!
       if (msg.role === 'system') {
         if (systemPrompt) throw new MappingError('Multiple system messages not supported by Anthropic.', this.provider)
         if (typeof msg.content !== 'string')
@@ -275,23 +276,36 @@ export class AnthropicMapper implements IProviderMapper {
         continue
       }
       if (msg.role === 'tool') {
-        if (!msg.toolCallId || typeof msg.content !== 'string') {
-          throw new MappingError(
-            'Invalid tool result message format for Anthropic. Requires toolCallId and string content.',
-            this.provider
-          )
+        const toolResultBlocks: ToolResultBlockParam[] = []
+        let toolMsgIndex = i
+
+        while (toolMsgIndex < params.messages.length) {
+          const toolMsg = params.messages[toolMsgIndex]!
+          if (toolMsg.role !== 'tool') {
+            break
+          }
+          if (!toolMsg.toolCallId || typeof toolMsg.content !== 'string') {
+            throw new MappingError(
+              'Invalid tool result message format for Anthropic. Requires toolCallId and string content.',
+              this.provider
+            )
+          }
+
+          toolResultBlocks.push({
+            type: 'tool_result',
+            tool_use_id: toolMsg.toolCallId,
+            content: toolMsg.content,
+            is_error: toolMsg.isError
+          })
+
+          toolMsgIndex += 1
         }
-        // Map RosettaToolResult (role='tool') to Anthropic's user message with tool_result block
-        const toolResultBlock: ToolResultBlockParam = {
-          type: 'tool_result',
-          tool_use_id: msg.toolCallId,
-          content: msg.content, // Assuming content is already stringified JSON or simple string
-          is_error: msg.isError // Pass the error flag if present
-        }
+
         messages.push({
           role: 'user',
-          content: [toolResultBlock]
+          content: toolResultBlocks
         })
+        i = toolMsgIndex - 1
       } else if (msg.role === 'assistant' && Array.isArray(msg.rawContentBlocks) && msg.rawContentBlocks.length > 0) {
         messages.push({
           role: 'assistant',
@@ -736,6 +750,13 @@ export class AnthropicMapper implements IProviderMapper {
                 rawThinkingBlock.thinking = `${
                   typeof rawThinkingBlock.thinking === 'string' ? rawThinkingBlock.thinking : ''
                 }${event.delta.thinking}`
+              }
+            } else if (event.delta.type === 'signature_delta') {
+              const rawThinkingBlock = rawContentBlocksByIndex[event.index] as
+                | { type?: string; signature?: unknown }
+                | undefined
+              if (rawThinkingBlock?.type === 'thinking') {
+                rawThinkingBlock.signature = event.delta.signature
               }
             } else if (event.delta.type === 'input_json_delta') {
               const index = event.index

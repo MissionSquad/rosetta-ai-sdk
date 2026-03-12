@@ -184,6 +184,43 @@ describe('Anthropic Mapper', () => {
       ])
     })
 
+    it('[Medium] should coalesce consecutive tool result messages into a single Anthropic user message', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Use both tools.' },
+          {
+            role: 'assistant',
+            content: null,
+            toolCalls: [
+              { id: 'tool_1', type: 'function', function: { name: 'tool_one', arguments: '{"a":1}' } },
+              { id: 'tool_2', type: 'function', function: { name: 'tool_two', arguments: '{"b":2}' } }
+            ]
+          },
+          { role: 'tool', toolCallId: 'tool_1', content: '{"result":"one"}' },
+          { role: 'tool', toolCallId: 'tool_2', content: '{"result":"two"}' }
+        ]
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.messages).toEqual([
+        { role: 'user', content: 'Use both tools.' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'tool_1', name: 'tool_one', input: { a: 1 } },
+            { type: 'tool_use', id: 'tool_2', name: 'tool_two', input: { b: 2 } }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'tool_1', content: '{"result":"one"}', is_error: undefined },
+            { type: 'tool_result', tool_use_id: 'tool_2', content: '{"result":"two"}', is_error: undefined }
+          ]
+        }
+      ])
+    })
+
     it('[Easy] should map tools correctly', () => {
       const params: GenerateParams = {
         ...baseParams,
@@ -1044,6 +1081,7 @@ describe('Anthropic Mapper', () => {
         { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } as ThinkingBlock },
         { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Step 1...' } },
         { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Step 2.' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig_123' } },
         { type: 'content_block_stop', index: 0 },
         { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '', citations: null } },
         { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Answer.' } },
@@ -1068,6 +1106,12 @@ describe('Anthropic Mapper', () => {
       const finalResult = (results[8] as any).data.result
       expect(finalResult.content).toBe('Answer.')
       expect(finalResult.thinkingSteps).toBe('Step 1...Step 2.')
+      expect(finalResult.rawResponse).toEqual({
+        content: [
+          { type: 'thinking', thinking: 'Step 1...Step 2.', signature: 'sig_123' },
+          { type: 'text', text: 'Answer.', citations: null }
+        ]
+      })
     })
 
     it('[Hard] should handle stream error', async () => {
