@@ -1,6 +1,5 @@
 import {
   Content,
-  FunctionCall,
   Tool,
   GenerateContentParameters,
   GenerateContentConfig,
@@ -322,7 +321,12 @@ export class GoogleMapper implements IProviderMapper {
       if (googleRole === 'model' && msg.toolCalls && msg.toolCalls.length > 0) {
         const functionCallParts: Part[] = msg.toolCalls.map(tc => {
           try {
-            return { functionCall: { name: tc.function.name, args: JSON.parse(tc.function.arguments) } }
+            const part: Part = { functionCall: { name: tc.function.name, args: JSON.parse(tc.function.arguments) } }
+            // Re-attach thought signature if present (required by Gemini 3+ for function calling)
+            if (tc.providerMetadata?.thoughtSignature) {
+              part.thoughtSignature = tc.providerMetadata.thoughtSignature as string
+            }
+            return part
           } catch (e) {
             throw new MappingError(
               `Failed to parse arguments for tool ${tc.function.name}`,
@@ -523,16 +527,22 @@ export class GoogleMapper implements IProviderMapper {
 
   // --- Result Mapping ---
 
-  private mapToolCallsFromGoogle(calls: FunctionCall[] | undefined): RosettaToolCallRequest[] | undefined {
-    if (!calls || calls.length === 0) return undefined
-    return calls
-      .filter(call => call?.name)
-      .map((call, index) => {
-        return {
-          id: `google_func_${call.name}_${index}_${Date.now()}`,
+  private mapToolCallsFromGoogle(functionCallParts: Part[] | undefined): RosettaToolCallRequest[] | undefined {
+    if (!functionCallParts || functionCallParts.length === 0) return undefined
+    return functionCallParts
+      .filter(part => part.functionCall?.name)
+      .map((part, index) => {
+        const call = part.functionCall!
+        const toolCall: RosettaToolCallRequest = {
+          id: call.id || `google_func_${call.name}_${index}_${Date.now()}`,
           type: 'function',
           function: { name: call.name!, arguments: JSON.stringify(call.args ?? {}) }
         }
+        // Preserve thought signature for echo-back in subsequent requests (required by Gemini 3+)
+        if (part.thoughtSignature) {
+          toolCall.providerMetadata = { thoughtSignature: part.thoughtSignature }
+        }
+        return toolCall
       })
   }
 
@@ -612,8 +622,7 @@ export class GoogleMapper implements IProviderMapper {
 
       const functionCallParts = candidate.content.parts.filter((p): p is Part => p && 'functionCall' in p)
       if (functionCallParts.length > 0) {
-        const functionCalls = functionCallParts.map(p => p.functionCall).filter((fc): fc is FunctionCall => fc !== undefined)
-        const mappedCalls = this.mapToolCallsFromGoogle(functionCalls)
+        const mappedCalls = this.mapToolCallsFromGoogle(functionCallParts)
         if (mappedCalls && mappedCalls.length > 0) {
           toolCalls = mappedCalls
           if (!['SAFETY', 'RECITATION', 'MAX_TOKENS'].includes(candidateFinishReason ?? '')) {
@@ -741,8 +750,7 @@ export class GoogleMapper implements IProviderMapper {
             )
 
             if (functionCallParts && functionCallParts.length > 0) {
-              const functionCalls = functionCallParts.map(p => p.functionCall).filter((fc): fc is FunctionCall => fc !== undefined)
-              const newCalls = this.mapToolCallsFromGoogle(functionCalls)
+              const newCalls = this.mapToolCallsFromGoogle(functionCallParts)
               if (newCalls) {
                 for (const tc of newCalls) {
                   // Check if this specific tool call ID has already been fully processed and added

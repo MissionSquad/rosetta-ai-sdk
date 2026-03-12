@@ -117,6 +117,11 @@ export interface RosettaToolCallRequest {
     type: 'direct' | 'code_execution_20250825' | 'code_execution_20260120'
     toolId?: string
   }
+  /**
+   * Provider-specific metadata that must be echoed back in subsequent requests.
+   * Used by Google Gemini to carry thought signatures through the tool-calling loop.
+   */
+  providerMetadata?: Record<string, unknown>
 }
 
 /**
