@@ -3066,10 +3066,10 @@ onetime@^5.1.0, onetime@^5.1.2:
   dependencies:
     mimic-fn "^2.1.0"
 
-openai@^6.8.1:
-  version "6.8.1"
-  resolved "https://registry.npmjs.org/openai/-/openai-6.8.1.tgz"
-  integrity sha512-ACifslrVgf+maMz9vqwMP4+v9qvx5Yzssydizks8n+YUJ6YwUoxj51sKRQ8HYMfR6wgKLSIlaI108ZwCk+8yig==
+openai@^6.27.0:
+  version "6.27.0"
+  resolved "https://registry.npmjs.org/openai/-/openai-6.27.0.tgz#eabaea9ce6904a8b2e6b2ac0a9d69b527d95ecf6"
+  integrity sha512-osTKySlrdYrLYTt0zjhY8yp0JUBmWDCN+Q+QxsV4xMQnnoVFpylgKGgxwN8sSdTNw0G4y+WUXs4eCMWpyDNWZQ==
 
 optionator@^0.8.3:
   version "0.8.3"
