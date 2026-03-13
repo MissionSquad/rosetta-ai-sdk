@@ -1,5 +1,5 @@
 import { VoiceSettings } from '@elevenlabs/elevenlabs-js/api'
-import { RosettaToolCallRequest, Citation, ProviderKey } from './common.types'
+import { RosettaToolCallRequest, Citation, ProviderKey, GenerateResultProviderState } from './common.types'
 import { OpenAICompletion } from './openai.types' // Import the new type
 
 /**
@@ -36,6 +36,8 @@ export interface GenerateResult {
   model: string
   /** The raw response object from the underlying SDK (use with caution, structure varies). */
   rawResponse?: unknown
+  /** Provider-specific response state for downstream persistence and replay. */
+  providerState?: GenerateResultProviderState
   /** Provider-native container/session metadata, when returned. */
   container?: {
     id: string

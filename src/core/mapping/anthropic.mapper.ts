@@ -161,6 +161,67 @@ export class AnthropicMapper implements IProviderMapper {
     return JSON.parse(JSON.stringify(block)) as T
   }
 
+  private cloneRawContentBlocks(blocks: unknown[]): unknown[] {
+    return blocks.map(block => this.cloneRawContentBlock(block))
+  }
+
+  private getAnthropicMessageRawContentBlocks(msg: RosettaMessage): unknown[] | undefined {
+    const providerStateBlocks = msg.providerState?.anthropic?.rawContentBlocks
+    if (Array.isArray(providerStateBlocks) && providerStateBlocks.length > 0) {
+      return this.cloneRawContentBlocks(providerStateBlocks)
+    }
+
+    if (Array.isArray(msg.rawContentBlocks) && msg.rawContentBlocks.length > 0) {
+      return this.cloneRawContentBlocks(msg.rawContentBlocks)
+    }
+
+    return undefined
+  }
+
+  private getAnthropicContainerId(params: GenerateParams): string | undefined {
+    const providerStateContainerId = params.providerState?.anthropic?.containerId
+    if (typeof providerStateContainerId === 'string' && providerStateContainerId.trim() !== '') {
+      return providerStateContainerId
+    }
+
+    if (typeof params.container === 'string' && params.container.trim() !== '') {
+      return params.container
+    }
+
+    return undefined
+  }
+
+  private mergeAnthropicResultProviderState(
+    existing: GenerateResult['providerState'] | undefined,
+    incoming: {
+      containerId?: string
+      expiresAt?: string | null
+      rawContentBlocks?: unknown[]
+    }
+  ): GenerateResult['providerState'] | undefined {
+    const anthropicState: {
+      containerId?: string
+      expiresAt?: string | null
+      rawContentBlocks?: unknown[]
+    } = {
+      ...(existing?.anthropic ?? {})
+    }
+
+    if (typeof incoming.containerId === 'string' && incoming.containerId.trim() !== '') {
+      anthropicState.containerId = incoming.containerId
+    }
+
+    if (incoming.expiresAt !== undefined) {
+      anthropicState.expiresAt = incoming.expiresAt
+    }
+
+    if (Array.isArray(incoming.rawContentBlocks) && incoming.rawContentBlocks.length > 0) {
+      anthropicState.rawContentBlocks = this.cloneRawContentBlocks(incoming.rawContentBlocks)
+    }
+
+    return Object.keys(anthropicState).length > 0 ? { anthropic: anthropicState } : undefined
+  }
+
   private mapCodeExecutionResultChunk(block: CodeExecutionToolResultBlock): StreamChunk {
     const content = block.content
 
@@ -306,93 +367,100 @@ export class AnthropicMapper implements IProviderMapper {
           content: toolResultBlocks
         })
         i = toolMsgIndex - 1
-      } else if (msg.role === 'assistant' && Array.isArray(msg.rawContentBlocks) && msg.rawContentBlocks.length > 0) {
-        messages.push({
-          role: 'assistant',
-          content: msg.rawContentBlocks as AnthropicContentBlockParam[]
-        })
-      } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-        const assistantContent = this.mapContentToAnthropic(msg.content)
-        const contentBlocks: AnthropicContentBlockParam[] = []
+      } else {
+        const rawContentBlocks = msg.role === 'assistant' ? this.getAnthropicMessageRawContentBlocks(msg) : undefined
+        if (msg.role === 'assistant' && rawContentBlocks) {
+          messages.push({
+            role: 'assistant',
+            content: rawContentBlocks as AnthropicContentBlockParam[]
+          })
+          continue
+        }
 
-        // Add text block if assistantContent is a non-empty string or a non-empty array containing text
-        if (typeof assistantContent === 'string' && assistantContent.length > 0) {
-          contentBlocks.push({ type: 'text', text: assistantContent })
-        } else if (Array.isArray(assistantContent)) {
-          assistantContent.forEach(block => {
-            if (block.type === 'text' || block.type === 'image') {
-              // @ts-ignore - Assuming block.source.data exists for image block if type is image
-              if (block.type === 'text' || (block.type === 'image' && block.source.data)) {
-                contentBlocks.push(block)
+        if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+          const assistantContent = this.mapContentToAnthropic(msg.content)
+          const contentBlocks: AnthropicContentBlockParam[] = []
+
+          // Add text block if assistantContent is a non-empty string or a non-empty array containing text
+          if (typeof assistantContent === 'string' && assistantContent.length > 0) {
+            contentBlocks.push({ type: 'text', text: assistantContent })
+          } else if (Array.isArray(assistantContent)) {
+            assistantContent.forEach(block => {
+              if (block.type === 'text' || block.type === 'image') {
+                // @ts-ignore - Assuming block.source.data exists for image block if type is image
+                if (block.type === 'text' || (block.type === 'image' && block.source.data)) {
+                  contentBlocks.push(block)
+                }
+              } else {
+                console.warn(
+                  `Ignoring unexpected content block type '${block.type}' in assistant message with tool calls.`
+                )
               }
-            } else {
-              console.warn(
-                `Ignoring unexpected content block type '${block.type}' in assistant message with tool calls.`
+            })
+          }
+
+          // Add tool_use blocks
+          msg.toolCalls.forEach(toolCall => {
+            try {
+              const toolUseBlock: ToolUseBlockParam = {
+                type: 'tool_use',
+                id: toolCall.id,
+                name: toolCall.function.name,
+                input: JSON.parse(toolCall.function.arguments || '{}'), // Parse arguments string
+                ...(toolCall.caller
+                  ? {
+                      caller: this.mapToolCallerToAnthropicParam(toolCall.caller)
+                    }
+                  : {})
+              }
+              contentBlocks.push(toolUseBlock)
+            } catch (e) {
+              throw new MappingError(
+                `Failed to parse arguments for tool_use block ${toolCall.id}`,
+                this.provider,
+                'mapToProviderParams toolCall mapping',
+                e
               )
             }
           })
-        }
 
-        // Add tool_use blocks
-        msg.toolCalls.forEach(toolCall => {
-          try {
-            const toolUseBlock: ToolUseBlockParam = {
-              type: 'tool_use',
-              id: toolCall.id,
-              name: toolCall.function.name,
-              input: JSON.parse(toolCall.function.arguments || '{}'), // Parse arguments string
-              ...(toolCall.caller
-                ? {
-                    caller: this.mapToolCallerToAnthropicParam(toolCall.caller)
-                  }
-                : {})
+          if (contentBlocks.length === 0) {
+            // This case should only happen if toolCalls were present but msg.content was null/empty
+            // and resulted in an empty contentBlocks array. Anthropic requires at least one block.
+            if (msg.toolCalls.length === 0) {
+              // This sub-case should theoretically not be reachable if msg.toolCalls.length > 0 check passed
+              throw new MappingError(
+                'Assistant message resulted in empty content blocks without tool calls.',
+                this.provider
+              )
             }
-            contentBlocks.push(toolUseBlock)
-          } catch (e) {
-            throw new MappingError(
-              `Failed to parse arguments for tool_use block ${toolCall.id}`,
-              this.provider,
-              'mapToProviderParams toolCall mapping',
-              e
-            )
+            // If only tool_use blocks exist, that's valid.
           }
-        })
 
-        if (contentBlocks.length === 0) {
-          // This case should only happen if toolCalls were present but msg.content was null/empty
-          // and resulted in an empty contentBlocks array. Anthropic requires at least one block.
-          if (msg.toolCalls.length === 0) {
-            // This sub-case should theoretically not be reachable if msg.toolCalls.length > 0 check passed
-            throw new MappingError(
-              'Assistant message resulted in empty content blocks without tool calls.',
-              this.provider
-            )
+          messages.push({ role: 'assistant', content: contentBlocks })
+        } else {
+          // Handle regular user/assistant messages
+          const mappedContent = this.mapContentToAnthropic(msg.content)
+          // Anthropic requires non-empty content for user/assistant roles unless it's purely tool calls/results
+          if (
+            (msg.role === 'user' || msg.role === 'assistant') &&
+            ((typeof mappedContent === 'string' && mappedContent === '') ||
+              (Array.isArray(mappedContent) && mappedContent.length === 0))
+          ) {
+            // Allow empty assistant message only if it contains tool calls (handled above)
+            if (msg.role !== 'assistant' || !msg.toolCalls || msg.toolCalls.length === 0) {
+              throw new MappingError(
+                `Role '${msg.role}' requires non-empty content for Anthropic. Received empty content after mapping.`,
+                this.provider
+              )
+            }
           }
-          // If only tool_use blocks exist, that's valid.
-        }
 
-        messages.push({ role: 'assistant', content: contentBlocks })
-      } else {
-        // Handle regular user/assistant messages
-        const mappedContent = this.mapContentToAnthropic(msg.content)
-        // Anthropic requires non-empty content for user/assistant roles unless it's purely tool calls/results
-        if (
-          (msg.role === 'user' || msg.role === 'assistant') &&
-          ((typeof mappedContent === 'string' && mappedContent === '') ||
-            (Array.isArray(mappedContent) && mappedContent.length === 0))
-        ) {
-          // Allow empty assistant message only if it contains tool calls (handled above)
-          if (msg.role !== 'assistant' || !msg.toolCalls || msg.toolCalls.length === 0) {
-            throw new MappingError(
-              `Role '${msg.role}' requires non-empty content for Anthropic. Received empty content after mapping.`,
-              this.provider
-            )
-          }
+          messages.push({
+            role: this.mapRoleToAnthropic(msg.role as 'user' | 'assistant'),
+            content: mappedContent
+          })
         }
-        messages.push({
-          role: this.mapRoleToAnthropic(msg.role as 'user' | 'assistant'),
-          content: mappedContent
-        })
       }
     }
 
@@ -494,6 +562,8 @@ export class AnthropicMapper implements IProviderMapper {
 
     const baseMappedParams = mapBaseParams(params)
 
+    const anthropicContainerId = this.getAnthropicContainerId(params)
+
     const basePayload = {
       ...(params.extraParams ?? {}),
       model: params.model!.replace(':1m', ''),
@@ -507,7 +577,7 @@ export class AnthropicMapper implements IProviderMapper {
       tool_choice: anthropicToolChoice,
       ...(thinkingParam && { thinking: thinkingParam }),
       ...(output_config && { output_config }),
-      ...(params.container ? { container: params.container } : {})
+      ...(anthropicContainerId ? { container: anthropicContainerId } : {})
     }
 
     if (params.stream) {
@@ -574,6 +644,8 @@ export class AnthropicMapper implements IProviderMapper {
     let combinedTextContent: string | null = null
     let thinkingText: string | null = null
     const responseContent = response.content as AnthropicResponseContentBlock[]
+    const rawContentBlocks =
+      Array.isArray(responseContent) && responseContent.length > 0 ? this.cloneRawContentBlocks(responseContent) : undefined
 
     if (Array.isArray(responseContent)) {
       const textParts: string[] = []
@@ -604,6 +676,11 @@ export class AnthropicMapper implements IProviderMapper {
         : response.stop_reason ?? 'unknown'
 
     const usage = mapTokenUsage(response.usage)
+    const providerState = this.mergeAnthropicResultProviderState(undefined, {
+      containerId: response.container?.id,
+      expiresAt: response.container?.expires_at,
+      rawContentBlocks
+    })
 
     return {
       content: combinedTextContent,
@@ -615,6 +692,7 @@ export class AnthropicMapper implements IProviderMapper {
       parsedContent: null,
       model: response.model ?? model,
       rawResponse: response,
+      ...(providerState ? { providerState } : {}),
       ...(response.container
         ? {
             container: {
@@ -664,7 +742,8 @@ export class AnthropicMapper implements IProviderMapper {
               thinkingSteps: null,
               citations: undefined,
               parsedContent: null,
-              rawResponse: undefined
+              rawResponse: undefined,
+              providerState: undefined
             }
             if (event.message.container) {
               const container = {
@@ -679,6 +758,10 @@ export class AnthropicMapper implements IProviderMapper {
                 }
               }
               aggregatedResult.container = container
+              aggregatedResult.providerState = this.mergeAnthropicResultProviderState(aggregatedResult.providerState, {
+                containerId: container.id,
+                expiresAt: container.expiresAt
+              })
             }
             break
           case 'content_block_start':
@@ -900,6 +983,10 @@ export class AnthropicMapper implements IProviderMapper {
 
               if (aggregatedResult) {
                 aggregatedResult.container = container
+                aggregatedResult.providerState = this.mergeAnthropicResultProviderState(aggregatedResult.providerState, {
+                  containerId: container.id,
+                  expiresAt: container.expiresAt
+                })
               }
             }
             const deltaUsage = mapTokenUsage(event.usage)
@@ -942,6 +1029,9 @@ export class AnthropicMapper implements IProviderMapper {
                 aggregatedResult.rawResponse = {
                   content: rawContentBlocks
                 }
+                aggregatedResult.providerState = this.mergeAnthropicResultProviderState(aggregatedResult.providerState, {
+                  rawContentBlocks
+                })
               }
               yield { type: 'final_result', data: { result: aggregatedResult } }
             } else {

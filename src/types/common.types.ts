@@ -47,6 +47,55 @@ export type RosettaContentPart = { type: 'text'; text: string } | { type: 'image
 // | { type: 'audio'; audio: RosettaAudioData }; // Future: If models support inline audio content parts
 
 /**
+ * Anthropic-specific replay state that must be preserved on assistant history messages.
+ */
+export interface AnthropicMessageProviderState {
+  /** Exact provider-native content blocks to replay on follow-up turns. */
+  rawContentBlocks?: unknown[]
+}
+
+/**
+ * Provider-specific message state that must survive history persistence and replay.
+ */
+export interface RosettaMessageProviderState {
+  anthropic?: AnthropicMessageProviderState
+}
+
+/**
+ * Anthropic-specific request state required to resume a stateful tool-calling session.
+ */
+export interface AnthropicGenerateParamsProviderState {
+  /** Provider-issued container/session identifier to reuse on the next request. */
+  containerId?: string
+}
+
+/**
+ * Provider-specific request state.
+ */
+export interface GenerateParamsProviderState {
+  anthropic?: AnthropicGenerateParamsProviderState
+}
+
+/**
+ * Anthropic-specific response state surfaced for downstream persistence and replay.
+ */
+export interface AnthropicGenerateResultProviderState {
+  /** Provider-issued container/session identifier returned on the response. */
+  containerId?: string
+  /** Provider-issued container/session expiration, when returned. */
+  expiresAt?: string | null
+  /** Replayable provider-native content blocks captured from the assistant turn. */
+  rawContentBlocks?: unknown[]
+}
+
+/**
+ * Provider-specific response state.
+ */
+export interface GenerateResultProviderState {
+  anthropic?: AnthropicGenerateResultProviderState
+}
+
+/**
  * Represents a single message in a conversation.
  * @property role - The role of the message sender ('system', 'user', 'assistant', 'tool').
  * @property content - The content of the message, can be simple text or an array of content parts (for multimodal).
@@ -61,6 +110,11 @@ export interface RosettaMessage {
   /** Optional flag for tool messages indicating an error during execution. */
   isError?: boolean
   /**
+   * Provider-specific message state that must be preserved verbatim across turns.
+   */
+  providerState?: RosettaMessageProviderState
+  /**
+   * @deprecated Prefer `providerState.anthropic.rawContentBlocks`.
    * Raw provider-native content blocks for assistant messages.
    * Used when an upstream provider requires exact content-block echo-back.
    */
