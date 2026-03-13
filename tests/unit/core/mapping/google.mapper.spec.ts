@@ -242,6 +242,43 @@ describe('Google Mapper', () => {
       expect(functionDecl?.parameters?.properties?.location?.type).toBe('STRING')
     })
 
+    it('[Easy] should strip non-Google schema keys from tool parameters', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'Use the tool.' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'list_timezones',
+              description: 'Lists timezones',
+              parameters: {
+                type: 'object',
+                properties: {
+                  region: {
+                    type: 'string',
+                    description: 'Optional timezone region prefix',
+                    optional: true,
+                    examples: ['America']
+                  }
+                }
+              } as any
+            }
+          }
+        ]
+      }
+
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      const functionDecl = result.config?.tools?.[0]?.functionDeclarations?.[0]
+
+      expect(functionDecl?.parameters?.properties?.region).toEqual({
+        type: 'STRING',
+        description: 'Optional timezone region prefix'
+      })
+      expect((functionDecl?.parameters?.properties?.region as any)?.optional).toBeUndefined()
+      expect((functionDecl?.parameters?.properties?.region as any)?.examples).toBeUndefined()
+    })
+
     it('[Easy] should map grounding tool', () => {
       const params: GenerateParams = {
         ...baseParams,

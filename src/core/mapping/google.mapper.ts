@@ -37,6 +37,30 @@ import * as GoogleEmbedMapper from './google.embed.mapper'
 
 export class GoogleMapper implements IProviderMapper {
   readonly provider = Provider.Google
+  private static readonly ALLOWED_SCHEMA_KEYS = new Set([
+    'anyOf',
+    'default',
+    'description',
+    'enum',
+    'example',
+    'format',
+    'items',
+    'maxItems',
+    'maxLength',
+    'maxProperties',
+    'maximum',
+    'minItems',
+    'minLength',
+    'minProperties',
+    'minimum',
+    'nullable',
+    'pattern',
+    'properties',
+    'propertyOrdering',
+    'required',
+    'title',
+    'type'
+  ])
 
   // --- Parameter Mapping ---
   private mapRoleToGoogle(role: RosettaMessage['role']): 'user' | 'model' | 'function' | 'system' {
@@ -259,9 +283,13 @@ export class GoogleMapper implements IProviderMapper {
         delete cleanedSchema.items
     }
     
+    const prunedSchema = Object.fromEntries(
+      Object.entries(cleanedSchema).filter(([key]) => GoogleMapper.ALLOWED_SCHEMA_KEYS.has(key))
+    )
+
     visited.delete(schema); // Clean up visited set for this path
 
-    return cleanedSchema;
+    return prunedSchema;
   }
 
   private findLastToolCallName(history: Content[], _toolCallId: string): string | undefined {
