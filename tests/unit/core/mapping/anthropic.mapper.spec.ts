@@ -62,6 +62,22 @@ const createMockThinkingBlock = (thinking: string): Anthropic.ThinkingBlock => (
   signature: '' // think this will always be a string? if it can be null or undefined, we might just want to make it optional
 })
 
+const createMockCodeExecutionToolResultBlock = (
+  toolUseId: string,
+  overrides?: Partial<Anthropic.CodeExecutionToolResultBlock>
+): Anthropic.CodeExecutionToolResultBlock => ({
+  type: 'code_execution_tool_result',
+  tool_use_id: toolUseId,
+  content: {
+    type: 'code_execution_result',
+    stdout: 'hello from code execution',
+    stderr: '',
+    return_code: 0,
+    content: []
+  },
+  ...overrides
+})
+
 // Helper async generator for stream tests
 async function* mockAnthropicStreamGenerator(events: RawMessageStreamEvent[]): AsyncIterable<RawMessageStreamEvent> {
   for (const event of events) {
@@ -245,6 +261,77 @@ describe('Anthropic Mapper', () => {
         {
           role: 'assistant',
           content: [{ type: 'text', text: 'Exact Anthropic replay block', citations: null }]
+        }
+      ])
+    })
+
+    it('[Hard] should exclude code_execution_tool_result blocks from assistant replay when resuming pending programmatic tool results', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        programmaticToolCalling: true,
+        messages: [
+          { role: 'user', content: 'Call the tool and continue.' },
+          {
+            role: 'assistant',
+            content: null,
+            providerState: {
+              anthropic: {
+                rawContentBlocks: [
+                  { type: 'text', text: 'Calling the tool now.', citations: null },
+                  { type: 'server_tool_use', id: 'srvtoolu_1', name: 'code_execution', input: { code: '...' } },
+                  createMockCodeExecutionToolResultBlock('srvtoolu_1'),
+                  {
+                    type: 'tool_use',
+                    id: 'toolu_1',
+                    name: 'my_tool',
+                    input: {},
+                    caller: {
+                      type: 'code_execution_20260120',
+                      tool_id: 'srvtoolu_1'
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            role: 'tool',
+            toolCallId: 'toolu_1',
+            content: '{"ok":true}'
+          }
+        ]
+      }
+
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.messages).toEqual([
+        { role: 'user', content: 'Call the tool and continue.' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Calling the tool now.', citations: null },
+            { type: 'server_tool_use', id: 'srvtoolu_1', name: 'code_execution', input: { code: '...' } },
+            {
+              type: 'tool_use',
+              id: 'toolu_1',
+              name: 'my_tool',
+              input: {},
+              caller: {
+                type: 'code_execution_20260120',
+                tool_id: 'srvtoolu_1'
+              }
+            }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_1',
+              content: '{"ok":true}',
+              is_error: undefined
+            }
+          ]
         }
       ])
     })
@@ -713,6 +800,26 @@ describe('Anthropic Mapper', () => {
         expiresAt: '2026-03-12T12:00:00Z'
       })
     })
+
+    it('[Medium] should surface code execution diagnostics on non-streaming Anthropic responses', () => {
+      const response = createMockAnthropicMessage(
+        [createMockCodeExecutionToolResultBlock('srvtoolu_nonstream'), createMockTextBlock('Final answer.')],
+        'end_turn',
+        { input_tokens: 8, output_tokens: 4 },
+        modelUsed
+      )
+
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+      expect(result.codeExecutionResults).toEqual([
+        {
+          toolUseId: 'srvtoolu_nonstream',
+          stdout: 'hello from code execution',
+          stderr: '',
+          returnCode: 0,
+          contentFileIds: []
+        }
+      ])
+    })
   })
 
   describe('mapProviderStream', () => {
@@ -1122,6 +1229,57 @@ describe('Anthropic Mapper', () => {
           ]
         }
       })
+    })
+
+    it('[Medium] should surface code execution diagnostics on streaming final results', async () => {
+      const events: RawMessageStreamEvent[] = [
+        baseMessageStart,
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: createMockCodeExecutionToolResultBlock('srvtoolu_stream')
+        },
+        {
+          type: 'content_block_start',
+          index: 1,
+          content_block: { type: 'text', text: '' }
+        },
+        {
+          type: 'content_block_delta',
+          index: 1,
+          delta: { type: 'text_delta', text: 'Done.' }
+        },
+        { type: 'content_block_stop', index: 1 },
+        {
+          type: 'message_delta',
+          delta: { stop_reason: 'end_turn', stop_sequence: null },
+          usage: { output_tokens: 2 }
+        },
+        { type: 'message_stop' }
+      ]
+
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), baseOriginalParams)
+      const results = await collectStreamChunks(stream)
+
+      expect(results[1]).toEqual({
+        type: 'code_execution_result',
+        data: {
+          toolUseId: 'srvtoolu_stream',
+          stdout: 'hello from code execution',
+          stderr: '',
+          returnCode: 0,
+          contentFileIds: []
+        }
+      })
+      expect((results[5] as any).data.result.codeExecutionResults).toEqual([
+        {
+          toolUseId: 'srvtoolu_stream',
+          stdout: 'hello from code execution',
+          stderr: '',
+          returnCode: 0,
+          contentFileIds: []
+        }
+      ])
     })
 
     it('[Hard] should yield a validation error when start-only input is invalid', async () => {

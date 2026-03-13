@@ -1,5 +1,5 @@
 import { TokenUsage, GenerateResult } from './result.types'
-import { Citation, ProviderKey } from './common.types' // Import ProviderKey
+import { Citation, ProviderKey, CodeExecutionResultInfo } from './common.types' // Import ProviderKey
 // Remove unused Provider import
 // import { Provider } from './common.types' // Removed
 
@@ -46,15 +46,7 @@ export type StreamChunk =
   /** Anthropic: A code execution result block containing stdout/stderr and optional encrypted output metadata. */
   | {
       type: 'code_execution_result'
-      data: {
-        toolUseId: string
-        stdout: string
-        stderr: string
-        returnCode: number
-        encryptedStdout?: string
-        errorCode?: string
-        contentFileIds?: string[]
-      }
+      data: CodeExecutionResultInfo
     }
   /** Anthropic: Container/session metadata for stateful code execution reuse. */
   | { type: 'container_info'; data: { containerId: string; expiresAt?: string | null } }

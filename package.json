@@ -1,6 +1,6 @@
 {
   "name": "@missionsquad/rosetta-ai",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "description": "Unified TypeScript SDK for interacting with multiple AI providers (Anthropic, Google, Groq, OpenAI).",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -47,6 +47,7 @@
     "example:audio": "ts-node examples/audio.ts",
     "example:structured": "ts-node examples/structured-output.ts",
     "example:listmodels": "ts-node examples/list-models.ts",
+    "example:anthropic-ptc-debug": "ts-node examples/anthropic-ptc-debug.ts",
     "example:custom-novita": "ts-node examples/custom-provider-novita.ts",
     "example:custom-gpustack": "ts-node examples/custom-provider-gpustack.ts",
     "example:custom-lms": "ts-node examples/custom-provider-lmstudio.ts",
