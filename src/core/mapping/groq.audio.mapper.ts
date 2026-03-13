@@ -1,7 +1,6 @@
 // Mappers for Groq Audio features (TTS, STT, Translate)
 
-import Groq from 'groq-sdk'
-import { Uploadable as GroqUploadable } from 'groq-sdk/core'
+import Groq, { type Uploadable as GroqUploadable } from 'groq-sdk'
 import { TranscribeParams, TranslateParams, TranscriptionResult, SpeechParams } from '../../types'
 import { safeGet } from '../utils'
 
