@@ -1,6 +1,6 @@
 {
   "name": "@missionsquad/rosetta-ai",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "description": "Unified TypeScript SDK for interacting with multiple AI providers (Anthropic, Google, Groq, OpenAI).",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -80,7 +80,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "@elevenlabs/elevenlabs-js": "^2.24.0",
-    "@google/genai": "^1.29.0",
+    "@google/genai": "^1.45.0",
     "dotenv": "^16.4.5",
     "groq-sdk": "^0.35.0",
     "nanoid": "3.3.11",
