@@ -1,4 +1,4 @@
-import Groq from 'groq-sdk'
+import Groq, { type Uploadable as GroqUploadable } from 'groq-sdk'
 import {
   ChatCompletionMessageParam,
   ChatCompletionSystemMessageParam,
@@ -13,8 +13,6 @@ import {
   ChatCompletion,
   ChatCompletionChunk
 } from 'groq-sdk/resources/chat/completions'
-import { Uploadable as GroqUploadable } from 'groq-sdk/core'
-
 import {
   GenerateParams,
   GenerateResult,
