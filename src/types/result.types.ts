@@ -1,5 +1,5 @@
 import { VoiceSettings } from '@elevenlabs/elevenlabs-js/api'
-import { RosettaToolCallRequest, Citation, ProviderKey, GenerateResultProviderState } from './common.types'
+import { RosettaToolCallRequest, Citation, ProviderKey, GenerateResultProviderState, CodeExecutionResultInfo } from './common.types'
 import { OpenAICompletion } from './openai.types' // Import the new type
 
 /**
@@ -30,6 +30,8 @@ export interface GenerateResult {
   citations?: Citation[]
   /** Intermediate thinking steps, if requested and provided (Anthropic specific). */
   thinkingSteps?: string | null
+  /** Managed code execution results emitted by providers that support programmatic execution. */
+  codeExecutionResults?: CodeExecutionResultInfo[]
   /** The parsed JSON object if `responseFormat: { type: 'json_object' }` was requested and parsing succeeded. Null otherwise. */
   parsedContent?: Record<string, unknown> | Array<unknown> | null
   /** The exact model ID string used for the completion, as reported by the provider. */

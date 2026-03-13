@@ -227,3 +227,16 @@ export interface Citation {
   startIndex?: number
   endIndex?: number
 }
+
+/**
+ * Provider-agnostic code execution result details surfaced from providers that support managed execution.
+ */
+export interface CodeExecutionResultInfo {
+  toolUseId: string
+  stdout: string
+  stderr: string
+  returnCode: number
+  encryptedStdout?: string
+  errorCode?: string
+  contentFileIds?: string[]
+}

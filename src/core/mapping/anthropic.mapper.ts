@@ -32,7 +32,8 @@ import {
   TranscribeParams,
   TranslateParams,
   TranscriptionResult,
-  RosettaTool // Import RosettaTool
+  RosettaTool, // Import RosettaTool
+  CodeExecutionResultInfo
 } from '../../types'
 import {
   MappingError,
@@ -178,6 +179,27 @@ export class AnthropicMapper implements IProviderMapper {
     return undefined
   }
 
+  private isProgrammaticToolResultResume(messages: RosettaMessage[], assistantIndex: number, isProgrammaticToolCalling: boolean): boolean {
+    if (!isProgrammaticToolCalling) {
+      return false
+    }
+
+    const nextMessage = messages[assistantIndex + 1]
+    return nextMessage?.role === 'tool'
+  }
+
+  private filterAnthropicReplayContentBlocksForProgrammaticToolResultResume(blocks: unknown[]): unknown[] {
+    const replayableBlockTypes = new Set(['text', 'thinking', 'redacted_thinking', 'tool_use', 'server_tool_use'])
+    return blocks.filter(block => {
+      if (typeof block !== 'object' || block === null || !('type' in block)) {
+        return false
+      }
+
+      const blockType = (block as { type?: unknown }).type
+      return typeof blockType === 'string' && replayableBlockTypes.has(blockType)
+    })
+  }
+
   private getAnthropicContainerId(params: GenerateParams): string | undefined {
     const providerStateContainerId = params.providerState?.anthropic?.containerId
     if (typeof providerStateContainerId === 'string' && providerStateContainerId.trim() !== '') {
@@ -222,44 +244,42 @@ export class AnthropicMapper implements IProviderMapper {
     return Object.keys(anthropicState).length > 0 ? { anthropic: anthropicState } : undefined
   }
 
-  private mapCodeExecutionResultChunk(block: CodeExecutionToolResultBlock): StreamChunk {
+  private mapCodeExecutionResultData(block: CodeExecutionToolResultBlock): CodeExecutionResultInfo {
     const content = block.content
 
     if (content.type === 'code_execution_result') {
       return {
-        type: 'code_execution_result',
-        data: {
-          toolUseId: block.tool_use_id,
-          stdout: content.stdout,
-          stderr: content.stderr,
-          returnCode: content.return_code,
-          contentFileIds: content.content.map(output => output.file_id)
-        }
+        toolUseId: block.tool_use_id,
+        stdout: content.stdout,
+        stderr: content.stderr,
+        returnCode: content.return_code,
+        contentFileIds: content.content.map(output => output.file_id)
       }
     }
 
     if (content.type === 'encrypted_code_execution_result') {
       return {
-        type: 'code_execution_result',
-        data: {
-          toolUseId: block.tool_use_id,
-          stdout: '',
-          stderr: content.stderr,
-          returnCode: content.return_code,
-          encryptedStdout: content.encrypted_stdout
-        }
+        toolUseId: block.tool_use_id,
+        stdout: '',
+        stderr: content.stderr,
+        returnCode: content.return_code,
+        encryptedStdout: content.encrypted_stdout
       }
     }
 
     return {
+      toolUseId: block.tool_use_id,
+      stdout: '',
+      stderr: '',
+      returnCode: 1,
+      errorCode: content.error_code
+    }
+  }
+
+  private mapCodeExecutionResultChunk(block: CodeExecutionToolResultBlock): StreamChunk {
+    return {
       type: 'code_execution_result',
-      data: {
-        toolUseId: block.tool_use_id,
-        stdout: '',
-        stderr: '',
-        returnCode: 1,
-        errorCode: content.error_code
-      }
+      data: this.mapCodeExecutionResultData(block)
     }
   }
 
@@ -326,6 +346,7 @@ export class AnthropicMapper implements IProviderMapper {
   ): Anthropic.Messages.MessageCreateParamsNonStreaming | Anthropic.Messages.MessageCreateParamsStreaming {
     let systemPrompt: string | undefined = undefined
     const messages: AnthropicMessageParam[] = []
+    const isProgrammaticToolCalling = params.programmaticToolCalling === true
 
     for (let i = 0; i < params.messages.length; i++) {
       const msg = params.messages[i]!
@@ -370,9 +391,12 @@ export class AnthropicMapper implements IProviderMapper {
       } else {
         const rawContentBlocks = msg.role === 'assistant' ? this.getAnthropicMessageRawContentBlocks(msg) : undefined
         if (msg.role === 'assistant' && rawContentBlocks) {
+          const replayContentBlocks = this.isProgrammaticToolResultResume(params.messages, i, isProgrammaticToolCalling)
+            ? this.filterAnthropicReplayContentBlocksForProgrammaticToolResultResume(rawContentBlocks)
+            : rawContentBlocks
           messages.push({
             role: 'assistant',
-            content: rawContentBlocks as AnthropicContentBlockParam[]
+            content: replayContentBlocks as AnthropicContentBlockParam[]
           })
           continue
         }
@@ -470,7 +494,6 @@ export class AnthropicMapper implements IProviderMapper {
     }
 
     // Map RosettaTool definitions to AnthropicToolParam
-    const isProgrammaticToolCalling = params.programmaticToolCalling === true
     if (isProgrammaticToolCalling && params.extraParams?.disable_parallel_tool_use === true) {
       throw new UnsupportedFeatureError(this.provider, 'disable_parallel_tool_use with programmaticToolCalling')
     }
@@ -643,6 +666,7 @@ export class AnthropicMapper implements IProviderMapper {
   ): GenerateResult {
     let combinedTextContent: string | null = null
     let thinkingText: string | null = null
+    const codeExecutionResults: CodeExecutionResultInfo[] = []
     const responseContent = response.content as AnthropicResponseContentBlock[]
     const rawContentBlocks =
       Array.isArray(responseContent) && responseContent.length > 0 ? this.cloneRawContentBlocks(responseContent) : undefined
@@ -654,6 +678,8 @@ export class AnthropicMapper implements IProviderMapper {
           textParts.push(block.text)
         } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
           thinkingText = block.thinking
+        } else if (block.type === 'code_execution_tool_result') {
+          codeExecutionResults.push(this.mapCodeExecutionResultData(block))
         }
       })
       if (textParts.length > 0) {
@@ -688,6 +714,7 @@ export class AnthropicMapper implements IProviderMapper {
       finishReason: finishReason,
       usage: usage,
       thinkingSteps: thinkingText,
+      ...(codeExecutionResults.length > 0 ? { codeExecutionResults } : {}),
       citations: undefined,
       parsedContent: null,
       model: response.model ?? model,
@@ -740,6 +767,7 @@ export class AnthropicMapper implements IProviderMapper {
               usage: undefined,
               model: model,
               thinkingSteps: null,
+              codeExecutionResults: [],
               citations: undefined,
               parsedContent: null,
               rawResponse: undefined,
@@ -805,6 +833,10 @@ export class AnthropicMapper implements IProviderMapper {
               }
             } else if (event.content_block.type === 'code_execution_tool_result') {
               rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(event.content_block)
+              if (aggregatedResult) {
+                aggregatedResult.codeExecutionResults = aggregatedResult.codeExecutionResults ?? []
+                aggregatedResult.codeExecutionResults.push(this.mapCodeExecutionResultData(event.content_block))
+              }
               yield this.mapCodeExecutionResultChunk(event.content_block)
             } else {
               rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(event.content_block)
@@ -1024,6 +1056,7 @@ export class AnthropicMapper implements IProviderMapper {
               aggregatedResult.finishReason = finalFinishReason
               if (aggregatedResult.content === '') aggregatedResult.content = null
               if (aggregatedResult.toolCalls?.length === 0) aggregatedResult.toolCalls = undefined
+              if (aggregatedResult.codeExecutionResults?.length === 0) aggregatedResult.codeExecutionResults = undefined
               const rawContentBlocks = rawContentBlocksByIndex.filter(block => block !== undefined)
               if (rawContentBlocks.length > 0) {
                 aggregatedResult.rawResponse = {
