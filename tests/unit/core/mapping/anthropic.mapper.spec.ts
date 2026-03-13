@@ -221,6 +221,50 @@ describe('Anthropic Mapper', () => {
       ])
     })
 
+    it('[Medium] should prefer Anthropic providerState raw content blocks for assistant replay', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Replay the exact assistant turn.' },
+          {
+            role: 'assistant',
+            content: 'This should not be used.',
+            providerState: {
+              anthropic: {
+                rawContentBlocks: [{ type: 'text', text: 'Exact Anthropic replay block', citations: null }]
+              }
+            },
+            rawContentBlocks: [{ type: 'text', text: 'Legacy block', citations: null }]
+          }
+        ]
+      }
+
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.messages).toEqual([
+        { role: 'user', content: 'Replay the exact assistant turn.' },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Exact Anthropic replay block', citations: null }]
+        }
+      ])
+    })
+
+    it('[Medium] should prefer providerState container over legacy container shim', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'Reuse the container.' }],
+        providerState: {
+          anthropic: {
+            containerId: 'container_from_provider_state'
+          }
+        },
+        container: 'legacy_container'
+      }
+
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.container).toBe('container_from_provider_state')
+    })
+
     it('[Easy] should map tools correctly', () => {
       const params: GenerateParams = {
         ...baseParams,
@@ -638,6 +682,37 @@ describe('Anthropic Mapper', () => {
       ])
       expect(result.finishReason).toBe('tool_calls')
     })
+
+    it('[Medium] should surface Anthropic providerState with raw content blocks and container metadata', () => {
+      const response = {
+        ...createMockAnthropicMessage(
+          [createMockThinkingBlock('Reasoning...'), createMockTextBlock('Final answer.')],
+          'end_turn',
+          { input_tokens: 8, output_tokens: 4 },
+          modelUsed
+        ),
+        container: {
+          id: 'container_response_state',
+          expires_at: '2026-03-12T12:00:00Z'
+        }
+      } as Anthropic.Messages.Message
+
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+      expect(result.providerState).toEqual({
+        anthropic: {
+          containerId: 'container_response_state',
+          expiresAt: '2026-03-12T12:00:00Z',
+          rawContentBlocks: [
+            { type: 'thinking', thinking: 'Reasoning...', signature: '' },
+            { type: 'text', text: 'Final answer.', citations: null }
+          ]
+        }
+      })
+      expect(result.container).toEqual({
+        id: 'container_response_state',
+        expiresAt: '2026-03-12T12:00:00Z'
+      })
+    })
   })
 
   describe('mapProviderStream', () => {
@@ -701,6 +776,11 @@ describe('Anthropic Mapper', () => {
           usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12, cachedContentTokenCount: undefined }
         })
       )
+      expect((results[5] as any).data.result.providerState).toEqual({
+        anthropic: {
+          rawContentBlocks: [{ type: 'text', text: 'Hello world', citations: null }]
+        }
+      })
     })
 
     it('[Medium] should handle stream ending with max_tokens', async () => {
@@ -1026,6 +1106,21 @@ describe('Anthropic Mapper', () => {
       expect((results[6] as any).data.result.container).toEqual({
         id: 'container_stream_delta',
         expiresAt: '2026-03-10T12:00:00Z'
+      })
+      expect((results[6] as any).data.result.providerState).toEqual({
+        anthropic: {
+          containerId: 'container_stream_delta',
+          expiresAt: '2026-03-10T12:00:00Z',
+          rawContentBlocks: [
+            {
+              type: 'tool_use',
+              id: toolCallId,
+              name: toolName,
+              input: { arg: 321 },
+              caller: { type: 'code_execution_20260120', tool_id: 'srvtoolu_container' }
+            }
+          ]
+        }
       })
     })
 

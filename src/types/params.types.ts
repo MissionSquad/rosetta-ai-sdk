@@ -1,4 +1,4 @@
-import { ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData } from './common.types'
+import { ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData, GenerateParamsProviderState } from './common.types'
 import { ProviderOptions } from './config.types'
 
 export type RosettaResponseFormat =
@@ -60,6 +60,10 @@ export interface GenerateParams {
    * Reuses an existing provider container/session for stateful code execution.
    */
   container?: string
+  /**
+   * Provider-specific request state. Prefer this over legacy provider-specific top-level fields.
+   */
+  providerState?: GenerateParamsProviderState
   /** Controls whether the model is forced to call a tool ('required' or specific function), allowed to choose ('auto'), or prevented ('none'). */
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
 
