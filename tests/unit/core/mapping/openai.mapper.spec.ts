@@ -522,6 +522,28 @@ describe('OpenAI Mapper', () => {
       expect(result.max_completion_tokens).toBe(321)
     })
 
+    it('[Medium] should omit reasoning_effort for gpt-5.4 when function tools are present', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        reasoningEffort: 'high',
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'myFunc',
+              parameters: { type: 'object', properties: {} },
+              zodSchema: z.object({})
+            }
+          }
+        ]
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.reasoning_effort).toBeUndefined()
+      expect(result.tools).toHaveLength(1)
+    })
+
     it('[Medium] should map toolChoice required and none', () => {
       const paramsRequired: GenerateParams = { ...baseParams, messages: [], toolChoice: 'required' }
       const paramsNone: GenerateParams = { ...baseParams, messages: [], toolChoice: 'none' }

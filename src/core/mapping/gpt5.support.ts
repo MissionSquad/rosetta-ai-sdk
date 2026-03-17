@@ -7,6 +7,7 @@ export interface Gpt5Support {
   fixedReasoningEffort?: ReasoningEffort
   supportsVerbosity: boolean
   supportsSampling: 'never' | 'always' | 'only_with_reasoning_none'
+  supportsFunctionToolsWithReasoning?: boolean
 }
 
 // Chat Completions-supported GPT-5 models verified for this implementation.
@@ -16,62 +17,71 @@ const GPT5_CHAT_COMPLETIONS_SUPPORT: Record<string, Gpt5Support> = {
     allowedReasoningEfforts: ['minimal', 'low', 'medium', 'high'],
     defaultReasoningEffort: 'medium',
     supportsVerbosity: true,
-    supportsSampling: 'never'
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: true
   },
   'gpt-5-mini': {
     chatCompletionsSupported: true,
     allowedReasoningEfforts: ['minimal', 'low', 'medium', 'high'],
     defaultReasoningEffort: 'medium',
     supportsVerbosity: true,
-    supportsSampling: 'never'
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: true
   },
   'gpt-5-nano': {
     chatCompletionsSupported: true,
     allowedReasoningEfforts: ['minimal', 'low', 'medium', 'high'],
     defaultReasoningEffort: 'medium',
     supportsVerbosity: true,
-    supportsSampling: 'never'
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: true
   },
   'gpt-5.1': {
     chatCompletionsSupported: true,
     allowedReasoningEfforts: ['none', 'low', 'medium', 'high'],
     defaultReasoningEffort: 'none',
     supportsVerbosity: true,
-    supportsSampling: 'never'
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: true
   },
   'gpt-5.2': {
     chatCompletionsSupported: true,
     allowedReasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'],
     defaultReasoningEffort: 'none',
     supportsVerbosity: true,
-    supportsSampling: 'only_with_reasoning_none'
+    supportsSampling: 'only_with_reasoning_none',
+    supportsFunctionToolsWithReasoning: true
   },
   'gpt-5.4': {
     chatCompletionsSupported: true,
     allowedReasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'],
     defaultReasoningEffort: 'none',
     supportsVerbosity: true,
-    supportsSampling: 'never'
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: false
   },
   'gpt-5-chat-latest': {
     chatCompletionsSupported: true,
     allowedReasoningEfforts: [],
     supportsVerbosity: true,
-    supportsSampling: 'always'
+    supportsSampling: 'always',
+    supportsFunctionToolsWithReasoning: true
   },
   'gpt-5.1-chat-latest': {
     chatCompletionsSupported: true,
     allowedReasoningEfforts: ['medium'],
     fixedReasoningEffort: 'medium',
     supportsVerbosity: true,
-    supportsSampling: 'never'
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: true
   },
   'gpt-5.2-chat-latest': {
     chatCompletionsSupported: true,
     allowedReasoningEfforts: ['medium'],
     fixedReasoningEffort: 'medium',
     supportsVerbosity: true,
-    supportsSampling: 'never'
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: true
   }
 }
 
