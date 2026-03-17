@@ -1,6 +1,9 @@
 import { ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData, GenerateParamsProviderState } from './common.types'
 import { ProviderOptions } from './config.types'
 
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type Verbosity = 'low' | 'medium' | 'high'
+
 export type RosettaResponseFormat =
   | { type: 'text' }
   | {
@@ -44,6 +47,10 @@ export interface GenerateParams {
   temperature?: number
   /** Nucleus sampling parameter: considers only tokens comprising the top `topP` probability mass. */
   topP?: number
+  /** GPT-5 reasoning effort control for supported OpenAI Chat Completions models. */
+  reasoningEffort?: ReasoningEffort
+  /** GPT-5 verbosity control for supported OpenAI Chat Completions models. */
+  verbosity?: Verbosity
   /** Sequence(s) where the API will stop generating further tokens. */
   stop?: string | string[] | null
   /**

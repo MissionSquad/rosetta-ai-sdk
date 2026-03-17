@@ -83,6 +83,8 @@ export function mapBaseParams(
   temperature?: number
   topP?: number
   maxTokens?: number
+  reasoningEffort?: GenerateParams['reasoningEffort']
+  verbosity?: GenerateParams['verbosity']
   stopSequences?: string[]
 } {
   const stopSequences = Array.isArray(params.stop) ? params.stop : params.stop ? [params.stop] : undefined
@@ -102,12 +104,16 @@ export function mapBaseParams(
     temperature?: number
     topP?: number
     maxTokens?: number
+    reasoningEffort?: GenerateParams['reasoningEffort']
+    verbosity?: GenerateParams['verbosity']
     stopSequences?: string[]
   } = {}
 
   if (params.temperature !== undefined) result.temperature = params.temperature
   if (params.topP !== undefined) result.topP = params.topP
   if (effectiveMaxTokens !== undefined) result.maxTokens = effectiveMaxTokens
+  if (params.reasoningEffort !== undefined) result.reasoningEffort = params.reasoningEffort
+  if (params.verbosity !== undefined) result.verbosity = params.verbosity
   if (stopSequences !== undefined) result.stopSequences = stopSequences
 
   return result
