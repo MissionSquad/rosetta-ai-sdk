@@ -191,6 +191,7 @@ export class OpenAIMapper implements IProviderMapper {
     const isThinking = isThinkingModel(params.model!)
     const isGPT5 = isGPT5Model(params.model!)
     const hasEffectiveLimit = baseMappedParams.maxTokens !== undefined
+    const hasFunctionTools = Array.isArray(tools) && tools.length > 0
 
     if (!isThinking) {
       // Non-thinking OpenAI models must use max_completion_tokens only.
@@ -235,7 +236,11 @@ export class OpenAIMapper implements IProviderMapper {
           }
         }
 
-        if (effectiveEffort !== undefined) {
+        const shouldOmitReasoningForFunctionTools =
+          hasFunctionTools &&
+          support.supportsFunctionToolsWithReasoning === false
+
+        if (effectiveEffort !== undefined && !shouldOmitReasoningForFunctionTools) {
           basePayload.reasoning_effort = effectiveEffort
         } else {
           delete basePayload.reasoning_effort
