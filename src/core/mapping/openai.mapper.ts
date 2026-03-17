@@ -36,6 +36,7 @@ import { IProviderMapper } from './base.mapper'
 import { mapBaseParams, mapBaseToolChoice, mapToOpenAIResponseFormat } from './common.utils'
 import * as OpenAIEmbedMapper from './openai.embed.mapper'
 import * as OpenAIAudioMapper from './openai.audio.mapper'
+import { getGpt5Support } from './gpt5.support'
 import {
   isGPT5Model,
   isThinkingModel,
@@ -209,9 +210,65 @@ export class OpenAIMapper implements IProviderMapper {
     } else {
       delete basePayload.max_tokens
     }
+
     if (isGPT5) {
-      if (basePayload.temperature != null && !isNaN(basePayload.temperature)) {
-        basePayload.temperature = 1
+      const support = getGpt5Support(params.model!)
+
+      if (support?.chatCompletionsSupported === false) {
+        throw new UnsupportedFeatureError(this.provider, `Chat Completions for model '${params.model!}'`)
+      }
+
+      if (support) {
+        const requestedEffort = baseMappedParams.reasoningEffort
+        let effectiveEffort: GenerateParams['reasoningEffort'] | undefined
+
+        if (support.fixedReasoningEffort) {
+          effectiveEffort = support.fixedReasoningEffort
+        } else if (support.allowedReasoningEfforts.length > 0) {
+          if (
+            requestedEffort !== undefined &&
+            support.allowedReasoningEfforts.includes(requestedEffort)
+          ) {
+            effectiveEffort = requestedEffort
+          } else {
+            effectiveEffort = support.defaultReasoningEffort
+          }
+        }
+
+        if (effectiveEffort !== undefined) {
+          basePayload.reasoning_effort = effectiveEffort
+        } else {
+          delete basePayload.reasoning_effort
+        }
+
+        if (
+          support.supportsVerbosity &&
+          baseMappedParams.verbosity !== undefined &&
+          ['low', 'medium', 'high'].includes(baseMappedParams.verbosity)
+        ) {
+          basePayload.verbosity = baseMappedParams.verbosity
+        } else {
+          delete basePayload.verbosity
+        }
+
+        const allowsSampling =
+          support.supportsSampling === 'always' ||
+          (support.supportsSampling === 'only_with_reasoning_none' && effectiveEffort === 'none')
+
+        if (!allowsSampling) {
+          delete basePayload.temperature
+          delete basePayload.top_p
+        }
+
+        delete basePayload.max_tokens
+      } else {
+        // Conservative fallback for unknown future GPT-5-family models on Chat Completions:
+        // preserve token limit behavior but drop sampling and GPT-5-specific fields until modeled.
+        delete basePayload.temperature
+        delete basePayload.top_p
+        delete basePayload.reasoning_effort
+        delete basePayload.verbosity
+        delete basePayload.max_tokens
       }
     }
 

@@ -727,6 +727,10 @@ export class RosettaAI {
       // --- Map Parameters ---
       const mappedParams = mapper.mapToProviderParams ? mapper.mapToProviderParams(effectiveParams) : effectiveParams
 
+      if (process.env.DEBUG === 'true' && providerKey === Provider.Anthropic) {
+          console.log(`[ROSETTA DEBUG] Mapped Anthropic stream request:\n${JSON.stringify(mappedParams, null, 2)}`)
+      }
+
       // --- Execute ---
       if (isCustom && mapper.executeStream && customConfig) {
         // Custom Provider Execution Path

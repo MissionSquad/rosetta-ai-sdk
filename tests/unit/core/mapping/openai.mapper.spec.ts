@@ -411,6 +411,117 @@ describe('OpenAI Mapper', () => {
       expect(result.top_p).toBe(0.9)
     })
 
+    it('[Medium] should drop sampling and default reasoning for gpt-5', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7,
+        topP: 0.9
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.temperature).toBeUndefined()
+      expect(result.top_p).toBeUndefined()
+      expect(result.reasoning_effort).toBe('medium')
+      expect(result.max_completion_tokens).toBeUndefined()
+    })
+
+    it('[Medium] should preserve sampling for gpt-5.2 when reasoningEffort is none', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5.2',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7,
+        topP: 0.9,
+        reasoningEffort: 'none',
+        verbosity: 'low',
+        maxTokens: 800
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.temperature).toBe(0.7)
+      expect(result.top_p).toBe(0.9)
+      expect(result.reasoning_effort).toBe('none')
+      expect(result.verbosity).toBe('low')
+      expect(result.max_completion_tokens).toBe(800)
+    })
+
+    it('[Medium] should drop sampling for gpt-5.2 when reasoningEffort is high', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5.2',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7,
+        topP: 0.9,
+        reasoningEffort: 'high'
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.temperature).toBeUndefined()
+      expect(result.top_p).toBeUndefined()
+      expect(result.reasoning_effort).toBe('high')
+    })
+
+    it('[Medium] should use family-aware lookup for dated gpt-5.2 models', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5.2-2025-12-11',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7,
+        reasoningEffort: 'none',
+        verbosity: 'high'
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.temperature).toBe(0.7)
+      expect(result.reasoning_effort).toBe('none')
+      expect(result.verbosity).toBe('high')
+    })
+
+    it('[Medium] should map fixed reasoning for gpt-5.2-chat-latest', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5.2-chat-latest',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        reasoningEffort: 'none',
+        temperature: 0.7,
+        verbosity: 'medium'
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.reasoning_effort).toBe('medium')
+      expect(result.temperature).toBeUndefined()
+      expect(result.top_p).toBeUndefined()
+      expect(result.verbosity).toBe('medium')
+    })
+
+    it('[Medium] should reject responses-only GPT-5 variants on chat completions', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5-pro',
+        messages: [{ role: 'user', content: 'Generate.' }]
+      }
+      expect(() => mapper.mapToProviderParams(params)).toThrow(UnsupportedFeatureError)
+      expect(() => mapper.mapToProviderParams(params)).toThrow(
+        "Provider 'openai' does not support the requested feature: Chat Completions for model 'gpt-5-pro'"
+      )
+    })
+
+    it('[Medium] should conservatively normalize unknown future GPT-5 family models', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5.9-experimental',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7,
+        topP: 0.9,
+        reasoningEffort: 'high',
+        verbosity: 'high',
+        maxTokens: 321
+      }
+      const result = mapper.mapToProviderParams(params) as any
+      expect(result.temperature).toBeUndefined()
+      expect(result.top_p).toBeUndefined()
+      expect(result.reasoning_effort).toBeUndefined()
+      expect(result.verbosity).toBeUndefined()
+      expect(result.max_completion_tokens).toBe(321)
+    })
+
     it('[Medium] should map toolChoice required and none', () => {
       const paramsRequired: GenerateParams = { ...baseParams, messages: [], toolChoice: 'required' }
       const paramsNone: GenerateParams = { ...baseParams, messages: [], toolChoice: 'none' }
