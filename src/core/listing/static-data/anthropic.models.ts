@@ -10,6 +10,30 @@ const rawAnthropicData = {
     // LATEST MODELS
     // =========================================================================
 
+    // --- Claude Opus 4.7 ---
+    {
+      id: 'claude-opus-4-7',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'Our most capable generally available model for complex reasoning and agentic coding',
+        strengths: 'Step-change improvement in agentic coding over Opus 4.6 (Claude 4.7 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Moderate',
+        cost_input_mtok: 5.0,
+        cost_output_mtok: 25.0,
+        training_data_cutoff: 'Jan 2026',
+        extended_max_completion_tokens: null
+      }
+    },
+
     // --- Claude Opus 4.6 ---
     {
       id: 'claude-opus-4-6',
