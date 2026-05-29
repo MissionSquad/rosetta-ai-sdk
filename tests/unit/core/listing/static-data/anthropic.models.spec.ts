@@ -67,4 +67,17 @@ describe('Anthropic Static Models Data', () => {
       expect(model.created === null || typeof model.created === 'number').toBe(true)
     })
   })
+
+  it('[Easy] should include claude-opus-4-8 with expected core metadata', () => {
+    const opus48 = anthropicStaticModels.data.find(model => model.id === 'claude-opus-4-8')
+    expect(opus48).toBeDefined()
+    expect(opus48?.owned_by).toBe('anthropic')
+    expect(opus48?.provider).toBe(Provider.Anthropic)
+    expect(opus48?.context_window).toBe(1000000)
+    expect(opus48?.max_completion_tokens).toBe(128000)
+    expect(opus48?.properties?.comparative_latency).toBe('Moderate')
+    expect(opus48?.properties?.cost_input_mtok).toBe(5.0)
+    expect(opus48?.properties?.cost_output_mtok).toBe(25.0)
+    expect(opus48?.properties?.training_data_cutoff).toBe('Jan 2026')
+  })
 })

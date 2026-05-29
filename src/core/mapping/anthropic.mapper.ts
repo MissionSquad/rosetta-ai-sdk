@@ -2,6 +2,7 @@ import Anthropic, { APIError } from '@anthropic-ai/sdk'
 import {
   RawMessageStreamEvent,
   MessageParam as AnthropicMessageParam,
+  MessageCreateParamsBase as AnthropicMessageCreateParamsBase,
   ToolUnion as AnthropicToolParam,
   ThinkingConfigParam as AnthropicThinkingConfig,
   ContentBlockParam as AnthropicContentBlockParam,
@@ -70,6 +71,11 @@ type ToolUseAccumulator = {
 
 export class AnthropicMapper implements IProviderMapper {
   readonly provider = Provider.Anthropic
+  private static readonly modelsWithoutTemperature = new Set(['claude-opus-4-7', 'claude-opus-4-8'])
+
+  private shouldStripTemperature(model: string): boolean {
+    return AnthropicMapper.modelsWithoutTemperature.has(model)
+  }
 
   private extractToolCaller(caller?: {
     type: RosettaToolCaller['type']
@@ -587,9 +593,11 @@ export class AnthropicMapper implements IProviderMapper {
 
     const anthropicContainerId = this.getAnthropicContainerId(params)
 
-    const basePayload = {
+    const normalizedModel = params.model!.replace(':1m', '')
+
+    const basePayload: AnthropicMessageCreateParamsBase = {
       ...(params.extraParams ?? {}),
-      model: params.model!.replace(':1m', ''),
+      model: normalizedModel,
       messages: messages,
       system: systemParam,
       max_tokens: baseMappedParams.maxTokens ?? 4096,
@@ -603,11 +611,15 @@ export class AnthropicMapper implements IProviderMapper {
       ...(anthropicContainerId ? { container: anthropicContainerId } : {})
     }
 
+    if (this.shouldStripTemperature(normalizedModel)) {
+      delete basePayload.temperature
+    }
+
     if (params.stream) {
       const streamPayload: Anthropic.Messages.MessageCreateParamsStreaming = { ...basePayload, stream: true }
       return streamPayload
     } else {
-      const nonStreamPayload: Anthropic.Messages.MessageCreateParamsNonStreaming = basePayload
+      const nonStreamPayload = { ...basePayload } as Anthropic.Messages.MessageCreateParamsNonStreaming
       return nonStreamPayload
     }
   }

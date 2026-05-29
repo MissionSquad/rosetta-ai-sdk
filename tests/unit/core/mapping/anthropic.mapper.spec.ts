@@ -388,7 +388,7 @@ describe('Anthropic Mapper', () => {
       expect(result.stream).toBe(true)
     })
 
-    it('[Easy] should map temperature, topP, and stop_sequences', () => {
+    it('[Easy] should map temperature, topP, and stop_sequences for legacy Anthropic models', () => {
       const params: GenerateParams = {
         ...baseParams,
         messages: [{ role: 'user', content: 'Generate.' }],
@@ -400,6 +400,30 @@ describe('Anthropic Mapper', () => {
       expect(result.temperature).toBe(0.7)
       expect(result.top_p).toBe(0.8)
       expect(result.stop_sequences).toEqual(['\n', 'Human:'])
+    })
+
+    it('[Easy] should omit temperature for claude-opus-4-7 when set via unified params', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'claude-opus-4-7',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7,
+        topP: 0.8
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.temperature).toBeUndefined()
+      expect(result.top_p).toBe(0.8)
+    })
+
+    it('[Easy] should omit temperature for claude-opus-4-8', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'claude-opus-4-8',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.temperature).toBeUndefined()
     })
 
     it('[Easy] should map toolChoice auto and none', () => {
@@ -624,7 +648,7 @@ describe('Anthropic Mapper', () => {
         expect(result.metadata).toEqual({ user_id: 'abc' })
       })
 
-      it('should not let extraParams override explicitly mapped fields', () => {
+      it('should not let extraParams override explicitly mapped fields for legacy Anthropic models', () => {
         const params: GenerateParams = {
           ...baseParams,
           messages: [{ role: 'user', content: 'Hello' }],
@@ -636,6 +660,37 @@ describe('Anthropic Mapper', () => {
         }
         const result = mapper.mapToProviderParams(params)
         expect(result.temperature).toBe(0.7)
+        expect(result.custom_param).toBe('value')
+      })
+
+      it('should remove temperature from extraParams for claude-opus-4-7 while preserving unrelated fields', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          model: 'claude-opus-4-7',
+          messages: [{ role: 'user', content: 'Hello' }],
+          extraParams: {
+            temperature: 0.1,
+            custom_param: 'value'
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.temperature).toBeUndefined()
+        expect(result.custom_param).toBe('value')
+      })
+
+      it('should remove temperature for claude-opus-4-7 even when both unified params and extraParams set it', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          model: 'claude-opus-4-7',
+          messages: [{ role: 'user', content: 'Hello' }],
+          temperature: 0.7,
+          extraParams: {
+            temperature: 0.1,
+            custom_param: 'value'
+          }
+        }
+        const result = mapper.mapToProviderParams(params)
+        expect(result.temperature).toBeUndefined()
         expect(result.custom_param).toBe('value')
       })
 
