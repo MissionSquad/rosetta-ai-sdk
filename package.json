@@ -78,7 +78,7 @@
   "author": "Jayson Jacobs <public@missionsquad.ai>",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
+    "@anthropic-ai/sdk": "^0.100.1",
     "@elevenlabs/elevenlabs-js": "^2.24.0",
     "@google/genai": "^1.45.0",
     "dotenv": "^16.4.5",
