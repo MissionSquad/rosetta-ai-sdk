@@ -78,6 +78,16 @@ const createMockCodeExecutionToolResultBlock = (
   ...overrides
 })
 
+const createMockServerToolUseBlock = (
+  id: string,
+  code: string
+): Extract<Anthropic.ContentBlock, { type: 'server_tool_use' }> => ({
+  type: 'server_tool_use',
+  id,
+  name: 'code_execution',
+  input: { code }
+})
+
 // Helper async generator for stream tests
 async function* mockAnthropicStreamGenerator(events: RawMessageStreamEvent[]): AsyncIterable<RawMessageStreamEvent> {
   for (const event of events) {
@@ -262,6 +272,32 @@ describe('Anthropic Mapper', () => {
           role: 'assistant',
           content: [{ type: 'text', text: 'Exact Anthropic replay block', citations: null }]
         }
+      ])
+    })
+
+    it('[Medium] should replay an empty Anthropic assistant turn boundary from providerState', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Continue the prior empty assistant turn.' },
+          {
+            role: 'assistant',
+            content: null,
+            providerState: {
+              anthropic: {
+                assistantTurnBoundary: true
+              }
+            }
+          },
+          { role: 'user', content: 'Please continue.' }
+        ]
+      }
+
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.messages).toEqual([
+        { role: 'user', content: 'Continue the prior empty assistant turn.' },
+        { role: 'assistant', content: [] },
+        { role: 'user', content: 'Please continue.' }
       ])
     })
 
@@ -786,6 +822,17 @@ describe('Anthropic Mapper', () => {
       expect(result.finishReason).toBe('stop')
     })
 
+    it('[Easy] should preserve pause_turn finish reason on non-streaming responses', () => {
+      const response = createMockAnthropicMessage(
+        [createMockServerToolUseBlock('srvtoolu_pause_test', 'print(1)')],
+        'pause_turn',
+        { input_tokens: 10, output_tokens: 4 },
+        modelUsed
+      )
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+      expect(result.finishReason).toBe('pause_turn')
+    })
+
     it('[Easy] should handle null stop_reason', () => {
       const response = createMockAnthropicMessage(
         [createMockTextBlock('Response')],
@@ -853,6 +900,17 @@ describe('Anthropic Mapper', () => {
       expect(result.container).toEqual({
         id: 'container_response_state',
         expiresAt: '2026-03-12T12:00:00Z'
+      })
+    })
+
+    it('[Medium] should preserve an empty Anthropic assistant turn boundary on non-streaming responses', () => {
+      const response = createMockAnthropicMessage([], 'end_turn', { input_tokens: 5, output_tokens: 0 }, modelUsed)
+
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+      expect(result.providerState).toEqual({
+        anthropic: {
+          assistantTurnBoundary: true
+        }
       })
     })
 
@@ -968,6 +1026,51 @@ describe('Anthropic Mapper', () => {
       expect(results[3].type).toBe('final_usage')
       expect(results[4].type).toBe('final_result')
       expect((results[4] as any).data.result.finishReason).toBe('length')
+    })
+
+    it('[Medium] should preserve pause_turn finish reason in streaming results', async () => {
+      const events: RawMessageStreamEvent[] = [
+        baseMessageStart,
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: createMockServerToolUseBlock('srvtoolu_pause_stream', 'print(1)')
+        },
+        { type: 'content_block_stop', index: 0 },
+        {
+          type: 'message_delta',
+          delta: { stop_reason: 'pause_turn', stop_sequence: null },
+          usage: { output_tokens: 1 }
+        },
+        { type: 'message_stop' }
+      ]
+
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), baseOriginalParams)
+      const results = await collectStreamChunks(stream)
+
+      expect(results[2]).toEqual({ type: 'message_stop', data: { finishReason: 'pause_turn' } })
+      expect((results[4] as any).data.result.finishReason).toBe('pause_turn')
+    })
+
+    it('[Medium] should preserve an empty Anthropic assistant turn boundary in streaming results', async () => {
+      const events: RawMessageStreamEvent[] = [
+        baseMessageStart,
+        { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 0 } },
+        { type: 'message_stop' }
+      ]
+
+      const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), baseOriginalParams)
+      const results = await collectStreamChunks(stream)
+
+      const finalResultChunk = results.find(
+        (chunk): chunk is Extract<StreamChunk, { type: 'final_result' }> => chunk.type === 'final_result'
+      )
+      expect(finalResultChunk).toBeDefined()
+      expect(finalResultChunk?.data.result.providerState).toEqual({
+        anthropic: {
+          assistantTurnBoundary: true
+        }
+      })
     })
 
     it('[Hard] should handle tool call streaming', async () => {

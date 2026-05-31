@@ -52,6 +52,8 @@ export type RosettaContentPart = { type: 'text'; text: string } | { type: 'image
 export interface AnthropicMessageProviderState {
   /** Exact provider-native content blocks to replay on follow-up turns. */
   rawContentBlocks?: unknown[]
+  /** Preserves an empty-but-real assistant turn boundary for programmatic tool calling resumes. */
+  assistantTurnBoundary?: boolean
 }
 
 /**
@@ -86,6 +88,8 @@ export interface AnthropicGenerateResultProviderState {
   expiresAt?: string | null
   /** Replayable provider-native content blocks captured from the assistant turn. */
   rawContentBlocks?: unknown[]
+  /** Preserves an empty-but-real assistant turn boundary for downstream history replay. */
+  assistantTurnBoundary?: boolean
 }
 
 /**

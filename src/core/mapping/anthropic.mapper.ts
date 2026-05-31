@@ -185,6 +185,10 @@ export class AnthropicMapper implements IProviderMapper {
     return undefined
   }
 
+  private hasAnthropicAssistantTurnBoundary(msg: RosettaMessage): boolean {
+    return msg.providerState?.anthropic?.assistantTurnBoundary === true
+  }
+
   private isProgrammaticToolResultResume(messages: RosettaMessage[], assistantIndex: number, isProgrammaticToolCalling: boolean): boolean {
     if (!isProgrammaticToolCalling) {
       return false
@@ -225,12 +229,14 @@ export class AnthropicMapper implements IProviderMapper {
       containerId?: string
       expiresAt?: string | null
       rawContentBlocks?: unknown[]
+      assistantTurnBoundary?: boolean
     }
   ): GenerateResult['providerState'] | undefined {
     const anthropicState: {
       containerId?: string
       expiresAt?: string | null
       rawContentBlocks?: unknown[]
+      assistantTurnBoundary?: boolean
     } = {
       ...(existing?.anthropic ?? {})
     }
@@ -245,6 +251,10 @@ export class AnthropicMapper implements IProviderMapper {
 
     if (Array.isArray(incoming.rawContentBlocks) && incoming.rawContentBlocks.length > 0) {
       anthropicState.rawContentBlocks = this.cloneRawContentBlocks(incoming.rawContentBlocks)
+    }
+
+    if (incoming.assistantTurnBoundary === true) {
+      anthropicState.assistantTurnBoundary = true
     }
 
     return Object.keys(anthropicState).length > 0 ? { anthropic: anthropicState } : undefined
@@ -403,6 +413,14 @@ export class AnthropicMapper implements IProviderMapper {
           messages.push({
             role: 'assistant',
             content: replayContentBlocks as AnthropicContentBlockParam[]
+          })
+          continue
+        }
+
+        if (msg.role === 'assistant' && this.hasAnthropicAssistantTurnBoundary(msg)) {
+          messages.push({
+            role: 'assistant',
+            content: []
           })
           continue
         }
@@ -717,7 +735,8 @@ export class AnthropicMapper implements IProviderMapper {
     const providerState = this.mergeAnthropicResultProviderState(undefined, {
       containerId: response.container?.id,
       expiresAt: response.container?.expires_at,
-      rawContentBlocks
+      rawContentBlocks,
+      assistantTurnBoundary: Array.isArray(responseContent) && responseContent.length === 0
     })
 
     return {
@@ -1076,6 +1095,10 @@ export class AnthropicMapper implements IProviderMapper {
                 }
                 aggregatedResult.providerState = this.mergeAnthropicResultProviderState(aggregatedResult.providerState, {
                   rawContentBlocks
+                })
+              } else {
+                aggregatedResult.providerState = this.mergeAnthropicResultProviderState(aggregatedResult.providerState, {
+                  assistantTurnBoundary: true
                 })
               }
               yield { type: 'final_result', data: { result: aggregatedResult } }
