@@ -199,7 +199,14 @@ export class AnthropicMapper implements IProviderMapper {
   }
 
   private filterAnthropicReplayContentBlocksForProgrammaticToolResultResume(blocks: unknown[]): unknown[] {
-    const replayableBlockTypes = new Set(['text', 'thinking', 'redacted_thinking', 'tool_use', 'server_tool_use'])
+    const replayableBlockTypes = new Set([
+      'text',
+      'thinking',
+      'redacted_thinking',
+      'tool_use',
+      'server_tool_use',
+      'code_execution_tool_result'
+    ])
     return blocks.filter(block => {
       if (typeof block !== 'object' || block === null || !('type' in block)) {
         return false

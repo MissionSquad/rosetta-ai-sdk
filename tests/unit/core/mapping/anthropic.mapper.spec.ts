@@ -301,7 +301,7 @@ describe('Anthropic Mapper', () => {
       ])
     })
 
-    it('[Hard] should exclude code_execution_tool_result blocks from assistant replay when resuming pending programmatic tool results', () => {
+    it('[Hard] should preserve code_execution_tool_result blocks in assistant replay when resuming pending programmatic tool results', () => {
       const params: GenerateParams = {
         ...baseParams,
         programmaticToolCalling: true,
@@ -346,6 +346,7 @@ describe('Anthropic Mapper', () => {
           content: [
             { type: 'text', text: 'Calling the tool now.', citations: null },
             { type: 'server_tool_use', id: 'srvtoolu_1', name: 'code_execution', input: { code: '...' } },
+            createMockCodeExecutionToolResultBlock('srvtoolu_1'),
             {
               type: 'tool_use',
               id: 'toolu_1',
