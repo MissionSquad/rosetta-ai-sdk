@@ -57,22 +57,26 @@ function transformCohereResponse(rawJson: any): any {
   return transformed
 }
 
-// Zod schema for the MINIMUM expected API response structure
+// Zod schema for the MINIMUM expected API response structure.
+// Only `data` with per-item string `id` is truly required: OpenAI-compatible
+// providers such as OpenRouter omit the decorative `object: 'list'` /
+// `object: 'model'` literals and `owned_by`, so those are optional and get
+// normalized during mapping instead of failing validation.
 const BaseApiResponseSchema = z
   .object({
-    object: z.literal('list'),
+    object: z.literal('list').optional(),
     data: z.array(
       z
         .object({
           id: z.string(),
-          object: z.literal('model'),
-          owned_by: z.string()
+          object: z.literal('model').optional(),
+          owned_by: z.string().optional()
           // Allow other fields to pass through
         })
         .passthrough()
     )
   })
-  .strict() // Use strict to prevent unexpected top-level fields
+  .passthrough() // Tolerate extra top-level fields from non-OpenAI providers
 
 /**
  * Fetches and validates model list from an API endpoint.
@@ -145,10 +149,31 @@ export async function fetchAndValidateModelsFromApi(
 
     let rawJson = await response.json()
 
+    // Some gateways return HTTP 200 with an error envelope instead of a model
+    // list. A truthy top-level `error` marks such a response; successful
+    // OpenAI-compatible responses either omit the key or send `error: null`.
+    // Note: an empty `error: {}` object is deliberately treated as an error
+    // too — requiring a `message` shape would miss envelopes that only carry
+    // codes or arrays, a worse trade than this hypothetical false positive.
+    if (rawJson && typeof rawJson === 'object' && !Array.isArray(rawJson) && rawJson.error) {
+      const errText = typeof rawJson.error === 'string' ? rawJson.error : JSON.stringify(rawJson.error)
+      throw new ProviderAPIError(
+        `Provider ${providerKey} returned an error envelope from ${url}: ${errText}`,
+        providerKey,
+        response.status
+      )
+    }
+
     // Transform Cohere response if detected
     if (isCohere) {
       console.log(`RosettaAI: Transforming Cohere response format`)
       rawJson = transformCohereResponse(rawJson)
+    }
+
+    // Some OpenAI-compatible providers return the model array directly
+    // instead of wrapping it in a `data` envelope
+    if (Array.isArray(rawJson)) {
+      rawJson = { object: 'list', data: rawJson }
     }
 
     // --- CRITICAL VALIDATION STEP ---
@@ -165,29 +190,91 @@ export async function fetchAndValidateModelsFromApi(
 
     const validatedData = validationResult.data // Now typed according to schema
 
+    // An empty-but-valid list usually points at a misconfigured endpoint rather
+    // than a provider with zero models — surface it for debugging
+    if (validatedData.data.length === 0) {
+      console.warn(`RosettaAI: Model list from ${providerKey} (${url}) validated but contained no models.`)
+    }
+
     // --- Mapping ---
     const models: RosettaModel[] = validatedData.data.map(
       (rawModel: any): RosettaModel => {
+        const id: string = rawModel.id
+        // owned_by is absent on some providers (e.g. OpenRouter). Fall back to the
+        // vendor prefix of namespaced ids ('openai/gpt-4' -> 'openai'), then the provider key.
+        const slashIndex = id.indexOf('/')
+        // > 0 also excludes leading-slash ids, which have no vendor prefix
+        const vendorPrefix = slashIndex > 0 ? id.slice(0, slashIndex) : ''
+        const ownedBy: string =
+          typeof rawModel.owned_by === 'string' && rawModel.owned_by.length > 0
+            ? rawModel.owned_by
+            : vendorPrefix.length > 0
+            ? vendorPrefix
+            : providerKey
+        // Priority: explicit context_window, then the model-level context_length
+        // (OpenRouter's canonical value), then top_provider.context_length. The
+        // top_provider value only describes the currently top-ranked route, so it
+        // is a last resort rather than an override of the model-level number.
+        const contextWindow: number | undefined =
+          typeof rawModel.context_window === 'number'
+            ? rawModel.context_window
+            : typeof rawModel.context_length === 'number'
+            ? rawModel.context_length
+            : typeof rawModel.top_provider?.context_length === 'number'
+            ? rawModel.top_provider.context_length
+            : undefined
+        const maxCompletionTokens: number | undefined =
+          typeof rawModel.max_completion_tokens === 'number'
+            ? rawModel.max_completion_tokens
+            : typeof rawModel.top_provider?.max_completion_tokens === 'number'
+            ? rawModel.top_provider.max_completion_tokens
+            : undefined
+        // Description can live under `properties` (Anthropic/Groq style) or top-level (OpenRouter)
+        const description: string | undefined =
+          typeof rawModel.properties?.description === 'string'
+            ? rawModel.properties.description
+            : typeof rawModel.description === 'string'
+            ? rawModel.description
+            : undefined
+        // OpenRouter exposes modalities under `architecture.input_modalities`.
+        // Only trust a list whose entries are all strings; a malformed list is
+        // no signal rather than an explicit "no image input".
+        const rawModalities = rawModel.architecture?.input_modalities
+        const inputModalities: string[] | undefined =
+          Array.isArray(rawModalities) && rawModalities.every((m: any) => typeof m === 'string')
+            ? rawModalities
+            : undefined
+        // Only accept a real boolean; otherwise fall back to modality inference
+        const vision: boolean | undefined =
+          typeof rawModel.properties?.vision === 'boolean'
+            ? rawModel.properties.vision
+            : inputModalities
+            ? inputModalities.includes('image')
+            : undefined
+
         // Map known fields + safely access optional ones seen in examples
         return {
-          id: rawModel.id,
+          id,
           object: 'model',
-          owned_by: rawModel.owned_by,
+          owned_by: ownedBy,
           created: typeof rawModel.created === 'number' ? rawModel.created : undefined, // Only if number
           active: typeof rawModel.active === 'boolean' ? rawModel.active : undefined, // Optional field handling
-          context_window: typeof rawModel.context_window === 'number' ? rawModel.context_window : undefined,
+          context_window: contextWindow,
           public_apps: rawModel.public_apps ?? undefined, // Handle null or undefined
-          max_completion_tokens:
-            typeof rawModel.max_completion_tokens === 'number' ? rawModel.max_completion_tokens : undefined,
-          properties: rawModel.properties
-            ? {
-                // Map known properties if they exist
-                description: rawModel.properties.description,
-                strengths: rawModel.properties.strengths,
-                multilingual: rawModel.properties.multilingual,
-                vision: rawModel.properties.vision
-              }
-            : undefined,
+          max_completion_tokens: maxCompletionTokens,
+          properties:
+            rawModel.properties || description !== undefined || vision !== undefined
+              ? {
+                  description,
+                  strengths:
+                    typeof rawModel.properties?.strengths === 'string' ? rawModel.properties.strengths : undefined,
+                  multilingual:
+                    typeof rawModel.properties?.multilingual === 'boolean'
+                      ? rawModel.properties.multilingual
+                      : undefined,
+                  vision
+                }
+              : undefined,
           provider: providerKey,
           rawData: rawModel // Store original
         }

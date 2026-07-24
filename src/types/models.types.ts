@@ -10,7 +10,14 @@ export interface RosettaModelProperties {
   strengths?: string
   /** Indicates if the model has strong multilingual capabilities. */
   multilingual?: boolean
-  /** Indicates if the model supports vision (image) input. */
+  /**
+   * Indicates if the model supports vision (image) input.
+   * `true`/`false` reflect an explicit signal from the provider (a `vision` flag
+   * or a reported input-modality list, e.g. OpenRouter's
+   * `architecture.input_modalities`); `undefined` means the provider reported
+   * no modality information either way. A reported modality list that lacks
+   * `'image'` is an explicit "no image input" signal and yields `false`.
+   */
   vision?: boolean
   /** Anthropic specific: Indicates support for extended thinking steps. */
   extended_thinking?: boolean
@@ -50,7 +57,15 @@ export interface RosettaModel {
   public_apps?: string | null // Keeping as string | null for flexibility, though examples show null
   /** The maximum number of tokens that can be generated in a single completion request. */
   max_completion_tokens?: number
-  /** Additional, often provider-specific, properties and capabilities of the model. */
+  /**
+   * Additional, often provider-specific, properties and capabilities of the model.
+   * May be synthesized from provider metadata during normalization (e.g. from
+   * OpenRouter's top-level `description` and `architecture.input_modalities`)
+   * even when the provider does not send an explicit `properties` object; check
+   * individual fields rather than treating presence of this object as a signal.
+   * @since 1.12.7 — earlier versions only set this when the provider sent an
+   * explicit `properties` object.
+   */
   properties?: RosettaModelProperties
   /** The provider this model belongs to. Added by RosettaAI for context. */
   readonly provider: ProviderKey // Added by our SDK logic
