@@ -313,6 +313,36 @@ describe('fetchAndValidateModelsFromApi', () => {
       expect(result.data[0].context_window).toBe(4096)
     })
 
+    it('[Easy] should use the first segment of multi-segment ids for owned_by', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [{ id: 'openai/gpt-4/turbo' }] }),
+        status: 200
+      })
+
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      expect(result.data[0].owned_by).toBe('openai')
+    })
+
+    it('[Medium] should warn when a validated response contains no models', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+      try {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: async () => ({ object: 'list', data: [] }),
+          status: 200
+        })
+
+        const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+        expect(result.data).toHaveLength(0)
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('contained no models'))
+      } finally {
+        warnSpy.mockRestore()
+      }
+    })
+
     it('[Medium] should treat an empty owned_by string as absent', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

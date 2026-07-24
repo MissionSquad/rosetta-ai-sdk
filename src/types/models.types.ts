@@ -15,7 +15,8 @@ export interface RosettaModelProperties {
    * `true`/`false` reflect an explicit signal from the provider (a `vision` flag
    * or a reported input-modality list, e.g. OpenRouter's
    * `architecture.input_modalities`); `undefined` means the provider reported
-   * no modality information either way.
+   * no modality information either way. A reported modality list that lacks
+   * `'image'` is an explicit "no image input" signal and yields `false`.
    */
   vision?: boolean
   /** Anthropic specific: Indicates support for extended thinking steps. */
