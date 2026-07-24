@@ -491,6 +491,19 @@ describe('Anthropic Mapper', () => {
       expect(result.top_p).toBeUndefined()
     })
 
+    it('[Easy] should omit temperature and top_p for claude-fable-5', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'claude-fable-5',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7,
+        topP: 0.8
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.temperature).toBeUndefined()
+      expect(result.top_p).toBeUndefined()
+    })
+
     it('[Easy] should map toolChoice auto and none', () => {
       // FIX: Add a user message to avoid the "No messages" error
       const paramsAuto: GenerateParams = {
@@ -539,7 +552,7 @@ describe('Anthropic Mapper', () => {
     })
 
     it('[Medium] should map thinking to adaptive for models that reject thinking budgets', () => {
-      for (const model of ['claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5']) {
+      for (const model of ['claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5']) {
         const params: GenerateParams = {
           ...baseParams,
           model,

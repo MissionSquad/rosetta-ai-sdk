@@ -68,6 +68,19 @@ describe('Anthropic Static Models Data', () => {
     })
   })
 
+  it('[Easy] should include claude-fable-5 with expected core metadata', () => {
+    const fable5 = anthropicStaticModels.data.find(model => model.id === 'claude-fable-5')
+    expect(fable5).toBeDefined()
+    expect(fable5?.owned_by).toBe('anthropic')
+    expect(fable5?.provider).toBe(Provider.Anthropic)
+    expect(fable5?.context_window).toBe(1000000)
+    expect(fable5?.max_completion_tokens).toBe(128000)
+    expect(fable5?.properties?.comparative_latency).toBe('Slower')
+    expect(fable5?.properties?.cost_input_mtok).toBe(10.0)
+    expect(fable5?.properties?.cost_output_mtok).toBe(50.0)
+    expect(fable5?.properties?.training_data_cutoff).toBe('Jan 2026')
+  })
+
   it('[Easy] should include claude-opus-5 with expected core metadata', () => {
     const opus5 = anthropicStaticModels.data.find(model => model.id === 'claude-opus-5')
     expect(opus5).toBeDefined()

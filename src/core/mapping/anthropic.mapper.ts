@@ -76,7 +76,8 @@ export class AnthropicMapper implements IProviderMapper {
     'claude-opus-4-7',
     'claude-opus-4-8',
     'claude-opus-5',
-    'claude-sonnet-5'
+    'claude-sonnet-5',
+    'claude-fable-5'
   ])
 
   // These models reject thinking budgets ({type: 'enabled', budget_tokens})
@@ -85,7 +86,8 @@ export class AnthropicMapper implements IProviderMapper {
     'claude-opus-4-7',
     'claude-opus-4-8',
     'claude-opus-5',
-    'claude-sonnet-5'
+    'claude-sonnet-5',
+    'claude-fable-5'
   ])
 
   private shouldStripSamplingParams(model: string): boolean {
