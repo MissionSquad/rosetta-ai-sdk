@@ -312,6 +312,25 @@ describe('fetchAndValidateModelsFromApi', () => {
       expect(result.data[0].context_window).toBe(4096)
     })
 
+    it('[Medium] should treat an empty owned_by string as absent', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: 'acme/widget', owned_by: '' },
+            { id: 'plain-model', owned_by: '' }
+          ]
+        }),
+        status: 200
+      })
+
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      // Empty string falls through to the vendor prefix, then the provider key
+      expect(result.data[0].owned_by).toBe('acme')
+      expect(result.data[1].owned_by).toBe(openRouterProvider)
+    })
+
     it('[Medium] should tolerate extra top-level fields in the response', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

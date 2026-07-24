@@ -175,6 +175,12 @@ export async function fetchAndValidateModelsFromApi(
 
     const validatedData = validationResult.data // Now typed according to schema
 
+    // An empty-but-valid list usually points at a misconfigured endpoint rather
+    // than a provider with zero models — surface it for debugging
+    if (validatedData.data.length === 0) {
+      console.warn(`RosettaAI: Model list from ${providerKey} (${url}) validated but contained no models.`)
+    }
+
     // --- Mapping ---
     const models: RosettaModel[] = validatedData.data.map(
       (rawModel: any): RosettaModel => {
