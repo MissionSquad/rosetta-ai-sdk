@@ -424,9 +424,10 @@ describe('fetchAndValidateModelsFromApi', () => {
             {
               id: 'big/model',
               context_length: 200000,
+              max_completion_tokens: 4000,
               top_provider: { context_length: 128000, max_completion_tokens: 8192 }
             },
-            { id: 'routed/model', top_provider: { context_length: 128000 } }
+            { id: 'routed/model', top_provider: { context_length: 128000, max_completion_tokens: 8192 } }
           ]
         }),
         status: 200
@@ -434,10 +435,11 @@ describe('fetchAndValidateModelsFromApi', () => {
 
       const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
 
-      // Model-level context_length is canonical; top_provider is a last resort
+      // Model-level values are canonical; top_provider is a last resort
       expect(result.data[0].context_window).toBe(200000)
-      expect(result.data[0].max_completion_tokens).toBe(8192)
+      expect(result.data[0].max_completion_tokens).toBe(4000)
       expect(result.data[1].context_window).toBe(128000)
+      expect(result.data[1].max_completion_tokens).toBe(8192)
     })
 
     it('[Medium] should leave vision undefined when no modality signal is present', async () => {

@@ -152,6 +152,9 @@ export async function fetchAndValidateModelsFromApi(
     // Some gateways return HTTP 200 with an error envelope instead of a model
     // list. A truthy top-level `error` marks such a response; successful
     // OpenAI-compatible responses either omit the key or send `error: null`.
+    // Note: an empty `error: {}` object is deliberately treated as an error
+    // too — requiring a `message` shape would miss envelopes that only carry
+    // codes or arrays, a worse trade than this hypothetical false positive.
     if (rawJson && typeof rawJson === 'object' && !Array.isArray(rawJson) && rawJson.error) {
       const errText = typeof rawJson.error === 'string' ? rawJson.error : JSON.stringify(rawJson.error)
       throw new ProviderAPIError(
