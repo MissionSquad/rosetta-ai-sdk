@@ -63,6 +63,8 @@ export interface RosettaModel {
    * OpenRouter's top-level `description` and `architecture.input_modalities`)
    * even when the provider does not send an explicit `properties` object; check
    * individual fields rather than treating presence of this object as a signal.
+   * @since 1.12.7 — earlier versions only set this when the provider sent an
+   * explicit `properties` object.
    */
   properties?: RosettaModelProperties
   /** The provider this model belongs to. Added by RosettaAI for context. */

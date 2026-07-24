@@ -149,6 +149,18 @@ export async function fetchAndValidateModelsFromApi(
 
     let rawJson = await response.json()
 
+    // Some gateways return HTTP 200 with an error envelope instead of a model
+    // list. A truthy top-level `error` marks such a response; successful
+    // OpenAI-compatible responses either omit the key or send `error: null`.
+    if (rawJson && typeof rawJson === 'object' && !Array.isArray(rawJson) && rawJson.error) {
+      const errText = typeof rawJson.error === 'string' ? rawJson.error : JSON.stringify(rawJson.error)
+      throw new ProviderAPIError(
+        `Provider ${providerKey} returned an error envelope from ${url}: ${errText}`,
+        providerKey,
+        response.status
+      )
+    }
+
     // Transform Cohere response if detected
     if (isCohere) {
       console.log(`RosettaAI: Transforming Cohere response format`)
@@ -221,10 +233,14 @@ export async function fetchAndValidateModelsFromApi(
             : typeof rawModel.description === 'string'
             ? rawModel.description
             : undefined
-        // OpenRouter exposes modalities under `architecture.input_modalities`
-        const inputModalities: any[] | undefined = Array.isArray(rawModel.architecture?.input_modalities)
-          ? rawModel.architecture.input_modalities
-          : undefined
+        // OpenRouter exposes modalities under `architecture.input_modalities`.
+        // Only trust a list whose entries are all strings; a malformed list is
+        // no signal rather than an explicit "no image input".
+        const rawModalities = rawModel.architecture?.input_modalities
+        const inputModalities: string[] | undefined =
+          Array.isArray(rawModalities) && rawModalities.every((m: any) => typeof m === 'string')
+            ? rawModalities
+            : undefined
         // Only accept a real boolean; otherwise fall back to modality inference
         const vision: boolean | undefined =
           typeof rawModel.properties?.vision === 'boolean'

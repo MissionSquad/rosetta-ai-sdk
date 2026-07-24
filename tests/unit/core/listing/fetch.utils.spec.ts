@@ -325,6 +325,34 @@ describe('fetchAndValidateModelsFromApi', () => {
       expect(result.data[0].owned_by).toBe('openai')
     })
 
+    it('[Medium] should throw ProviderAPIError for an HTTP 200 error envelope', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ error: { message: 'invalid key' }, data: [] }),
+        status: 200
+      })
+
+      await expect(fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)).rejects.toThrow(
+        ProviderAPIError
+      )
+      await expect(fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)).rejects.toThrow(
+        /error envelope/
+      )
+    })
+
+    it('[Medium] should treat a malformed input_modalities array as no signal', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [{ id: 'weird/model', architecture: { input_modalities: [1, 2, 3] } }] }),
+        status: 200
+      })
+
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      // Garbage modality entries must not produce an explicit vision: false
+      expect(result.data[0].properties).toBeUndefined()
+    })
+
     it('[Medium] should warn when a validated response contains no models', async () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
       try {
