@@ -10,6 +10,56 @@ const rawAnthropicData = {
     // LATEST MODELS
     // =========================================================================
 
+    // --- Claude Opus 5 ---
+    {
+      id: 'claude-opus-5',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'For complex agentic coding and enterprise work',
+        strengths: 'Step-change over Opus 4.8 in deep reasoning, agentic coding, and long-horizon work (Claude 5 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Moderate',
+        cost_input_mtok: 5.0,
+        cost_output_mtok: 25.0,
+        training_data_cutoff: 'May 2026',
+        extended_max_completion_tokens: null
+      }
+    },
+
+    // --- Claude Sonnet 5 ---
+    // Introductory pricing of $2/$10 per MTok applies through 2026-08-31;
+    // the durable sticker price is recorded here.
+    {
+      id: 'claude-sonnet-5',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'The best combination of speed and intelligence',
+        strengths: 'Near-Opus quality on coding and agentic work with fast response times (Claude 5 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Fast',
+        cost_input_mtok: 3.0,
+        cost_output_mtok: 15.0,
+        training_data_cutoff: 'Jan 2026',
+        extended_max_completion_tokens: null
+      }
+    },
+
     // --- Claude Opus 4.8 ---
     {
       id: 'claude-opus-4-8',
@@ -339,191 +389,6 @@ const rawAnthropicData = {
         cost_input_mtok: 5.0,
         cost_output_mtok: 25.0,
         training_data_cutoff: 'Aug 2025',
-        extended_max_completion_tokens: null
-      }
-    },
-
-    // --- Claude Opus 4.1 ---
-    {
-      id: 'claude-opus-4-1-20250805',
-      object: 'model',
-      owned_by: 'anthropic',
-      created: null,
-      active: true,
-      context_window: 200000,
-      public_apps: null,
-      max_completion_tokens: 32000,
-      properties: {
-        description: "Anthropic's powerful Claude 4.1 model",
-        strengths: 'Highest level of intelligence and capability for complex tasks (Claude 4.1 series)',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'Moderate',
-        cost_input_mtok: 15.0,
-        cost_output_mtok: 75.0,
-        training_data_cutoff: 'Mar 2025',
-        extended_max_completion_tokens: null
-      }
-    },
-    {
-      id: 'claude-opus-4-1',
-      object: 'model',
-      owned_by: 'anthropic',
-      created: null,
-      active: true,
-      context_window: 200000,
-      public_apps: null,
-      max_completion_tokens: 32000,
-      properties: {
-        description: "Anthropic's powerful Claude 4.1 model (alias)",
-        strengths: 'Highest level of intelligence and capability for complex tasks (Claude 4.1 series)',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'Moderate',
-        cost_input_mtok: 15.0,
-        cost_output_mtok: 75.0,
-        training_data_cutoff: 'Mar 2025',
-        extended_max_completion_tokens: null
-      }
-    },
-
-    // --- Claude Sonnet 4 ---
-    {
-      id: 'claude-sonnet-4-20250514',
-      object: 'model',
-      owned_by: 'anthropic',
-      created: null,
-      active: true,
-      context_window: 200000,
-      public_apps: null,
-      max_completion_tokens: 64000,
-      properties: {
-        description: "Anthropic's balanced Claude 4 model for intelligence and speed",
-        strengths: 'High level of intelligence and capability with good speed (Claude 4 series)',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'Fast',
-        cost_input_mtok: 3.0,
-        cost_output_mtok: 15.0,
-        training_data_cutoff: 'Mar 2025',
-        extended_max_completion_tokens: null
-      }
-    },
-    {
-      id: 'claude-sonnet-4-0',
-      object: 'model',
-      owned_by: 'anthropic',
-      created: null,
-      active: true,
-      context_window: 200000,
-      public_apps: null,
-      max_completion_tokens: 64000,
-      properties: {
-        description: "Anthropic's balanced Claude 4 model for intelligence and speed (alias)",
-        strengths: 'High level of intelligence and capability with good speed (Claude 4 series)',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'Fast',
-        cost_input_mtok: 3.0,
-        cost_output_mtok: 15.0,
-        training_data_cutoff: 'Mar 2025',
-        extended_max_completion_tokens: null
-      }
-    },
-    // --- Claude Sonnet 4 (1M Context) ---
-    {
-      id: 'claude-sonnet-4-20250514:1m',
-      object: 'model',
-      owned_by: 'anthropic',
-      created: null,
-      active: true,
-      context_window: 1000000,
-      public_apps: null,
-      max_completion_tokens: 64000,
-      properties: {
-        description: "Anthropic's balanced Claude 4 model for intelligence and speed (1M context)",
-        strengths: 'High level of intelligence and capability with good speed (Claude 4 series)',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'Fast',
-        cost_input_mtok: 3.0,
-        cost_output_mtok: 15.0,
-        training_data_cutoff: 'Mar 2025',
-        extended_max_completion_tokens: null,
-        beta_features: ['context-1m-2025-08-07']
-      }
-    },
-    {
-      id: 'claude-sonnet-4-0:1m',
-      object: 'model',
-      owned_by: 'anthropic',
-      created: null,
-      active: true,
-      context_window: 1000000,
-      public_apps: null,
-      max_completion_tokens: 64000,
-      properties: {
-        description: "Anthropic's balanced Claude 4 model for intelligence and speed (1M context, alias)",
-        strengths: 'High level of intelligence and capability with good speed (Claude 4 series)',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'Fast',
-        cost_input_mtok: 3.0,
-        cost_output_mtok: 15.0,
-        training_data_cutoff: 'Mar 2025',
-        extended_max_completion_tokens: null,
-        beta_features: ['context-1m-2025-08-07']
-      }
-    },
-
-    // --- Claude Opus 4 ---
-    {
-      id: 'claude-opus-4-20250514',
-      object: 'model',
-      owned_by: 'anthropic',
-      created: null,
-      active: true,
-      context_window: 200000,
-      public_apps: null,
-      max_completion_tokens: 32000,
-      properties: {
-        description: "Anthropic's powerful Claude 4 model",
-        strengths: 'Highest level of intelligence and capability for complex tasks (Claude 4 series)',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'Moderate',
-        cost_input_mtok: 15.0,
-        cost_output_mtok: 75.0,
-        training_data_cutoff: 'Mar 2025',
-        extended_max_completion_tokens: null
-      }
-    },
-    {
-      id: 'claude-opus-4-0',
-      object: 'model',
-      owned_by: 'anthropic',
-      created: null,
-      active: true,
-      context_window: 200000,
-      public_apps: null,
-      max_completion_tokens: 32000,
-      properties: {
-        description: "Anthropic's powerful Claude 4 model (alias)",
-        strengths: 'Highest level of intelligence and capability for complex tasks (Claude 4 series)',
-        multilingual: true,
-        vision: true,
-        extended_thinking: true,
-        comparative_latency: 'Moderate',
-        cost_input_mtok: 15.0,
-        cost_output_mtok: 75.0,
-        training_data_cutoff: 'Mar 2025',
         extended_max_completion_tokens: null
       }
     }

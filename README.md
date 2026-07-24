@@ -752,7 +752,7 @@ const result = await rosetta.generate({
 // Anthropic structured output via json_schema
 const result = await rosetta.generate({
   provider: Provider.Anthropic,
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-5',
   messages: [
     { role: 'user', content: 'Extract the name and age from: "Bob is 25 years old."' }
   ],

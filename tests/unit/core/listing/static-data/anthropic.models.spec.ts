@@ -68,6 +68,32 @@ describe('Anthropic Static Models Data', () => {
     })
   })
 
+  it('[Easy] should include claude-opus-5 with expected core metadata', () => {
+    const opus5 = anthropicStaticModels.data.find(model => model.id === 'claude-opus-5')
+    expect(opus5).toBeDefined()
+    expect(opus5?.owned_by).toBe('anthropic')
+    expect(opus5?.provider).toBe(Provider.Anthropic)
+    expect(opus5?.context_window).toBe(1000000)
+    expect(opus5?.max_completion_tokens).toBe(128000)
+    expect(opus5?.properties?.comparative_latency).toBe('Moderate')
+    expect(opus5?.properties?.cost_input_mtok).toBe(5.0)
+    expect(opus5?.properties?.cost_output_mtok).toBe(25.0)
+    expect(opus5?.properties?.training_data_cutoff).toBe('May 2026')
+  })
+
+  it('[Easy] should include claude-sonnet-5 with expected core metadata', () => {
+    const sonnet5 = anthropicStaticModels.data.find(model => model.id === 'claude-sonnet-5')
+    expect(sonnet5).toBeDefined()
+    expect(sonnet5?.owned_by).toBe('anthropic')
+    expect(sonnet5?.provider).toBe(Provider.Anthropic)
+    expect(sonnet5?.context_window).toBe(1000000)
+    expect(sonnet5?.max_completion_tokens).toBe(128000)
+    expect(sonnet5?.properties?.comparative_latency).toBe('Fast')
+    expect(sonnet5?.properties?.cost_input_mtok).toBe(3.0)
+    expect(sonnet5?.properties?.cost_output_mtok).toBe(15.0)
+    expect(sonnet5?.properties?.training_data_cutoff).toBe('Jan 2026')
+  })
+
   it('[Easy] should include claude-opus-4-8 with expected core metadata', () => {
     const opus48 = anthropicStaticModels.data.find(model => model.id === 'claude-opus-4-8')
     expect(opus48).toBeDefined()

@@ -439,7 +439,7 @@ describe('Anthropic Mapper', () => {
       expect(result.stop_sequences).toEqual(['\n', 'Human:'])
     })
 
-    it('[Easy] should omit temperature for claude-opus-4-7 when set via unified params', () => {
+    it('[Easy] should omit temperature and top_p for claude-opus-4-7 when set via unified params', () => {
       const params: GenerateParams = {
         ...baseParams,
         model: 'claude-opus-4-7',
@@ -449,18 +449,46 @@ describe('Anthropic Mapper', () => {
       }
       const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
       expect(result.temperature).toBeUndefined()
-      expect(result.top_p).toBe(0.8)
+      expect(result.top_p).toBeUndefined()
     })
 
-    it('[Easy] should omit temperature for claude-opus-4-8', () => {
+    it('[Easy] should omit temperature and top_p for claude-opus-4-8', () => {
       const params: GenerateParams = {
         ...baseParams,
         model: 'claude-opus-4-8',
         messages: [{ role: 'user', content: 'Generate.' }],
-        temperature: 0.7
+        temperature: 0.7,
+        topP: 0.8
       }
       const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
       expect(result.temperature).toBeUndefined()
+      expect(result.top_p).toBeUndefined()
+    })
+
+    it('[Easy] should omit temperature and top_p for claude-opus-5', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'claude-opus-5',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7,
+        topP: 0.8
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.temperature).toBeUndefined()
+      expect(result.top_p).toBeUndefined()
+    })
+
+    it('[Easy] should omit temperature and top_p for claude-sonnet-5', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'claude-sonnet-5',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7,
+        topP: 0.8
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.temperature).toBeUndefined()
+      expect(result.top_p).toBeUndefined()
     })
 
     it('[Easy] should map toolChoice auto and none', () => {
@@ -508,6 +536,19 @@ describe('Anthropic Mapper', () => {
       const params: GenerateParams = { ...baseParams, messages: [{ role: 'user', content: 'Test' }], thinking: true }
       const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
       expect(result.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 })
+    })
+
+    it('[Medium] should map thinking to adaptive for models that reject thinking budgets', () => {
+      for (const model of ['claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5']) {
+        const params: GenerateParams = {
+          ...baseParams,
+          model,
+          messages: [{ role: 'user', content: 'Test' }],
+          thinking: true
+        }
+        const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+        expect(result.thinking).toEqual({ type: 'adaptive' })
+      }
     })
 
     it('[Easy] should map responseFormat json_schema to output_config.format', () => {
