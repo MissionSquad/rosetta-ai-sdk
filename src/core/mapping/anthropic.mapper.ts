@@ -71,15 +71,25 @@ type ToolUseAccumulator = {
 
 export class AnthropicMapper implements IProviderMapper {
   readonly provider = Provider.Anthropic
-  private static readonly modelsWithoutTemperature = new Set([
+  // These models reject sampling parameters (temperature, top_p) with a 400.
+  private static readonly modelsWithoutSamplingParams = new Set([
     'claude-opus-4-7',
     'claude-opus-4-8',
     'claude-opus-5',
     'claude-sonnet-5'
   ])
 
-  private shouldStripTemperature(model: string): boolean {
-    return AnthropicMapper.modelsWithoutTemperature.has(model)
+  // These models reject thinking budgets ({type: 'enabled', budget_tokens})
+  // with a 400; thinking is requested via {type: 'adaptive'} instead.
+  private static readonly modelsWithAdaptiveThinking = new Set([
+    'claude-opus-4-7',
+    'claude-opus-4-8',
+    'claude-opus-5',
+    'claude-sonnet-5'
+  ])
+
+  private shouldStripSamplingParams(model: string): boolean {
+    return AnthropicMapper.modelsWithoutSamplingParams.has(model)
   }
 
   private extractToolCaller(caller?: {
@@ -593,9 +603,13 @@ export class AnthropicMapper implements IProviderMapper {
       }
     }
 
+    const normalizedModel = params.model!.replace(':1m', '')
+
     let thinkingParam: AnthropicThinkingConfig | undefined = undefined
     if (params.thinking) {
-      thinkingParam = { type: 'enabled', budget_tokens: 1024 }
+      thinkingParam = AnthropicMapper.modelsWithAdaptiveThinking.has(normalizedModel)
+        ? { type: 'adaptive' }
+        : { type: 'enabled', budget_tokens: 1024 }
     }
 
     let systemParam: string | AnthropicTextBlockParam[] | undefined
@@ -623,8 +637,6 @@ export class AnthropicMapper implements IProviderMapper {
 
     const anthropicContainerId = this.getAnthropicContainerId(params)
 
-    const normalizedModel = params.model!.replace(':1m', '')
-
     const basePayload: AnthropicMessageCreateParamsBase = {
       ...(params.extraParams ?? {}),
       model: normalizedModel,
@@ -641,8 +653,9 @@ export class AnthropicMapper implements IProviderMapper {
       ...(anthropicContainerId ? { container: anthropicContainerId } : {})
     }
 
-    if (this.shouldStripTemperature(normalizedModel)) {
+    if (this.shouldStripSamplingParams(normalizedModel)) {
       delete basePayload.temperature
+      delete basePayload.top_p
     }
 
     if (params.stream) {
