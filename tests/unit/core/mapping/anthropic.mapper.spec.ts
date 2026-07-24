@@ -463,6 +463,28 @@ describe('Anthropic Mapper', () => {
       expect(result.temperature).toBeUndefined()
     })
 
+    it('[Easy] should omit temperature for claude-opus-5', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'claude-opus-5',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.temperature).toBeUndefined()
+    })
+
+    it('[Easy] should omit temperature for claude-sonnet-5', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'claude-sonnet-5',
+        messages: [{ role: 'user', content: 'Generate.' }],
+        temperature: 0.7
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.temperature).toBeUndefined()
+    })
+
     it('[Easy] should map toolChoice auto and none', () => {
       // FIX: Add a user message to avoid the "No messages" error
       const paramsAuto: GenerateParams = {

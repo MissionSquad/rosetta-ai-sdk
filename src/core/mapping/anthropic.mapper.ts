@@ -71,7 +71,12 @@ type ToolUseAccumulator = {
 
 export class AnthropicMapper implements IProviderMapper {
   readonly provider = Provider.Anthropic
-  private static readonly modelsWithoutTemperature = new Set(['claude-opus-4-7', 'claude-opus-4-8'])
+  private static readonly modelsWithoutTemperature = new Set([
+    'claude-opus-4-7',
+    'claude-opus-4-8',
+    'claude-opus-5',
+    'claude-sonnet-5'
+  ])
 
   private shouldStripTemperature(model: string): boolean {
     return AnthropicMapper.modelsWithoutTemperature.has(model)

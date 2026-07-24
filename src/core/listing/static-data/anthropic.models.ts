@@ -10,6 +10,54 @@ const rawAnthropicData = {
     // LATEST MODELS
     // =========================================================================
 
+    // --- Claude Opus 5 ---
+    {
+      id: 'claude-opus-5',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'For complex agentic coding and enterprise work',
+        strengths: 'Step-change over Opus 4.8 in deep reasoning, agentic coding, and long-horizon work (Claude 5 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Moderate',
+        cost_input_mtok: 5.0,
+        cost_output_mtok: 25.0,
+        training_data_cutoff: 'May 2026',
+        extended_max_completion_tokens: null
+      }
+    },
+
+    // --- Claude Sonnet 5 ---
+    {
+      id: 'claude-sonnet-5',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'The best combination of speed and intelligence',
+        strengths: 'Near-Opus quality on coding and agentic work with fast response times (Claude 5 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Fast',
+        cost_input_mtok: 3.0,
+        cost_output_mtok: 15.0,
+        training_data_cutoff: 'Jan 2026',
+        extended_max_completion_tokens: null
+      }
+    },
+
     // --- Claude Opus 4.8 ---
     {
       id: 'claude-opus-4-8',
