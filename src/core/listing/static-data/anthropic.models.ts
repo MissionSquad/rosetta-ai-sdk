@@ -10,6 +10,30 @@ const rawAnthropicData = {
     // LATEST MODELS
     // =========================================================================
 
+    // --- Claude Fable 5 ---
+    {
+      id: 'claude-fable-5',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'Next-generation intelligence for long-running agents',
+        strengths: "Anthropic's most capable widely released model for demanding reasoning and long-horizon agentic work (Claude 5 series)",
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Slower',
+        cost_input_mtok: 10.0,
+        cost_output_mtok: 50.0,
+        training_data_cutoff: 'Jan 2026',
+        extended_max_completion_tokens: null
+      }
+    },
+
     // --- Claude Opus 5 ---
     {
       id: 'claude-opus-5',
