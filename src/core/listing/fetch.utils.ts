@@ -187,8 +187,11 @@ export async function fetchAndValidateModelsFromApi(
             ? rawModel.owned_by
             : vendorPrefix.length > 0
             ? vendorPrefix
-            : String(providerKey)
-        // OpenRouter reports the window as `context_length` (per-model or per top_provider)
+            : providerKey
+        // Priority: explicit context_window, then the model-level context_length
+        // (OpenRouter's canonical value), then top_provider.context_length. The
+        // top_provider value only describes the currently top-ranked route, so it
+        // is a last resort rather than an override of the model-level number.
         const contextWindow: number | undefined =
           typeof rawModel.context_window === 'number'
             ? rawModel.context_window

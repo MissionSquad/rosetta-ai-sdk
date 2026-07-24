@@ -312,24 +312,44 @@ describe('fetchAndValidateModelsFromApi', () => {
       expect(result.data[0].context_window).toBe(4096)
     })
 
-    it('[Medium] should tolerate extra top-level fields and a bare array response', async () => {
-      mockFetch.mockResolvedValueOnce({
+    it('[Medium] should tolerate extra top-level fields in the response', async () => {
+      mockFetch.mockResolvedValue({
         ok: true,
         json: async () => ({ data: [{ id: 'a/b' }], extra_field: 'ignored' }),
         status: 200
       })
-      const withExtras = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
-      expect(withExtras.data[0].id).toBe('a/b')
 
-      mockFetch.mockResolvedValueOnce({
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      expect(result.data[0].id).toBe('a/b')
+    })
+
+    it('[Medium] should accept a bare array response', async () => {
+      mockFetch.mockResolvedValue({
         ok: true,
         json: async () => [{ id: 'bare/model', owned_by: 'someone' }],
         status: 200
       })
-      const bareArray = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
-      expect(bareArray.object).toBe('list')
-      expect(bareArray.data[0].id).toBe('bare/model')
-      expect(bareArray.data[0].owned_by).toBe('someone')
+
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      expect(result.object).toBe('list')
+      expect(result.data[0].id).toBe('bare/model')
+      expect(result.data[0].owned_by).toBe('someone')
+    })
+
+    it('[Medium] should leave vision undefined when no modality signal is present', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [{ id: 'mystery/model' }] }),
+        status: 200
+      })
+
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      // No properties, no architecture: no capability signal at all
+      expect(result.data[0].properties).toBeUndefined()
+      expect(result.data[0].context_window).toBeUndefined()
     })
   })
 
