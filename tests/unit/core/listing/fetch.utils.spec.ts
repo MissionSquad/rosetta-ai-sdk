@@ -196,6 +196,119 @@ describe('fetchAndValidateModelsFromApi', () => {
     )
   })
 
+  describe('OpenRouter-style responses (no object/owned_by markers)', () => {
+    const openRouterUrl = 'https://openrouter.ai/api/v1/models'
+    const openRouterProvider = 'openrouter'
+    // Shape taken from https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties
+    const openRouterModel = {
+      architecture: {
+        input_modalities: ['text'],
+        instruct_type: 'chatml',
+        modality: 'text->text',
+        output_modalities: ['text'],
+        tokenizer: 'GPT'
+      },
+      canonical_slug: 'openai/gpt-4',
+      context_length: 8192,
+      created: 1692901234,
+      default_parameters: null,
+      description: 'GPT-4 is a large multimodal model that can solve difficult problems with greater accuracy.',
+      expiration_date: null,
+      id: 'openai/gpt-4',
+      knowledge_cutoff: null,
+      links: { details: '/api/v1/models/openai/gpt-4/endpoints' },
+      name: 'GPT-4',
+      per_request_limits: null,
+      pricing: { completion: '0.00006', image: '0', prompt: '0.00003', request: '0' },
+      supported_parameters: ['temperature', 'top_p', 'max_tokens'],
+      supported_voices: null,
+      top_provider: { context_length: 8192, is_moderated: true, max_completion_tokens: 4096 }
+    }
+
+    it('[Medium] should validate and normalize the OpenRouter model list response', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [openRouterModel] }),
+        status: 200
+      })
+
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      expect(result.object).toBe('list')
+      expect(result.data).toHaveLength(1)
+      const model = result.data[0]
+      expect(model.id).toBe('openai/gpt-4')
+      expect(model.object).toBe('model')
+      // Derived from the vendor prefix of the id
+      expect(model.owned_by).toBe('openai')
+      expect(model.created).toBe(1692901234)
+      // Mapped from OpenRouter's context_length
+      expect(model.context_window).toBe(8192)
+      // Mapped from top_provider.max_completion_tokens
+      expect(model.max_completion_tokens).toBe(4096)
+      expect(model.properties).toEqual({
+        description: 'GPT-4 is a large multimodal model that can solve difficult problems with greater accuracy.',
+        strengths: undefined,
+        multilingual: undefined,
+        vision: false
+      })
+      expect(model.provider).toBe(openRouterProvider)
+      // Original payload preserved for downstream use
+      expect(model.rawData).toEqual(openRouterModel)
+    })
+
+    it('[Medium] should derive vision capability from architecture.input_modalities', async () => {
+      const visionModel = {
+        ...openRouterModel,
+        id: 'google/gemini-2.5-pro',
+        architecture: { ...openRouterModel.architecture, input_modalities: ['text', 'image'] }
+      }
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [visionModel] }),
+        status: 200
+      })
+
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      expect(result.data[0].owned_by).toBe('google')
+      expect(result.data[0].properties?.vision).toBe(true)
+    })
+
+    it('[Medium] should fall back to the provider key for owned_by when the id has no vendor prefix', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [{ id: 'my-local-model', context_length: 4096 }] }),
+        status: 200
+      })
+
+      const result = await fetchAndValidateModelsFromApi('http://localhost:1234/v1/models', 'lmstudio', undefined)
+
+      expect(result.data[0].owned_by).toBe('lmstudio')
+      expect(result.data[0].context_window).toBe(4096)
+    })
+
+    it('[Medium] should tolerate extra top-level fields and a bare array response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [{ id: 'a/b' }], extra_field: 'ignored' }),
+        status: 200
+      })
+      const withExtras = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+      expect(withExtras.data[0].id).toBe('a/b')
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: 'bare/model', owned_by: 'someone' }],
+        status: 200
+      })
+      const bareArray = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+      expect(bareArray.object).toBe('list')
+      expect(bareArray.data[0].id).toBe('bare/model')
+      expect(bareArray.data[0].owned_by).toBe('someone')
+    })
+  })
+
   it('[Hard] should handle optional properties correctly during mapping', async () => {
     const mockApiResponse = {
       object: 'list',

@@ -57,22 +57,26 @@ function transformCohereResponse(rawJson: any): any {
   return transformed
 }
 
-// Zod schema for the MINIMUM expected API response structure
+// Zod schema for the MINIMUM expected API response structure.
+// Only `data` with per-item string `id` is truly required: OpenAI-compatible
+// providers such as OpenRouter omit the decorative `object: 'list'` /
+// `object: 'model'` literals and `owned_by`, so those are optional and get
+// normalized during mapping instead of failing validation.
 const BaseApiResponseSchema = z
   .object({
-    object: z.literal('list'),
+    object: z.literal('list').optional(),
     data: z.array(
       z
         .object({
           id: z.string(),
-          object: z.literal('model'),
-          owned_by: z.string()
+          object: z.literal('model').optional(),
+          owned_by: z.string().optional()
           // Allow other fields to pass through
         })
         .passthrough()
     )
   })
-  .strict() // Use strict to prevent unexpected top-level fields
+  .passthrough() // Tolerate extra top-level fields from non-OpenAI providers
 
 /**
  * Fetches and validates model list from an API endpoint.
@@ -151,6 +155,12 @@ export async function fetchAndValidateModelsFromApi(
       rawJson = transformCohereResponse(rawJson)
     }
 
+    // Some OpenAI-compatible providers return the model array directly
+    // instead of wrapping it in a `data` envelope
+    if (Array.isArray(rawJson)) {
+      rawJson = { object: 'list', data: rawJson }
+    }
+
     // --- CRITICAL VALIDATION STEP ---
     const validationResult = BaseApiResponseSchema.safeParse(rawJson)
     if (!validationResult.success) {
@@ -168,26 +178,61 @@ export async function fetchAndValidateModelsFromApi(
     // --- Mapping ---
     const models: RosettaModel[] = validatedData.data.map(
       (rawModel: any): RosettaModel => {
+        const id: string = rawModel.id
+        // owned_by is absent on some providers (e.g. OpenRouter). Fall back to the
+        // vendor prefix of namespaced ids ('openai/gpt-4' -> 'openai'), then the provider key.
+        const vendorPrefix = id.includes('/') ? id.slice(0, id.indexOf('/')) : ''
+        const ownedBy: string =
+          typeof rawModel.owned_by === 'string' && rawModel.owned_by.length > 0
+            ? rawModel.owned_by
+            : vendorPrefix.length > 0
+            ? vendorPrefix
+            : String(providerKey)
+        // OpenRouter reports the window as `context_length` (per-model or per top_provider)
+        const contextWindow: number | undefined =
+          typeof rawModel.context_window === 'number'
+            ? rawModel.context_window
+            : typeof rawModel.context_length === 'number'
+            ? rawModel.context_length
+            : typeof rawModel.top_provider?.context_length === 'number'
+            ? rawModel.top_provider.context_length
+            : undefined
+        const maxCompletionTokens: number | undefined =
+          typeof rawModel.max_completion_tokens === 'number'
+            ? rawModel.max_completion_tokens
+            : typeof rawModel.top_provider?.max_completion_tokens === 'number'
+            ? rawModel.top_provider.max_completion_tokens
+            : undefined
+        // Description can live under `properties` (Anthropic/Groq style) or top-level (OpenRouter)
+        const description: string | undefined =
+          rawModel.properties?.description ??
+          (typeof rawModel.description === 'string' ? rawModel.description : undefined)
+        // OpenRouter exposes modalities under `architecture.input_modalities`
+        const inputModalities: any[] | undefined = Array.isArray(rawModel.architecture?.input_modalities)
+          ? rawModel.architecture.input_modalities
+          : undefined
+        const vision: boolean | undefined =
+          rawModel.properties?.vision ?? (inputModalities ? inputModalities.includes('image') : undefined)
+
         // Map known fields + safely access optional ones seen in examples
         return {
-          id: rawModel.id,
+          id,
           object: 'model',
-          owned_by: rawModel.owned_by,
+          owned_by: ownedBy,
           created: typeof rawModel.created === 'number' ? rawModel.created : undefined, // Only if number
           active: typeof rawModel.active === 'boolean' ? rawModel.active : undefined, // Optional field handling
-          context_window: typeof rawModel.context_window === 'number' ? rawModel.context_window : undefined,
+          context_window: contextWindow,
           public_apps: rawModel.public_apps ?? undefined, // Handle null or undefined
-          max_completion_tokens:
-            typeof rawModel.max_completion_tokens === 'number' ? rawModel.max_completion_tokens : undefined,
-          properties: rawModel.properties
-            ? {
-                // Map known properties if they exist
-                description: rawModel.properties.description,
-                strengths: rawModel.properties.strengths,
-                multilingual: rawModel.properties.multilingual,
-                vision: rawModel.properties.vision
-              }
-            : undefined,
+          max_completion_tokens: maxCompletionTokens,
+          properties:
+            rawModel.properties || description !== undefined || vision !== undefined
+              ? {
+                  description,
+                  strengths: rawModel.properties?.strengths,
+                  multilingual: rawModel.properties?.multilingual,
+                  vision
+                }
+              : undefined,
           provider: providerKey,
           rawData: rawModel // Store original
         }
