@@ -35,6 +35,8 @@ const rawAnthropicData = {
     },
 
     // --- Claude Sonnet 5 ---
+    // Introductory pricing of $2/$10 per MTok applies through 2026-08-31;
+    // the durable sticker price is recorded here.
     {
       id: 'claude-sonnet-5',
       object: 'model',
