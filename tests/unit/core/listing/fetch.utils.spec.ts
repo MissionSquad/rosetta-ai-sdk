@@ -275,6 +275,30 @@ describe('fetchAndValidateModelsFromApi', () => {
       expect(result.data[0].properties?.vision).toBe(true)
     })
 
+    it('[Medium] should ignore non-boolean vision and non-string description values during normalization', async () => {
+      const badPropsModel = {
+        ...openRouterModel,
+        id: 'openai/gpt-4o',
+        properties: { vision: 'yes', description: 123, strengths: 42, multilingual: 'oui' },
+        architecture: { ...openRouterModel.architecture, input_modalities: ['text', 'image'] }
+      }
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [badPropsModel] }),
+        status: 200
+      })
+
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      // Non-boolean properties.vision is discarded; modality inference wins
+      expect(result.data[0].properties?.vision).toBe(true)
+      // Non-string properties.description falls back to the top-level description
+      expect(result.data[0].properties?.description).toBe(openRouterModel.description)
+      // Invalid strengths/multilingual types are dropped rather than propagated
+      expect(result.data[0].properties?.strengths).toBeUndefined()
+      expect(result.data[0].properties?.multilingual).toBeUndefined()
+    })
+
     it('[Medium] should fall back to the provider key for owned_by when the id has no vendor prefix', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

@@ -205,14 +205,22 @@ export async function fetchAndValidateModelsFromApi(
             : undefined
         // Description can live under `properties` (Anthropic/Groq style) or top-level (OpenRouter)
         const description: string | undefined =
-          rawModel.properties?.description ??
-          (typeof rawModel.description === 'string' ? rawModel.description : undefined)
+          typeof rawModel.properties?.description === 'string'
+            ? rawModel.properties.description
+            : typeof rawModel.description === 'string'
+            ? rawModel.description
+            : undefined
         // OpenRouter exposes modalities under `architecture.input_modalities`
         const inputModalities: any[] | undefined = Array.isArray(rawModel.architecture?.input_modalities)
           ? rawModel.architecture.input_modalities
           : undefined
+        // Only accept a real boolean; otherwise fall back to modality inference
         const vision: boolean | undefined =
-          rawModel.properties?.vision ?? (inputModalities ? inputModalities.includes('image') : undefined)
+          typeof rawModel.properties?.vision === 'boolean'
+            ? rawModel.properties.vision
+            : inputModalities
+            ? inputModalities.includes('image')
+            : undefined
 
         // Map known fields + safely access optional ones seen in examples
         return {
@@ -228,8 +236,12 @@ export async function fetchAndValidateModelsFromApi(
             rawModel.properties || description !== undefined || vision !== undefined
               ? {
                   description,
-                  strengths: rawModel.properties?.strengths,
-                  multilingual: rawModel.properties?.multilingual,
+                  strengths:
+                    typeof rawModel.properties?.strengths === 'string' ? rawModel.properties.strengths : undefined,
+                  multilingual:
+                    typeof rawModel.properties?.multilingual === 'boolean'
+                      ? rawModel.properties.multilingual
+                      : undefined,
                   vision
                 }
               : undefined,
