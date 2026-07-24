@@ -187,7 +187,9 @@ export async function fetchAndValidateModelsFromApi(
         const id: string = rawModel.id
         // owned_by is absent on some providers (e.g. OpenRouter). Fall back to the
         // vendor prefix of namespaced ids ('openai/gpt-4' -> 'openai'), then the provider key.
-        const vendorPrefix = id.includes('/') ? id.slice(0, id.indexOf('/')) : ''
+        const slashIndex = id.indexOf('/')
+        // > 0 also excludes leading-slash ids, which have no vendor prefix
+        const vendorPrefix = slashIndex > 0 ? id.slice(0, slashIndex) : ''
         const ownedBy: string =
           typeof rawModel.owned_by === 'string' && rawModel.owned_by.length > 0
             ? rawModel.owned_by

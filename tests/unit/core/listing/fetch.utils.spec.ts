@@ -246,6 +246,7 @@ describe('fetchAndValidateModelsFromApi', () => {
       expect(model.context_window).toBe(8192)
       // Mapped from top_provider.max_completion_tokens
       expect(model.max_completion_tokens).toBe(4096)
+      // vision derived from architecture.input_modalities (no 'image' -> false)
       expect(model.properties).toEqual({
         description: 'GPT-4 is a large multimodal model that can solve difficult problems with greater accuracy.',
         strengths: undefined,
@@ -355,6 +356,30 @@ describe('fetchAndValidateModelsFromApi', () => {
       expect(result.object).toBe('list')
       expect(result.data[0].id).toBe('bare/model')
       expect(result.data[0].owned_by).toBe('someone')
+    })
+
+    it('[Medium] should prefer model-level context_length over top_provider.context_length', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: 'big/model',
+              context_length: 200000,
+              top_provider: { context_length: 128000, max_completion_tokens: 8192 }
+            },
+            { id: 'routed/model', top_provider: { context_length: 128000 } }
+          ]
+        }),
+        status: 200
+      })
+
+      const result = await fetchAndValidateModelsFromApi(openRouterUrl, openRouterProvider, testApiKey)
+
+      // Model-level context_length is canonical; top_provider is a last resort
+      expect(result.data[0].context_window).toBe(200000)
+      expect(result.data[0].max_completion_tokens).toBe(8192)
+      expect(result.data[1].context_window).toBe(128000)
     })
 
     it('[Medium] should leave vision undefined when no modality signal is present', async () => {
