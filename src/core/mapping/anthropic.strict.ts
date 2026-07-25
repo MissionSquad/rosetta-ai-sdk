@@ -116,9 +116,12 @@ export function supportsStrictToolUse(model: string | undefined | null): boolean
  *   is `false` when the schema contains a construct strict mode rejects that
  *   cannot be safely rewritten (a `$ref`/`$defs` reference, a recursive object
  *   graph, or an `additionalProperties` set to something other than `false`).
- * @property schema - A deep, normalized copy of the input schema. Only ever
- *   sent to Anthropic when `eligible` is `true`; the caller's schema object is
- *   never mutated.
+ * @property schema - A normalized copy of the input schema. When `eligible` is
+ *   `true` it is a full deep copy sharing no nodes with the input; when
+ *   `eligible` is `false` (notably for cyclic graphs, where normalization
+ *   short-circuits) it may share nodes with the input and must be discarded.
+ *   Only ever sent to Anthropic when `eligible` is `true`; the caller's schema
+ *   object is never mutated in either case.
  */
 export interface StrictSchemaNormalizationResult {
   eligible: boolean
@@ -128,7 +131,7 @@ export interface StrictSchemaNormalizationResult {
 /**
  * Produces a strict-eligible copy of a tool's JSON schema.
  *
- * Recursively (over a deep clone):
+ * Recursively, while building a fresh copy of the schema graph:
  * - sets `additionalProperties: false` on every object schema that does not
  *   already set it;
  * - ensures a `required` array exists on every object schema (an empty array
@@ -139,7 +142,11 @@ export interface StrictSchemaNormalizationResult {
  *   and that cannot be safely rewritten (`$ref`/`$defs`, a cyclic object graph,
  *   or `additionalProperties` set to `true` / a sub-schema).
  *
- * The caller's schema object is never mutated.
+ * The caller's schema object is never mutated. The returned copy is a full
+ * deep copy only when `eligible` is `true`: cycle detection short-circuits by
+ * returning the original node (marking the schema ineligible), so an
+ * ineligible result may share nodes with the input — see
+ * {@link StrictSchemaNormalizationResult}.
  *
  * @param schema - The tool's `input_schema` (already validated to be an object
  *   schema by the caller).
