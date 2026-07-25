@@ -416,6 +416,7 @@ describe('Anthropic Mapper', () => {
     })
 
     describe('strict tool use', () => {
+      // 'claude-opus-4-8' is deliberately not a registry model id: it proves gating enables unknown future 4.5+ ids.
       const weatherTool = {
         type: 'function' as const,
         function: {

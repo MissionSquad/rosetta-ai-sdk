@@ -68,6 +68,9 @@ const STRICT_UNSUPPORTED_MODEL_PREFIXES: readonly string[] = [
   'claude-3',
   'claude-opus-4-0',
   'claude-opus-4-1',
+  // The two `-4-2025` entries below target the dated 4.0 snapshot IDs
+  // (`claude-opus-4-20250514`, `claude-sonnet-4-20250514`). Dated 4.5+ snapshots
+  // are named `claude-{family}-4-5-YYYYMMDD`, so they never match these.
   'claude-opus-4-2025',
   'claude-sonnet-4-0',
   'claude-sonnet-4-2025'
@@ -76,16 +79,31 @@ const STRICT_UNSUPPORTED_MODEL_PREFIXES: readonly string[] = [
 /**
  * Returns whether the given Anthropic model ID supports strict tool use.
  *
- * @param model - The (possibly `:1m`-suffixed) model ID from the request.
- * @returns `true` for Claude 4.5+ models; `false` for known pre-4.5 families or
- *   an empty/absent model ID.
+ * Normalization, in order: trim, lower-case, then strip a *single trailing*
+ * colon-delimited suffix. The strip is end-anchored (`/:[^:]+$/`) and suffix
+ * agnostic, so `:1m`, `:thinking`, `:batch`, and any future variant are all
+ * handled, while a `:`-bearing segment in the middle of an ID is left intact
+ * (an unanchored replace could splice an ID into a different — potentially
+ * denylisted — one).
+ *
+ * Matching is then gated on the `claude-` prefix: a non-Anthropic ID (e.g.
+ * `gpt-4o`) is never strict-eligible, even though it matches no entry in
+ * {@link STRICT_UNSUPPORTED_MODEL_PREFIXES}. Unknown `claude-*` IDs that miss
+ * the denylist remain enabled by design — new Anthropic releases are 4.5+ and
+ * therefore strict-capable, so defaulting them to `true` is forward compatible.
+ *
+ * @param model - The (possibly suffixed, e.g. `:1m`) model ID from the request.
+ * @returns `true` for Claude 4.5+ models; `false` for known pre-4.5 families,
+ *   non-`claude-` IDs, and an empty/absent model ID.
  */
 export function supportsStrictToolUse(model: string | undefined | null): boolean {
   if (typeof model !== 'string') {
     return false
   }
-  const normalized = model.replace(':1m', '').trim().toLowerCase()
-  if (normalized === '') {
+  // End-anchored strip of a single trailing colon-delimited suffix.
+  const normalized = model.trim().toLowerCase().replace(/:[^:]+$/, '')
+  if (!normalized.startsWith('claude-')) {
+    // Covers the empty/whitespace-only ID as well as any non-Anthropic ID.
     return false
   }
   return !STRICT_UNSUPPORTED_MODEL_PREFIXES.some(prefix => normalized.startsWith(prefix))
