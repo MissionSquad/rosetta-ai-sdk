@@ -415,6 +415,123 @@ describe('Anthropic Mapper', () => {
       ])
     })
 
+    describe('strict tool use', () => {
+      const weatherTool = {
+        type: 'function' as const,
+        function: {
+          name: 'get_weather',
+          description: 'Gets weather',
+          parameters: { type: 'object', properties: { location: { type: 'string' } }, required: ['location'] },
+          zodSchema: z.object({ location: z.string() })
+        }
+      }
+
+      it('[Medium] should set strict:true and normalize the schema for a supported model', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          model: 'claude-sonnet-5',
+          messages: [{ role: 'user', content: 'Use the tool.' }],
+          tools: [weatherTool]
+        }
+        const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+        expect(result.tools).toEqual([
+          {
+            name: 'get_weather',
+            description: 'Gets weather',
+            input_schema: {
+              type: 'object',
+              properties: { location: { type: 'string' } },
+              required: ['location'],
+              additionalProperties: false
+            },
+            strict: true
+          }
+        ])
+      })
+
+      it('[Medium] should omit strict and leave the schema untouched for an unsupported model', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          model: 'claude-3-haiku-20240307',
+          messages: [{ role: 'user', content: 'Use the tool.' }],
+          tools: [weatherTool]
+        }
+        const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+        const tool = result.tools?.[0] as Anthropic.Tool
+        expect(tool.strict).toBeUndefined()
+        expect(tool.input_schema).toEqual({
+          type: 'object',
+          properties: { location: { type: 'string' } },
+          required: ['location']
+        })
+      })
+
+      it('[Medium] should not mutate the caller-provided schema object', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          model: 'claude-opus-4-8',
+          messages: [{ role: 'user', content: 'Use the tool.' }],
+          tools: [weatherTool]
+        }
+        mapper.mapToProviderParams(params)
+        expect(weatherTool.function.parameters).toEqual({
+          type: 'object',
+          properties: { location: { type: 'string' } },
+          required: ['location']
+        })
+      })
+
+      it('[Medium] should omit strict for a strict-ineligible schema on a supported model', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          model: 'claude-opus-4-8',
+          messages: [{ role: 'user', content: 'Use the tool.' }],
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'open_map',
+                description: 'Open map',
+                parameters: {
+                  type: 'object',
+                  properties: { location: { type: 'string' } },
+                  required: ['location'],
+                  additionalProperties: true
+                },
+                zodSchema: z.object({ location: z.string() })
+              }
+            }
+          ]
+        }
+        const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+        const tool = result.tools?.[0] as Anthropic.Tool
+        expect(tool.strict).toBeUndefined()
+        // The original (ineligible) schema is passed through unchanged.
+        expect(tool.input_schema).toEqual({
+          type: 'object',
+          properties: { location: { type: 'string' } },
+          required: ['location'],
+          additionalProperties: true
+        })
+      })
+
+      it('[Medium] should omit strict when programmatic tool calling is enabled', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          model: 'claude-opus-4-8',
+          programmaticToolCalling: true,
+          messages: [{ role: 'user', content: 'Use the tool.' }],
+          tools: [weatherTool]
+        }
+        const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+        // The custom tool is the second entry (index 0 is the code_execution tool).
+        const customTool = result.tools?.[1] as Anthropic.Tool
+        expect(customTool.name).toBe('get_weather')
+        expect(customTool.strict).toBeUndefined()
+        expect(customTool.allowed_callers).toEqual(['code_execution_20260120'])
+      })
+    })
+
     it('[Easy] should set stream flag correctly', () => {
       const params: GenerateParams = {
         ...baseParams,
