@@ -47,6 +47,7 @@ import {
 import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
 import { mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
+import { normalizeSchemaForStrict, supportsStrictToolUse } from './anthropic.strict'
 
 // Type alias for the stream type from Anthropic SDK
 type AnthropicMessageStream = AsyncIterable<RawMessageStreamEvent>
@@ -574,10 +575,31 @@ export class AnthropicMapper implements IProviderMapper {
               // Cast is now safe because we've checked inputSchemaSource.type === 'object'
               const inputSchema: AnthropicToolType.InputSchema = inputSchemaSource as AnthropicToolType.InputSchema
 
+              // Anthropic strict tool use (GA on Claude 4.5+, no beta header):
+              // setting `strict: true` guarantees the model's `tool_use.input`
+              // validates against the schema server-side, which removes the
+              // failure mode where buffered streaming yields valid JSON that is
+              // not schema-conformant (rosetta's zod safeParse then rejects it
+              // and terminates the stream). Only applied when both (a) the model
+              // supports it and (b) the schema is strict-eligible after
+              // normalization. Strict is incompatible with programmatic tool
+              // calling, so it is skipped there. rosetta's local zod validation
+              // is retained unchanged as a redundant safety net.
+              let finalInputSchema: AnthropicToolType.InputSchema = inputSchema
+              let strictToolUse = false
+              if (!isProgrammaticToolCalling && supportsStrictToolUse(params.model)) {
+                const normalizedStrictSchema = normalizeSchemaForStrict(inputSchemaSource)
+                if (normalizedStrictSchema.eligible) {
+                  finalInputSchema = normalizedStrictSchema.schema as AnthropicToolType.InputSchema
+                  strictToolUse = true
+                }
+              }
+
               return {
                 name: tool.function.name,
                 description: tool.function.description,
-                input_schema: inputSchema,
+                input_schema: finalInputSchema,
+                ...(strictToolUse ? { strict: true } : {}),
                 ...(isProgrammaticToolCalling
                   ? {
                       allowed_callers: tool.allowedCallers ?? ['code_execution_20260120']
@@ -699,7 +721,8 @@ export class AnthropicMapper implements IProviderMapper {
             `Arguments failed validation for tool '${block.name}'.`,
             validationResult.error.issues,
             block.name,
-            block.id
+            block.id,
+            block.input
           )
         }
 
@@ -1012,7 +1035,8 @@ export class AnthropicMapper implements IProviderMapper {
                     `Streamed arguments failed validation for tool '${toolData.name}'.`,
                     validationResult.error.issues,
                     toolData.name,
-                    toolData.id
+                    toolData.id,
+                    resolvedToolInput
                   )
                 }
               } else {

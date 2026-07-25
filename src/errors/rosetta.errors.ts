@@ -148,13 +148,22 @@ export class ToolArgumentValidationError extends RosettaAIError {
   public readonly toolName?: string
   /** The ID of the specific tool call that failed validation. */
   public readonly toolCallId?: string
+  /**
+   * The raw arguments the model produced for the tool call that failed schema
+   * validation (the parsed value passed to `zodSchema.safeParse`). Exposed so
+   * consumers driving the tool-execution loop can build an `is_error`
+   * tool_result and let the model retry, rather than treating the failure as
+   * terminal. Present when the SDK has the model's arguments available.
+   */
+  public readonly receivedInput?: unknown
 
-  constructor(message: string, issues: z.ZodIssue[], toolName?: string, toolCallId?: string) {
+  constructor(message: string, issues: z.ZodIssue[], toolName?: string, toolCallId?: string, receivedInput?: unknown) {
     super(`Tool Argument Validation Error${toolName ? ` for '${toolName}'` : ''}: ${message}`)
     this.name = 'ToolArgumentValidationError'
     this.issues = issues
     this.toolName = toolName
     this.toolCallId = toolCallId
+    this.receivedInput = receivedInput
   }
 }
 
