@@ -212,7 +212,118 @@ describe('Google Mapper', () => {
       expect(result.contents).toEqual([
         { role: 'user', parts: [{ text: 'Call the tool.' }] },
         { role: 'model', parts: [{ functionCall: { name: 'my_tool', args: {} } }] },
-        { role: 'function', parts: [{ functionResponse: { name: 'my_tool', response: { result: 'success' } } }] }
+        { role: 'user', parts: [{ functionResponse: { name: 'my_tool', response: { result: 'success' } } }] }
+      ])
+    })
+
+    it('[Medium] should group parallel tool results into one user turn with per-id names', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Call the tools.' },
+          {
+            role: 'assistant',
+            content: null,
+            toolCalls: [
+              { id: 'call_a', type: 'function', function: { name: 'tool_a', arguments: '{}' } },
+              { id: 'call_b', type: 'function', function: { name: 'tool_b', arguments: '{}' } },
+              { id: 'call_c', type: 'function', function: { name: 'tool_c', arguments: '{}' } }
+            ]
+          },
+          // Results arrive out of call order: names must resolve by id, not position.
+          { role: 'tool', toolCallId: 'call_b', content: '{"n": 2}' },
+          { role: 'tool', toolCallId: 'call_a', content: '{"n": 1}' },
+          { role: 'tool', toolCallId: 'call_c', content: '{"n": 3}' }
+        ]
+      }
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents).toEqual([
+        { role: 'user', parts: [{ text: 'Call the tools.' }] },
+        {
+          role: 'model',
+          parts: [
+            { functionCall: { name: 'tool_a', args: {} } },
+            { functionCall: { name: 'tool_b', args: {} } },
+            { functionCall: { name: 'tool_c', args: {} } }
+          ]
+        },
+        {
+          role: 'user',
+          parts: [
+            { functionResponse: { name: 'tool_b', response: { n: 2 } } },
+            { functionResponse: { name: 'tool_a', response: { n: 1 } } },
+            { functionResponse: { name: 'tool_c', response: { n: 3 } } }
+          ]
+        }
+      ])
+    })
+
+    it('[Medium] should fall back to the last model turn functionCall name when no toolCall id matches', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Call the tool.' },
+          {
+            role: 'assistant',
+            content: null,
+            toolCalls: [{ id: 'call_real', type: 'function', function: { name: 'real_tool', arguments: '{}' } }]
+          },
+          { role: 'tool', toolCallId: 'call_mismatch', content: '{"ok": true}' }
+        ]
+      }
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents).toEqual([
+        { role: 'user', parts: [{ text: 'Call the tool.' }] },
+        { role: 'model', parts: [{ functionCall: { name: 'real_tool', args: {} } }] },
+        { role: 'user', parts: [{ functionResponse: { name: 'real_tool', response: { ok: true } } }] }
+      ])
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('matched no assistant toolCall id'))
+      warnSpy.mockRestore()
+    })
+
+    it('[Medium] should wrap non-object JSON tool result content so response stays an object', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Call the tool.' },
+          {
+            role: 'assistant',
+            content: null,
+            toolCalls: [{ id: 'call_arr', type: 'function', function: { name: 'array_tool', arguments: '{}' } }]
+          },
+          { role: 'tool', toolCallId: 'call_arr', content: '[1, 2, 3]' }
+        ]
+      }
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents[2]).toEqual({
+        role: 'user',
+        parts: [{ functionResponse: { name: 'array_tool', response: { content: [1, 2, 3] } } }]
+      })
+    })
+
+    it('[Medium] should close a tool-result group when a non-tool message follows it', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Call the tool.' },
+          {
+            role: 'assistant',
+            content: null,
+            toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'tool_one', arguments: '{}' } }]
+          },
+          { role: 'tool', toolCallId: 'call_1', content: '{"ok": true}' },
+          { role: 'assistant', content: 'Done with the first call.' },
+          { role: 'user', content: 'Thanks — summarize.' }
+        ]
+      }
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents).toEqual([
+        { role: 'user', parts: [{ text: 'Call the tool.' }] },
+        { role: 'model', parts: [{ functionCall: { name: 'tool_one', args: {} } }] },
+        { role: 'user', parts: [{ functionResponse: { name: 'tool_one', response: { ok: true } } }] },
+        { role: 'model', parts: [{ text: 'Done with the first call.' }] },
+        { role: 'user', parts: [{ text: 'Thanks — summarize.' }] }
       ])
     })
 
@@ -421,7 +532,7 @@ describe('Google Mapper', () => {
       expect(result.contents).toEqual([
         { role: 'user', parts: [{ text: 'Call tool.' }] },
         { role: 'model', parts: [{ functionCall: { name: 'string_tool', args: {} } }] },
-        { role: 'function', parts: [{ functionResponse: { name: 'string_tool', response: { content: 'Tool result was just this string.' } } }] }
+        { role: 'user', parts: [{ functionResponse: { name: 'string_tool', response: { content: 'Tool result was just this string.' } } }] }
       ])
       // FIX: Adjust assertion to be less strict about the exact warning message, check for the key part.
       expect(warnSpy).toHaveBeenCalledWith(
