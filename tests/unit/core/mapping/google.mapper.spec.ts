@@ -258,6 +258,50 @@ describe('Google Mapper', () => {
       ])
     })
 
+    it('[Medium] should fall back to the last model turn functionCall name when no toolCall id matches', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Call the tool.' },
+          {
+            role: 'assistant',
+            content: null,
+            toolCalls: [{ id: 'call_real', type: 'function', function: { name: 'real_tool', arguments: '{}' } }]
+          },
+          { role: 'tool', toolCallId: 'call_mismatch', content: '{"ok": true}' }
+        ]
+      }
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents).toEqual([
+        { role: 'user', parts: [{ text: 'Call the tool.' }] },
+        { role: 'model', parts: [{ functionCall: { name: 'real_tool', args: {} } }] },
+        { role: 'user', parts: [{ functionResponse: { name: 'real_tool', response: { ok: true } } }] }
+      ])
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('matched no assistant toolCall id'))
+      warnSpy.mockRestore()
+    })
+
+    it('[Medium] should wrap non-object JSON tool result content so response stays an object', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [
+          { role: 'user', content: 'Call the tool.' },
+          {
+            role: 'assistant',
+            content: null,
+            toolCalls: [{ id: 'call_arr', type: 'function', function: { name: 'array_tool', arguments: '{}' } }]
+          },
+          { role: 'tool', toolCallId: 'call_arr', content: '[1, 2, 3]' }
+        ]
+      }
+      const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+      expect(result.contents[2]).toEqual({
+        role: 'user',
+        parts: [{ functionResponse: { name: 'array_tool', response: { content: [1, 2, 3] } } }]
+      })
+    })
+
     it('[Medium] should close a tool-result group when a non-tool message follows it', () => {
       const params: GenerateParams = {
         ...baseParams,

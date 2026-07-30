@@ -307,7 +307,9 @@ export class GoogleMapper implements IProviderMapper {
       }
     }
     // Fallback for histories whose assistant messages carry no matching toolCall id: first
-    // functionCall name of the most recent model turn (the pre-id-matching behavior).
+    // functionCall name of the most recent model turn (the pre-id-matching behavior). Only
+    // accurate for single-call turns — id-less parallel-call histories keep the legacy
+    // mislabeling, which the warn below flags.
     for (let i = mappedContents.length - 1; i >= 0; i--) {
       const prevMsg = mappedContents[i]
       if (prevMsg?.role === 'model' && Array.isArray(prevMsg.parts)) {
@@ -354,9 +356,16 @@ export class GoogleMapper implements IProviderMapper {
         this.provider
       )
     }
-    let respContent: any
+    let respContent: Record<string, unknown>
     try {
-      respContent = JSON.parse(msg.content)
+      const parsed: unknown = JSON.parse(msg.content)
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        respContent = parsed as Record<string, unknown>
+      } else {
+        // FunctionResponse.response must be a JSON object per the SDK contract; wrap
+        // primitives/arrays so the parsed value still reaches the model intact.
+        respContent = { content: parsed }
+      }
     } catch {
       respContent = { content: msg.content } // Wrap non-JSON string content
       console.warn(
@@ -462,6 +471,8 @@ export class GoogleMapper implements IProviderMapper {
     const lastMessageRole = this.mapRoleToGoogle(lastMessage.role)
 
     if (lastMessage.role === 'tool') {
+      // lastMessage was popped from messagesToProcess above, so the history loop never saw it —
+      // appending here cannot double-add its part.
       const part = this.buildFunctionResponsePart(lastMessage, params.messages, contents, true)
       const last = contents[contents.length - 1]
       if (toolGroupOpen && last?.role === 'user' && Array.isArray(last.parts)) {
