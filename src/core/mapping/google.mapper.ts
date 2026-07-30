@@ -63,14 +63,17 @@ export class GoogleMapper implements IProviderMapper {
   ])
 
   // --- Parameter Mapping ---
-  private mapRoleToGoogle(role: RosettaMessage['role']): 'user' | 'model' | 'function' | 'system' {
+  private mapRoleToGoogle(role: RosettaMessage['role']): 'user' | 'model' | 'system' {
     switch (role) {
       case 'user':
         return 'user'
       case 'assistant':
         return 'model'
       case 'tool':
-        return 'function'
+        // Content.role only accepts 'user' | 'model'. Tool results travel as functionResponse
+        // parts inside a 'user' content — Gemini 3+ backends reject the legacy 'function' role
+        // with a 400, and @google/genai's own function-calling flow sends role 'user'.
+        return 'user'
       case 'system':
         return 'system'
       default:
@@ -292,19 +295,75 @@ export class GoogleMapper implements IProviderMapper {
     return prunedSchema;
   }
 
-  private findLastToolCallName(history: Content[], _toolCallId: string): string | undefined {
-    for (let i = history.length - 1; i >= 0; i--) {
-      const prevMsg = history[i]
+  private findToolCallName(messages: RosettaMessage[], mappedContents: Content[], toolCallId: string): string | undefined {
+    // Resolve by id from the assistant message that issued the call. With parallel tool calls
+    // each functionResponse must carry its own function name — Gemini 3+ validates that the
+    // response turn's names/count pair up with the functionCall parts of the model turn.
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg?.role === 'assistant' && Array.isArray(msg.toolCalls)) {
+        const match = msg.toolCalls.find(tc => tc.id === toolCallId)
+        if (match) return match.function.name
+      }
+    }
+    // Fallback for histories whose assistant messages carry no matching toolCall id: first
+    // functionCall name of the most recent model turn (the pre-id-matching behavior).
+    for (let i = mappedContents.length - 1; i >= 0; i--) {
+      const prevMsg = mappedContents[i]
       if (prevMsg?.role === 'model' && Array.isArray(prevMsg.parts)) {
         for (const part of prevMsg.parts) {
           if ('functionCall' in part && part.functionCall?.name) {
+            console.warn(
+              `Tool result (ID: ${toolCallId}) matched no assistant toolCall id; falling back to functionCall name '${part.functionCall.name}'.`
+            )
             return part.functionCall.name
           }
         }
       }
     }
-    console.warn(`Could not determine preceding function name for tool result (ID: ${_toolCallId}) from history.`)
+    console.warn(`Could not determine preceding function name for tool result (ID: ${toolCallId}) from history.`)
     return undefined
+  }
+
+  /**
+   * Builds the functionResponse Part for a tool-result message. The caller places it inside a
+   * 'user' content: Gemini's Content.role must be 'user' or 'model', and consecutive tool
+   * results must share one user turn so response parts pair up with the model turn's
+   * functionCall parts.
+   */
+  private buildFunctionResponsePart(
+    msg: RosettaMessage,
+    allMessages: RosettaMessage[],
+    mappedContents: Content[],
+    isFinal: boolean
+  ): Part {
+    if (!msg.toolCallId || typeof msg.content !== 'string') {
+      throw new MappingError(
+        isFinal
+          ? 'Invalid last message: Tool result requires toolCallId and string content.'
+          : 'Invalid tool result message for Google. Requires toolCallId and string content.',
+        this.provider
+      )
+    }
+    const funcName = this.findToolCallName(allMessages, mappedContents, msg.toolCallId)
+    if (!funcName) {
+      throw new MappingError(
+        isFinal
+          ? `Cannot find function name for final tool result (ID: ${msg.toolCallId}).`
+          : `Cannot find function name for tool result (ID: ${msg.toolCallId}). Ensure model message with FunctionCall precedes this tool message.`,
+        this.provider
+      )
+    }
+    let respContent: any
+    try {
+      respContent = JSON.parse(msg.content)
+    } catch {
+      respContent = { content: msg.content } // Wrap non-JSON string content
+      console.warn(
+        `${isFinal ? 'Final tool' : 'Tool'} result content for ${funcName} was not valid JSON. Wrapping as { content: "..." }`
+      )
+    }
+    return { functionResponse: { name: funcName, response: respContent } }
   }
 
   mapToProviderParams(
@@ -318,6 +377,10 @@ export class GoogleMapper implements IProviderMapper {
     if (!lastMessage) {
       throw new MappingError('No messages provided to map for Google.', this.provider)
     }
+
+    // True while the tail of `contents` is the 'user' content accumulating functionResponse
+    // parts for a run of consecutive tool-result messages.
+    let toolGroupOpen = false
 
     messagesToProcess.forEach(msg => {
       const googleRole = this.mapRoleToGoogle(msg.role)
@@ -334,6 +397,19 @@ export class GoogleMapper implements IProviderMapper {
         systemInstruction = { role: 'user', parts: [{ text: msg.content }] }
         return
       }
+
+      if (msg.role === 'tool') {
+        const part = this.buildFunctionResponsePart(msg, params.messages, contents, false)
+        const last = contents[contents.length - 1]
+        if (toolGroupOpen && last?.role === 'user' && Array.isArray(last.parts)) {
+          last.parts.push(part)
+        } else {
+          contents.push({ role: 'user', parts: [part] })
+        }
+        toolGroupOpen = true
+        return
+      }
+      toolGroupOpen = false
 
       const parts = this.mapContentToGoogleParts(msg.content)
       // Skip adding entries if parts array is empty (from null/empty string/array content)
@@ -373,38 +449,6 @@ export class GoogleMapper implements IProviderMapper {
           return // Skip adding empty message
         }
         contents.push({ role: googleRole, parts: finalParts })
-      } else if (googleRole === 'function') {
-        if (!msg.toolCallId || typeof msg.content !== 'string') {
-          throw new MappingError(
-            'Invalid tool result message for Google. Requires toolCallId and string content.',
-            this.provider
-          )
-        }
-        const funcName = this.findLastToolCallName(contents, msg.toolCallId)
-        if (!funcName) {
-          throw new MappingError(
-            `Cannot find function name for tool result (ID: ${msg.toolCallId}). Ensure model message with FunctionCall precedes this tool message.`,
-            this.provider
-          )
-        }
-        let respContent: any
-        try {
-          respContent = JSON.parse(msg.content)
-        } catch {
-          respContent = { content: msg.content } // Wrap non-JSON string content
-          console.warn(`Tool result content for ${funcName} was not valid JSON. Wrapping as { content: "..." }`)
-        }
-        contents.push({
-          role: googleRole,
-          parts: [
-            {
-              functionResponse: {
-                name: funcName,
-                response: respContent
-              }
-            }
-          ]
-        })
       } else {
         // Only add if parts is not empty
         if (parts.length > 0) {
@@ -415,53 +459,30 @@ export class GoogleMapper implements IProviderMapper {
       }
     })
 
-    let lastMsgParts: Part[]
     const lastMessageRole = this.mapRoleToGoogle(lastMessage.role)
 
-    if (lastMessageRole === 'function') {
-      if (!lastMessage.toolCallId || typeof lastMessage.content !== 'string') {
-        throw new MappingError(
-          'Invalid last message: Tool result requires toolCallId and string content.',
-          this.provider
-        )
+    if (lastMessage.role === 'tool') {
+      const part = this.buildFunctionResponsePart(lastMessage, params.messages, contents, true)
+      const last = contents[contents.length - 1]
+      if (toolGroupOpen && last?.role === 'user' && Array.isArray(last.parts)) {
+        // The final tool result joins the user turn holding its siblings' functionResponses.
+        last.parts.push(part)
+      } else {
+        contents.push({ role: 'user', parts: [part] })
       }
-      const funcName = this.findLastToolCallName(contents, lastMessage.toolCallId)
-      if (!funcName) {
-        throw new MappingError(
-          `Cannot find function name for final tool result (ID: ${lastMessage.toolCallId}).`,
-          this.provider
-        )
-      }
-      let respContent: any
-      try {
-        respContent = JSON.parse(lastMessage.content)
-      } catch {
-        respContent = { content: lastMessage.content } // Wrap non-JSON string content
-        console.warn(`Final tool result content for ${funcName} was not valid JSON. Wrapping as { content: "..." }`)
-      }
-      lastMsgParts = [
-        {
-          functionResponse: {
-            name: funcName,
-            response: respContent
-          }
-        }
-      ]
-    } else if (lastMessageRole === 'user') {
-      lastMsgParts = this.mapContentToGoogleParts(lastMessage.content)
+    } else if (lastMessage.role === 'user') {
+      const lastMsgParts = this.mapContentToGoogleParts(lastMessage.content)
       if (lastMsgParts.length === 0) {
         // Google requires the final user message to have content parts
         throw new MappingError('Final user message content cannot be null or empty.', this.provider)
       }
+      contents.push({ role: 'user', parts: lastMsgParts })
     } else {
       throw new MappingError(
         `Invalid role for the final message: '${lastMessageRole}'. Expected 'user' or 'tool'.`,
         this.provider
       )
     }
-
-    // Add the last message to contents
-    contents.push({ role: lastMessageRole, parts: lastMsgParts })
 
     const googleTools: Tool[] | undefined = params.tools?.map(tool => {
       if (tool.type !== 'function') {
