@@ -969,6 +969,43 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       expect(results[1]).toEqual({ type: 'content_delta', data: { delta: 'Mapped Stream' } })
     })
 
+    it('should pass the cancellable abort signal to Google generateContentStream via config', async () => {
+      // Regression: Google was the only built-in provider whose SDK call omitted the abort
+      // signal, so cancel() degraded to return() on the SDK generator — which pends until the
+      // next chunk and never interrupts Gemini's long no-chunk gaps.
+      mockGoogleClientInstance.models = {
+        generateContentStream: jest.fn().mockResolvedValue({
+          async *[Symbol.asyncIterator]() {
+            yield { candidates: [] }
+          }
+        })
+      }
+      const googleRosetta = new RosettaAI({ googleApiKey: 'gkey' })
+      mockGoogleMapperInstance.mapToProviderParams.mockReturnValue({
+        model: 'gemini-3.5-flash',
+        contents: [{ role: 'user', parts: [{ text: 'Stream Hi' }] }],
+        config: { temperature: 0.3 }
+      })
+      mockGoogleMapperInstance.mapProviderStream.mockImplementation(() =>
+        mockStreamGenerator([{ type: 'message_stop', data: { finishReason: 'stop' } }])
+      )
+
+      const stream = googleRosetta.stream({
+        provider: Provider.Google,
+        model: 'gemini-3.5-flash',
+        messages: [{ role: 'user', content: 'Stream Hi' }]
+      })
+      await collectStreamChunks(stream)
+
+      expect(mockGoogleClientInstance.models.generateContentStream).toHaveBeenCalledTimes(1)
+      const callArg = mockGoogleClientInstance.models.generateContentStream.mock.calls[0][0]
+      // Mapper-produced config keys survive the merge, and the signal is the cancellable
+      // stream's own controller signal — cancel() must reach the Google HTTP request.
+      expect(callArg.config.temperature).toBe(0.3)
+      expect(callArg.config.abortSignal).toBeInstanceOf(AbortSignal)
+      expect(callArg.config.abortSignal).toBe((stream as any).signal)
+    })
+
     it('should yield error chunk if stream setup fails (e.g., missing model)', async () => {
       const params: GenerateParams = {
         provider: Provider.OpenAI,
