@@ -1003,7 +1003,7 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       // stream's own controller signal — cancel() must reach the Google HTTP request.
       expect(callArg.config.temperature).toBe(0.3)
       expect(callArg.config.abortSignal).toBeInstanceOf(AbortSignal)
-      expect(callArg.config.abortSignal).toBe((stream as any).signal)
+      expect(callArg.config.abortSignal).toBe(stream.signal)
     })
 
     it('should yield error chunk if stream setup fails (e.g., missing model)', async () => {

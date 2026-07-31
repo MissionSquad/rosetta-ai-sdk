@@ -770,7 +770,8 @@ export class RosettaAI {
           // config.abortSignal is the @google/genai equivalent of the request-options signal the
           // other SDKs take — without it, cancel() degrades to return() on the SDK's async
           // generator, which pends until the next chunk and never interrupts Gemini's long
-          // no-chunk gaps (thinking/TTFT).
+          // no-chunk gaps (thinking/TTFT). Cancellation is owned by this stream's controller:
+          // a mapper-set config.abortSignal (none exists today) is deliberately overridden.
           providerStream = await (client as GoogleGenAI).models.generateContentStream({
             ...googleParams,
             config: { ...(googleParams.config ?? {}), abortSignal }
