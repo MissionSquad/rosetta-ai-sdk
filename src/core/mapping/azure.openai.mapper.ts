@@ -226,7 +226,9 @@ export class AzureOpenAIMapper implements IProviderMapper {
     originalTools?: RosettaTool<any>[]
   ): GenerateResult {
     // Delegate to the base OpenAI mapper function, passing originalTools
-    return mapFromOpenAIResponse(response, modelUsed, originalTools)
+    return mapFromOpenAIResponse(response, this.provider, modelUsed, originalTools, {
+      captureOpenAICompatibleReplay: false
+    })
   }
 
   async *mapProviderStream(
@@ -244,7 +246,9 @@ export class AzureOpenAIMapper implements IProviderMapper {
       // This should ideally be caught earlier, but handle defensively
       throw new ConfigurationError('Azure chat deployment ID/name must be configured for streaming.')
     }
-    yield* mapOpenAIStream(stream, this.provider, deploymentId, originalParams.tools)
+    yield* mapOpenAIStream(stream, this.provider, deploymentId, originalParams.tools, {
+      captureOpenAICompatibleReplay: false
+    })
   }
 
   // --- Embedding Mapping ---

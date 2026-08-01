@@ -1,4 +1,5 @@
 import { Provider, RosettaImageData } from './common.types'
+import { ThinkingStreamChunk } from './stream.types'
 import { JSONSchema7 } from 'json-schema'
 import { z } from 'zod'
 
@@ -205,3 +206,4 @@ export type ResponsesStreamChunk =
   | { type: 'response.failed'; data: { error: { message: string; code?: string } } }
   | { type: 'response.cancelled'; data: { reason?: string } }
   | { type: 'error'; data: { error: Error } }
+  | ThinkingStreamChunk

@@ -1030,6 +1030,26 @@ describe('Anthropic Mapper', () => {
       expect(result.finishReason).toBe('stop')
     })
 
+    it('[Medium] should keep multiple thinking blocks separate from non-streaming answer content', () => {
+      const response = createMockAnthropicMessage(
+        [
+          createMockThinkingBlock('First reasoning block.'),
+          createMockTextBlock('Final '),
+          createMockThinkingBlock('Second reasoning block.'),
+          createMockTextBlock('answer.')
+        ],
+        'end_turn',
+        { input_tokens: 12, output_tokens: 8 },
+        modelUsed
+      )
+
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+
+      expect(result.content).toBe('Final answer.')
+      expect(result.content).not.toContain('reasoning block')
+      expect(result.thinkingSteps).toBe('First reasoning block.\n\nSecond reasoning block.')
+    })
+
     it('[Medium] should handle response with only tool calls (no text)', () => {
       const response = createMockAnthropicMessage(
         [createMockToolUseBlock('toolu_xyz', 'another_tool', {})],
@@ -1695,6 +1715,58 @@ describe('Anthropic Mapper', () => {
           { type: 'thinking', thinking: 'Step 1...Step 2.', signature: 'sig_123' },
           { type: 'text', text: 'Answer.', citations: null }
         ]
+      })
+    })
+
+    it('[Hard] should expose only a generic lifecycle for redacted thinking without leaking its data', async () => {
+      const opaqueRedactedData = 'opaque-redacted-provider-data'
+      const events: RawMessageStreamEvent[] = [
+        baseMessageStart,
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'redacted_thinking', data: opaqueRedactedData }
+        },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '', citations: null } },
+        { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Visible answer.' } },
+        { type: 'content_block_stop', index: 1 },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } },
+        { type: 'message_stop' }
+      ]
+
+      const results = await collectStreamChunks(
+        mapper.mapProviderStream(mockAnthropicStreamGenerator(events), baseOriginalParams)
+      )
+
+      expect(results.map(result => result.type)).toEqual([
+        'message_start',
+        'thinking_start',
+        'thinking_stop',
+        'content_delta',
+        'message_stop',
+        'final_usage',
+        'final_result'
+      ])
+      expect(results.filter(result => result.type === 'thinking_delta')).toHaveLength(0)
+      expect(results[3]).toEqual({ type: 'content_delta', data: { delta: 'Visible answer.' } })
+
+      const visiblePayloads = results
+        .filter(result => result.type !== 'final_result')
+        .map(result => JSON.stringify(result))
+        .join('')
+      expect(visiblePayloads).not.toContain(opaqueRedactedData)
+
+      const finalResult = (results[6] as Extract<StreamChunk, { type: 'final_result' }>).data.result
+      expect(finalResult.content).toBe('Visible answer.')
+      expect(finalResult.thinkingSteps).toBeNull()
+      expect(finalResult.providerState).toEqual({
+        anthropic: {
+          rawContentBlocks: [
+            { type: 'redacted_thinking', data: opaqueRedactedData },
+            { type: 'text', text: 'Visible answer.', citations: null }
+          ]
+        }
       })
     })
 

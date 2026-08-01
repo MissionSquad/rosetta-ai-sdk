@@ -531,7 +531,13 @@ describe('Azure OpenAI Mapper (V2)', () => {
     it('[Hard] mapFromProviderResponse should delegate to base mapper', () => {
       const result = mapper.mapFromProviderResponse(mockResponse, 'my-deploy-id')
       expect(mockMapFromOpenAIBaseResponse).toHaveBeenCalledTimes(1)
-      expect(mockMapFromOpenAIBaseResponse).toHaveBeenCalledWith(mockResponse, 'my-deploy-id', undefined)
+      expect(mockMapFromOpenAIBaseResponse).toHaveBeenCalledWith(
+        mockResponse,
+        Provider.OpenAI,
+        'my-deploy-id',
+        undefined,
+        { captureOpenAICompatibleReplay: false }
+      )
       expect(result).toEqual({ content: 'Delegated Response', finishReason: 'stop', model: 'delegated-model' })
     })
 
@@ -561,7 +567,8 @@ describe('Azure OpenAI Mapper (V2)', () => {
         mockStream,
         Provider.OpenAI, // Should be OpenAI as passed by AzureOpenAIMapper's implementation
         azureChatDeploymentId, // Expected deployment name
-        mockTools // Pass the tools from originalParams
+        mockTools, // Pass the tools from originalParams
+        { captureOpenAICompatibleReplay: false }
       )
       // Keep original assertions about the stream content if they are still valid
       expect(results).toHaveLength(4) // Assuming mockBaseStreamGenerator yields 4 chunks

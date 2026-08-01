@@ -321,6 +321,7 @@ export class GroqMapper implements IProviderMapper {
     }
     let parsedJson: any = null
     const textContent = choice.message?.content ?? null
+    const thinkingSteps = choice.message?.reasoning ?? null
     if (textContent && (textContent.trim().startsWith('{') || textContent.trim().startsWith('['))) {
       try {
         parsedJson = JSON.parse(textContent)
@@ -340,7 +341,7 @@ export class GroqMapper implements IProviderMapper {
       usage: mapTokenUsage(response.usage), // Use common utility
       citations: undefined,
       parsedContent: parsedJson,
-      thinkingSteps: undefined,
+      thinkingSteps,
       model: response.model ?? modelUsed,
       rawResponse: response
     }
@@ -400,6 +401,12 @@ export class GroqMapper implements IProviderMapper {
           continue // Skip to next chunk if no choice
         }
 
+        if (choice.delta?.reasoning) {
+          if (aggregatedResult) {
+            aggregatedResult.thinkingSteps = (aggregatedResult.thinkingSteps ?? '') + choice.delta.reasoning
+          }
+          yield { type: 'thinking_delta', data: { delta: choice.delta.reasoning } }
+        }
         if (choice.delta?.content) {
           accumulatedContent += choice.delta.content
           if (aggregatedResult) aggregatedResult.content = accumulatedContent

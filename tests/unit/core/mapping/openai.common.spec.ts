@@ -178,6 +178,7 @@ describe('OpenAI Common Mapping Utilities', () => {
 
   describe('mapFromOpenAIResponse', () => {
     const modelUsed = 'gpt-4o-mini-test'
+    const options = { captureOpenAICompatibleReplay: false }
 
     it('[Easy] should map basic response', () => {
       const response: OpenAI.Chat.Completions.ChatCompletion = {
@@ -188,7 +189,7 @@ describe('OpenAI Common Mapping Utilities', () => {
         choices: [{ index: 0, message: createMockMessage('Response'), finish_reason: 'stop', logprobs: null }],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
       }
-      const result = mapFromOpenAIResponse(response, modelUsed)
+      const result = mapFromOpenAIResponse(response, Provider.OpenAI, modelUsed, undefined, options)
       expect(result.content).toBe('Response')
       expect(result.finishReason).toBe('stop')
       expect(result.model).toBe('gpt-4o-mini-id')
@@ -208,7 +209,7 @@ describe('OpenAI Common Mapping Utilities', () => {
           { index: 0, message: createMockMessage(null, toolCalls), finish_reason: 'tool_calls', logprobs: null }
         ]
       }
-      const result = mapFromOpenAIResponse(response, modelUsed)
+      const result = mapFromOpenAIResponse(response, Provider.OpenAI, modelUsed, undefined, options)
       expect(result.content).toBeNull()
       expect(result.finishReason).toBe('tool_calls')
       expect(result.toolCalls).toEqual([{ id: 't1', type: 'function', function: { name: 'f1', arguments: '{}' } }])
@@ -222,7 +223,7 @@ describe('OpenAI Common Mapping Utilities', () => {
         model: modelUsed,
         choices: [{ index: 0, message: createMockMessage(null), finish_reason: 'content_filter', logprobs: null }]
       }
-      const result = mapFromOpenAIResponse(response, modelUsed)
+      const result = mapFromOpenAIResponse(response, Provider.OpenAI, modelUsed, undefined, options)
       expect(result.content).toBeNull()
       expect(result.finishReason).toBe('content_filter')
     })
@@ -236,7 +237,7 @@ describe('OpenAI Common Mapping Utilities', () => {
         model: modelUsed,
         choices: [] // Empty choices
       }
-      const result = mapFromOpenAIResponse(response, modelUsed)
+      const result = mapFromOpenAIResponse(response, Provider.OpenAI, modelUsed, undefined, options)
       expect(result.content).toBeNull()
       expect(result.finishReason).toBe('error')
       expect(warnSpy).toHaveBeenCalledWith('OpenAI response missing choices.')
@@ -246,6 +247,7 @@ describe('OpenAI Common Mapping Utilities', () => {
 
   describe('mapOpenAIStream', () => {
     const modelId = 'gpt-stream-test'
+    const options = { captureOpenAICompatibleReplay: false }
     const baseChunkProps = { id: 'chatcmpl-stream-1', object: 'chat.completion.chunk' as const, created: 1 }
 
     it('[Hard] should map basic text stream', async () => {
@@ -263,7 +265,10 @@ describe('OpenAI Common Mapping Utilities', () => {
       ]
       const stream = mapOpenAIStream(
         (mockOpenAIStreamGenerator(mockChunks) as any) as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>,
-        Provider.OpenAI
+        Provider.OpenAI,
+        modelId,
+        undefined,
+        options
       )
       const results = await collectStreamChunks(stream)
 
@@ -315,7 +320,10 @@ describe('OpenAI Common Mapping Utilities', () => {
       ]
       const stream = mapOpenAIStream(
         (mockOpenAIStreamGenerator(mockChunks) as any) as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>,
-        Provider.OpenAI
+        Provider.OpenAI,
+        modelId,
+        undefined,
+        options
       )
       const results = await collectStreamChunks(stream)
 
@@ -351,7 +359,10 @@ describe('OpenAI Common Mapping Utilities', () => {
       ]
       const stream = mapOpenAIStream(
         (mockOpenAIStreamGenerator(mockChunks) as any) as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>,
-        Provider.OpenAI
+        Provider.OpenAI,
+        modelId,
+        undefined,
+        options
       )
       const results = await collectStreamChunks(stream)
 

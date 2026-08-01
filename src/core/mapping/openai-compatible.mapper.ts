@@ -13,7 +13,6 @@ import {
   GenerateResult,
   StreamChunk,
   CustomProviderConfig,
-  Provider, // Import Provider enum for common functions
   ProviderKey,
   RosettaMessage,
   RosettaTool,
@@ -31,6 +30,7 @@ import {
 import { mapBaseToolChoice, mapToOpenAIResponseFormat } from '../mapping/common.utils'
 import { MappingError, RosettaAIError, ConfigurationError, UnsupportedFeatureError } from '../../errors'
 import { mapToOpenAIEmbedParams, mapFromOpenAIEmbedResponse } from './openai.embed.mapper'
+import { cloneOpenAICompatibleAssistantProviderState } from './openai-thinking'
 
 export class OpenAICompatibleMapper extends BaseCustomMapper {
   private openaiClient: OpenAI
@@ -87,7 +87,14 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
             // If no tool calls, content cannot be null for OpenAI assistant message (standard behavior)
             assistantMsg.content = '' // Default to empty string if no tool calls and content was null
           }
-          return assistantMsg
+          const replayState = cloneOpenAICompatibleAssistantProviderState(msg.providerState?.openAICompatible)
+          if (!replayState) return assistantMsg
+          const extensionRecord: Record<string, unknown> = { ...assistantMsg }
+          if (replayState.reasoningDetails) extensionRecord.reasoning_details = replayState.reasoningDetails
+          if (replayState.structuredContent) extensionRecord.content = replayState.structuredContent
+          // The installed OpenAI declarations intentionally omit custom-provider extensions.
+          // Runtime guards above isolate the assertion to this OpenAI-compatible request boundary.
+          return extensionRecord as unknown as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam
         case 'tool':
           if (!msg.toolCallId) {
             throw new MappingError('Tool message requires toolCallId.', this.provider)
@@ -185,7 +192,9 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
 
       // Map the OpenAI SDK response back to GenerateResult using common helper
       // Pass original tools for validation within mapFromOpenAIResponse
-      return mapFromOpenAIResponse(response, model, originalParams.tools)
+      return mapFromOpenAIResponse(response, this.provider, model, originalParams.tools, {
+        captureOpenAICompatibleReplay: true
+      })
     } catch (error) {
       // Wrap potential OpenAI SDK errors using the common wrapper
       throw this.wrapProviderError(error, this.provider)
@@ -257,13 +266,13 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
 
       const stream = await this.openaiClient.chat.completions.create(openAIParams, { signal: abortSignal })
 
-      // Reuse the common OpenAI stream mapping logic
-      // Pass Provider.OpenAI as the provider type expected by the common helper
+      // Reuse the common OpenAI stream mapping logic with the actual custom provider key.
       yield* mapOpenAIStream(
         stream as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>,
-        Provider.OpenAI, // Use the base enum type for the common helper
+        this.provider,
         model,
-        originalParams.tools
+        originalParams.tools,
+        { captureOpenAICompatibleReplay: true }
       )
     } catch (error) {
       // Wrap potential OpenAI SDK errors using the common wrapper
@@ -312,8 +321,7 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
 
   // Override wrapProviderError to delegate to the common OpenAI error wrapper
   override wrapProviderError(error: unknown, _provider: ProviderKey): RosettaAIError {
-    // Delegate to the common wrapper, passing Provider.OpenAI as the expected type
-    return wrapOpenAIError(error, Provider.OpenAI)
+    return wrapOpenAIError(error, this.provider)
   }
 
   // Note: executeGenerateSpeech, executeStreamSpeech, executeTranscribe, executeTranslate

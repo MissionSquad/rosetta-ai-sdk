@@ -17,6 +17,14 @@ export type CancellableAsyncIterable<T> = AsyncIterable<T> & {
  * Discriminated union representing the different types of events
  * yielded by the `RosettaAI.stream` async generator.
  */
+export type ThinkingStreamChunk =
+  /** Signals that disclosed provider reasoning has started. */
+  | { type: 'thinking_start' }
+  /** A chunk of disclosed provider reasoning text. */
+  | { type: 'thinking_delta'; data: { delta: string } }
+  /** Signals that the current disclosed reasoning cycle has finished. */
+  | { type: 'thinking_stop' }
+
 export type StreamChunk =
   // --- Lifecycle & Metadata ---
   /** Signals the start of the stream, providing initial metadata like provider and model ID. */
@@ -33,12 +41,7 @@ export type StreamChunk =
   // --- Content & Thinking ---
   /** A chunk of the primary text content being generated. */
   | { type: 'content_delta'; data: { delta: string } }
-  /** Anthropic: Signals that the model has started its internal "thinking" process (if requested). */
-  | { type: 'thinking_start' }
-  /** Anthropic: A chunk of the model's internal "thinking" text (if requested). */
-  | { type: 'thinking_delta'; data: { delta: string } }
-  /** Anthropic: Signals that the model has finished its internal "thinking" process. */
-  | { type: 'thinking_stop' }
+  | ThinkingStreamChunk
   /** Anthropic: Signals that code execution has started and provides any immediately available code. */
   | { type: 'code_execution_start'; data: { id: string; code: string } }
   /** Anthropic: A code execution input update, exposing the latest code delta and accumulated snapshot. */

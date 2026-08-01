@@ -504,6 +504,33 @@ describe('Groq Mapper', () => {
       expect(result.model).toBe('llama-3.1-8b-instant-test-id')
     })
 
+    it('[Medium] should map typed message reasoning separately from answer content', () => {
+      const response: Groq.Chat.Completions.ChatCompletion = {
+        id: 'chat_reasoning',
+        object: 'chat.completion',
+        created: 1700000000,
+        model: modelUsed,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              reasoning: 'Private reasoning.',
+              content: 'Visible answer.'
+            },
+            finish_reason: 'stop',
+            logprobs: null
+          }
+        ]
+      }
+
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+
+      expect(result.thinkingSteps).toBe('Private reasoning.')
+      expect(result.content).toBe('Visible answer.')
+      expect(result.content).not.toContain('Private reasoning.')
+    })
+
     it('[Easy] should map response with tool calls', () => {
       const toolCalls: Groq.Chat.Completions.ChatCompletionMessageToolCall[] = [
         { id: 'call_abc', type: 'function', function: { name: 'get_info', arguments: '{"id": 1}' } }
@@ -782,6 +809,38 @@ describe('Groq Mapper', () => {
           usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 }
         })
       )
+    })
+
+    it('[Hard] should emit typed delta reasoning before same-chunk answer content', async () => {
+      const mockChunks: ChatCompletionChunk[] = [
+        {
+          ...baseChunkProps,
+          model: modelId,
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: 'assistant',
+                reasoning: 'Private reasoning.',
+                content: 'Visible answer.'
+              },
+              logprobs: null,
+              finish_reason: 'stop'
+            }
+          ]
+        }
+      ]
+
+      const results = await collectStreamChunks(mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks)))
+
+      expect(results[1]).toEqual({ type: 'thinking_delta', data: { delta: 'Private reasoning.' } })
+      expect(results[2]).toEqual({ type: 'content_delta', data: { delta: 'Visible answer.' } })
+      expect(results[2]).not.toEqual(expect.objectContaining({ data: { delta: expect.stringContaining('Private') } }))
+      expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'stop' } })
+      expect(results[5].type).toBe('final_result')
+      const finalResult = (results[5] as Extract<StreamChunk, { type: 'final_result' }>).data.result
+      expect(finalResult.thinkingSteps).toBe('Private reasoning.')
+      expect(finalResult.content).toBe('Visible answer.')
     })
 
     it('[Hard] should handle stream with a single tool call', async () => {

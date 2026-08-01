@@ -684,8 +684,9 @@ describe('OpenAI Mapper', () => {
       const mockResponse = {} as OpenAI.Chat.Completions.ChatCompletion
       mapper.mapFromProviderResponse(mockResponse, 'model')
       // Use the spy to check the call
-      // Undefined as the third argument because it expects 3 args
-      expect(spyMapFromOpenAIResponse).toHaveBeenCalledWith(mockResponse, 'model', undefined)
+      expect(spyMapFromOpenAIResponse).toHaveBeenCalledWith(mockResponse, Provider.OpenAI, 'model', undefined, {
+        captureOpenAICompatibleReplay: false
+      })
     })
   })
 
@@ -707,7 +708,8 @@ describe('OpenAI Mapper', () => {
         mockStream,
         Provider.OpenAI,
         'test-model-id', // Expect modelId from originalParams
-        [] // Expect tools array from originalParams
+        [], // Expect tools array from originalParams
+        { captureOpenAICompatibleReplay: false }
       )
     })
   })

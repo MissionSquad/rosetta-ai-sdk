@@ -13,6 +13,7 @@ import { Stream } from 'openai/streaming'
 import {
   GenerateResult,
   Provider,
+  ProviderKey,
   RosettaMessage,
   RosettaToolCallRequest,
   StreamChunk,
@@ -28,6 +29,11 @@ import {
 } from '../../errors'
 import { safeGet } from '../utils'
 import { mapTokenUsage } from './common.utils'
+import { extractOpenAIThinking } from './openai-thinking'
+
+export interface OpenAIThinkingMappingOptions {
+  captureOpenAICompatibleReplay: boolean
+}
 
 export function mapRoleToOpenAI(role: RosettaMessage['role']): OpenAIRole {
   switch (role) {
@@ -199,8 +205,10 @@ function mapAndValidateToolCallsFromOpenAI(
 
 export function mapFromOpenAIResponse(
   response: ChatCompletion,
+  _provider: ProviderKey,
   modelUsed: string,
-  originalTools?: RosettaTool<any>[] // Accept original tools for validation
+  originalTools: RosettaTool<any>[] | undefined,
+  options: OpenAIThinkingMappingOptions
 ): GenerateResult {
   // Add null/undefined check for response.choices before accessing index 0
   const choice = response?.choices?.[0]
@@ -223,7 +231,8 @@ export function mapFromOpenAIResponse(
     }
   }
   let parsedJson: any = null
-  const textContent = choice.message?.content ?? null
+  const extraction = extractOpenAIThinking(choice.message)
+  const textContent = extraction.answerDeltas.length > 0 ? extraction.answerDeltas.join('') : null
   if (textContent && choice.finish_reason !== 'tool_calls') {
     const isJsonLike = textContent.trim().startsWith('{') || textContent.trim().startsWith('[')
     if (isJsonLike)
@@ -236,6 +245,18 @@ export function mapFromOpenAIResponse(
 
   // Map and validate tool calls
   const mappedToolCalls = mapAndValidateToolCallsFromOpenAI(choice.message?.tool_calls, originalTools)
+  const openAICompatibleState = options.captureOpenAICompatibleReplay
+    ? {
+        ...(extraction.reasoningDetails && extraction.reasoningDetails.length > 0
+          ? { reasoningDetails: extraction.reasoningDetails }
+          : {}),
+        ...(extraction.structuredContent && extraction.structuredContent.length > 0
+          ? { structuredContent: extraction.structuredContent }
+          : {})
+      }
+    : undefined
+  const hasOpenAICompatibleState =
+    openAICompatibleState !== undefined && Object.keys(openAICompatibleState).length > 0
   return {
     content: textContent,
     toolCalls: mappedToolCalls, // Use validated (but still raw) tool calls
@@ -243,13 +264,14 @@ export function mapFromOpenAIResponse(
     usage: mapTokenUsage(response.usage), // Use common utility
     citations: undefined,
     parsedContent: parsedJson,
-    thinkingSteps: undefined,
+    thinkingSteps: extraction.thinkingDeltas.join('') || null,
     model: response.model ?? modelUsed,
-    rawResponse: response
+    rawResponse: response,
+    ...(hasOpenAICompatibleState ? { providerState: { openAICompatible: openAICompatibleState } } : {})
   }
 }
 
-export function wrapOpenAIError(error: unknown, provider: Provider): RosettaAIError {
+export function wrapOpenAIError(error: unknown, provider: ProviderKey): RosettaAIError {
   // Handle specific validation errors first
   if (error instanceof ToolArgumentValidationError || error instanceof InvalidToolDefinitionError) {
     return error
@@ -293,9 +315,10 @@ export function wrapOpenAIError(error: unknown, provider: Provider): RosettaAIEr
 
 export async function* mapOpenAIStream(
   stream: Stream<ChatCompletionChunk>,
-  provider: Provider,
+  provider: ProviderKey,
   modelId: string, // Accept modelId as argument
-  originalTools?: RosettaTool<any>[] // Accept original tools for validation
+  originalTools: RosettaTool<any>[] | undefined,
+  options: OpenAIThinkingMappingOptions
 ): AsyncIterable<StreamChunk> {
   let accumulatedContent = ''
   const accumulatedToolCalls: Record<
@@ -306,6 +329,8 @@ export async function* mapOpenAIStream(
   let finalFinishReason: string | null = null
   let isJsonMode = false
   let messageStartYielded = false // Track if message_start has been yielded
+  const accumulatedReasoningDetails: unknown[] = []
+  const accumulatedStructuredContent: unknown[] = []
 
   // Initialize aggregatedResult immediately using the passed modelId
   const aggregatedResult: GenerateResult | null = {
@@ -345,16 +370,25 @@ export async function* mapOpenAIStream(
       const choice = chunk.choices[0]
       if (!choice) continue
 
-      // --- Content Processing ---
-      if (choice.delta?.content) {
-        const delta = choice.delta.content
+      // --- Thinking and Content Processing ---
+      const extraction = extractOpenAIThinking(choice.delta)
+      if (options.captureOpenAICompatibleReplay) {
+        if (extraction.reasoningDetails) accumulatedReasoningDetails.push(...extraction.reasoningDetails)
+        if (extraction.structuredContent) accumulatedStructuredContent.push(...extraction.structuredContent)
+      }
+      if (extraction.hasThinkingSignal && extraction.thinkingDeltas.length === 0) {
+        yield { type: 'thinking_start' }
+      }
+      for (const delta of extraction.thinkingDeltas) {
+        if (aggregatedResult) aggregatedResult.thinkingSteps = (aggregatedResult.thinkingSteps ?? '') + delta
+        yield { type: 'thinking_delta', data: { delta } }
+      }
+      for (const delta of extraction.answerDeltas) {
+        if (delta.length === 0) continue
         accumulatedContent += delta
-        if (aggregatedResult) aggregatedResult.content = accumulatedContent // Update aggregated content
+        if (aggregatedResult) aggregatedResult.content = accumulatedContent
 
-        // Detect JSON mode on the fly
-        if (!isJsonMode && accumulatedContent.trim().match(/^[{[]/)) {
-          isJsonMode = true
-        }
+        if (!isJsonMode && accumulatedContent.trim().match(/^[{[]/)) isJsonMode = true
 
         if (isJsonMode) {
           let partialParsed = undefined
@@ -492,6 +526,21 @@ export async function* mapOpenAIStream(
       // Final cleanup before yielding result
       if (!isJsonMode && aggregatedResult.content === '') aggregatedResult.content = null
       if (aggregatedResult.toolCalls?.length === 0) aggregatedResult.toolCalls = undefined
+      if (
+        options.captureOpenAICompatibleReplay &&
+        (accumulatedReasoningDetails.length > 0 || accumulatedStructuredContent.length > 0)
+      ) {
+        aggregatedResult.providerState = {
+          openAICompatible: {
+            ...(accumulatedReasoningDetails.length > 0
+              ? { reasoningDetails: accumulatedReasoningDetails }
+              : {}),
+            ...(accumulatedStructuredContent.length > 0
+              ? { structuredContent: accumulatedStructuredContent }
+              : {})
+          }
+        }
+      }
       yield { type: 'final_result', data: { result: aggregatedResult } }
     } else {
       // This case should be less likely now, but keep the warning

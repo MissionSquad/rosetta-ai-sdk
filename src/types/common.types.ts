@@ -56,11 +56,20 @@ export interface AnthropicMessageProviderState {
   assistantTurnBoundary?: boolean
 }
 
+/** Replay-only state returned by custom OpenAI-compatible providers. */
+export interface OpenAICompatibleAssistantProviderState {
+  /** Provider-native reasoning detail entries, including encrypted continuation metadata. */
+  reasoningDetails?: unknown[]
+  /** Provider-native structured assistant content, including Mistral thinking/text chunks. */
+  structuredContent?: unknown[]
+}
+
 /**
  * Provider-specific message state that must survive history persistence and replay.
  */
 export interface RosettaMessageProviderState {
   anthropic?: AnthropicMessageProviderState
+  openAICompatible?: OpenAICompatibleAssistantProviderState
 }
 
 /**
@@ -97,6 +106,7 @@ export interface AnthropicGenerateResultProviderState {
  */
 export interface GenerateResultProviderState {
   anthropic?: AnthropicGenerateResultProviderState
+  openAICompatible?: OpenAICompatibleAssistantProviderState
 }
 
 /**

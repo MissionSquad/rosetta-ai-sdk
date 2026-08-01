@@ -245,6 +245,16 @@ export async function* mapOpenAIResponsesStream(
     output_text: ''
   }
   let currentToolCall: { id: string; name: string; arguments: string } | null = null
+  let reasoningSummary = ''
+  let sawReasoningSummaryDelta = false
+  let sawReasoningTextDelta = false
+  let reasoningSummaryFlushed = false
+
+  const flushReasoningSummary = (): ResponsesStreamChunk[] => {
+    if (sawReasoningTextDelta || reasoningSummaryFlushed || reasoningSummary.length === 0) return []
+    reasoningSummaryFlushed = true
+    return [{ type: 'thinking_delta', data: { delta: reasoningSummary } }]
+  }
 
   try {
     for await (const event of stream) {
@@ -267,7 +277,31 @@ export async function* mapOpenAIResponsesStream(
             model: accumulatedResult.model!
           }
         }
+      } else if (eventType === 'response.reasoning_summary_text.delta') {
+        if (!sawReasoningTextDelta && typeof event.delta === 'string') {
+          sawReasoningSummaryDelta = true
+          reasoningSummary += event.delta
+        }
+      } else if (eventType === 'response.reasoning_summary_text.done') {
+        if (!sawReasoningTextDelta && !sawReasoningSummaryDelta && typeof event.text === 'string') {
+          reasoningSummary = event.text
+        }
+      } else if (eventType === 'response.reasoning_text.delta') {
+        if (typeof event.delta === 'string' && event.delta.length > 0) {
+          if (!sawReasoningTextDelta) {
+            sawReasoningTextDelta = true
+            reasoningSummary = ''
+          }
+          yield { type: 'thinking_delta', data: { delta: event.delta } }
+        }
+      } else if (eventType === 'response.reasoning_text.done') {
+        if (!sawReasoningTextDelta && typeof event.text === 'string' && event.text.length > 0) {
+          sawReasoningTextDelta = true
+          reasoningSummary = ''
+          yield { type: 'thinking_delta', data: { delta: event.text } }
+        }
       } else if (eventType === 'response.output_text.delta' || eventType === 'content.delta') {
+        for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
         const delta = event.delta || event.text || ''
         accumulatedResult.output_text = (accumulatedResult.output_text || '') + delta
         yield {
@@ -275,12 +309,14 @@ export async function* mapOpenAIResponsesStream(
           data: { delta }
         }
       } else if (eventType === 'response.output_text.done' || eventType === 'content.done') {
+        for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
         const text = event.text || accumulatedResult.output_text || ''
         yield {
           type: 'response.output_text.done',
           data: { text }
         }
       } else if (eventType === 'response.tool_call.start' || eventType === 'tool_call.start') {
+        for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
         const toolCall = event.tool_call || event
         currentToolCall = {
           id: toolCall.id,
@@ -295,6 +331,7 @@ export async function* mapOpenAIResponsesStream(
           }
         }
       } else if (eventType === 'response.tool_call.delta' || eventType === 'tool_call.delta') {
+        for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
         const delta = event.delta || event.arguments || ''
         if (currentToolCall) {
           currentToolCall.arguments += delta
@@ -307,6 +344,7 @@ export async function* mapOpenAIResponsesStream(
           }
         }
       } else if (eventType === 'response.tool_call.done' || eventType === 'tool_call.done') {
+        for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
         const toolCall = event.tool_call || currentToolCall
         if (toolCall) {
           // Validate tool arguments if original tools were provided
@@ -347,6 +385,7 @@ export async function* mapOpenAIResponsesStream(
           currentToolCall = null
         }
       } else if (eventType === 'response.completed' || eventType === 'done') {
+        for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
         const finalResponse = event.response || event
         const result = mapFromOpenAIResponsesResponse(finalResponse, originalTools)
         yield {
@@ -354,6 +393,7 @@ export async function* mapOpenAIResponsesStream(
           data: result
         }
       } else if (eventType === 'response.failed' || eventType === 'error') {
+        for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
         const error = event.error || event
         yield {
           type: 'response.failed',
@@ -365,6 +405,7 @@ export async function* mapOpenAIResponsesStream(
           }
         }
       } else if (eventType === 'response.cancelled') {
+        for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
         yield {
           type: 'response.cancelled',
           data: {
@@ -374,6 +415,7 @@ export async function* mapOpenAIResponsesStream(
       }
       // Ignore other event types
     }
+    for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
   } catch (error) {
     yield {
       type: 'error',
