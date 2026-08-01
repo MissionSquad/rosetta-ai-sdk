@@ -745,7 +745,7 @@ export class AnthropicMapper implements IProviderMapper {
     originalTools?: RosettaTool<any>[]
   ): GenerateResult {
     let combinedTextContent: string | null = null
-    let thinkingText: string | null = null
+    const thinkingParts: string[] = []
     const codeExecutionResults: CodeExecutionResultInfo[] = []
     const responseContent = response.content as AnthropicResponseContentBlock[]
     const rawContentBlocks =
@@ -757,7 +757,7 @@ export class AnthropicMapper implements IProviderMapper {
         if (block.type === 'text') {
           textParts.push(block.text)
         } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
-          thinkingText = block.thinking
+          thinkingParts.push(block.thinking)
         } else if (block.type === 'code_execution_tool_result') {
           codeExecutionResults.push(this.mapCodeExecutionResultData(block))
         }
@@ -794,7 +794,7 @@ export class AnthropicMapper implements IProviderMapper {
       toolCalls: toolCalls, // Raw tool calls
       finishReason: finishReason,
       usage: usage,
-      thinkingSteps: thinkingText,
+      thinkingSteps: thinkingParts.length > 0 ? thinkingParts.join('\n\n') : null,
       ...(codeExecutionResults.length > 0 ? { codeExecutionResults } : {}),
       citations: undefined,
       parsedContent: null,
@@ -878,6 +878,10 @@ export class AnthropicMapper implements IProviderMapper {
               rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(event.content_block)
               yield { type: 'thinking_start' }
               thinkingStarted = true
+            } else if (event.content_block.type === 'redacted_thinking') {
+              rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(event.content_block)
+              yield { type: 'thinking_start' }
+              thinkingStarted = true
             } else if (event.content_block.type === 'tool_use') {
               const toolUse = event.content_block
               const index = event.index
@@ -932,10 +936,6 @@ export class AnthropicMapper implements IProviderMapper {
                 rawTextBlock.text = `${typeof rawTextBlock.text === 'string' ? rawTextBlock.text : ''}${event.delta.text}`
               }
             } else if (event.delta.type === 'thinking_delta') {
-              if (!thinkingStarted) {
-                yield { type: 'thinking_start' }
-                thinkingStarted = true
-              }
               yield { type: 'thinking_delta', data: { delta: event.delta.thinking } }
               if (aggregatedResult)
                 aggregatedResult.thinkingSteps = (aggregatedResult.thinkingSteps ?? '') + event.delta.thinking

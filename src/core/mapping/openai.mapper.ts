@@ -297,7 +297,9 @@ export class OpenAIMapper implements IProviderMapper {
     originalTools?: RosettaTool<any>[] // Accept original tools
   ): GenerateResult {
     // Delegate to the base OpenAI mapper function, passing originalTools
-    return mapFromOpenAIResponse(response, modelUsed, originalTools)
+    return mapFromOpenAIResponse(response, this.provider, modelUsed, originalTools, {
+      captureOpenAICompatibleReplay: false
+    })
   }
 
   async *mapProviderStream(
@@ -305,7 +307,9 @@ export class OpenAIMapper implements IProviderMapper {
     originalParams: GenerateParams // Accept original params to get modelId
   ): AsyncIterable<StreamChunk> {
     // Delegate to the base OpenAI stream mapper function, passing modelId and originalTools
-    yield* mapOpenAIStream(stream, this.provider, originalParams.model!, originalParams.tools)
+    yield* mapOpenAIStream(stream, this.provider, originalParams.model!, originalParams.tools, {
+      captureOpenAICompatibleReplay: false
+    })
   }
 
   // --- Embedding Mapping ---

@@ -661,14 +661,17 @@ export class GoogleMapper implements IProviderMapper {
     }
 
     let textContent: string | null = null
+    let thinkingSteps: string | null = null
     let toolCalls: RosettaToolCallRequest[] | undefined
     let parsedJson: any = null
     let finishReason = candidateFinishReason ?? 'unknown'
 
     if (candidate.content?.parts) {
-      const textParts = candidate.content.parts.filter((p): p is Part => p && 'text' in p)
+      const textParts = candidate.content.parts.filter((p): p is Part => p && 'text' in p && p.thought !== true)
+      const thoughtParts = candidate.content.parts.filter((p): p is Part => p && 'text' in p && p.thought === true)
+      if (thoughtParts.length > 0) thinkingSteps = thoughtParts.map(p => p.text ?? '').join('') || null
       if (textParts.length > 0) {
-        textContent = textParts.map(p => p.text).join('')
+        textContent = textParts.map(p => p.text ?? '').join('')
         const isJsonLike = textContent?.trim().startsWith('{') || textContent?.trim().startsWith('[')
         const isBlocked = candidateFinishReason === 'SAFETY' || !!promptFeedbackReason
         if (isJsonLike && !isBlocked) {
@@ -714,7 +717,7 @@ export class GoogleMapper implements IProviderMapper {
       usage: mapTokenUsage(response.usageMetadata), // Use common utility
       citations: citations,
       parsedContent: parsedJson,
-      thinkingSteps: undefined,
+      thinkingSteps,
       model: model,
       rawResponse: response
     }
@@ -777,11 +780,22 @@ export class GoogleMapper implements IProviderMapper {
           // --- FIX: Wrap part processing in try-catch ---
           try {
             // --- Text Delta ---
-            const textDelta =
-              safeGet<Part[]>(candidate, 'content', 'parts') // Use safeGet
-                ?.filter((p): p is Part => p && 'text' in p)
+            const parts = safeGet<Part[]>(candidate, 'content', 'parts') ?? []
+            const thinkingDelta = parts
+                .filter((p): p is Part => p && 'text' in p && p.thought === true)
                 .map(p => p.text ?? '')
-                .join('') ?? ''
+                .join('')
+            const textDelta = parts
+                .filter((p): p is Part => p && 'text' in p && p.thought !== true)
+                .map(p => p.text ?? '')
+                .join('')
+
+            if (thinkingDelta) {
+              yield { type: 'thinking_delta', data: { delta: thinkingDelta } }
+              if (aggregatedResult) {
+                aggregatedResult.thinkingSteps = (aggregatedResult.thinkingSteps ?? '') + thinkingDelta
+              }
+            }
 
             if (textDelta) {
               if (!isPotentiallyJson && aggregatedText === '' && textDelta.trim().match(/^[{[]/)) {

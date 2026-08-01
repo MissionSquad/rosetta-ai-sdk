@@ -19,7 +19,7 @@ export interface RosettaModelProperties {
    * `'image'` is an explicit "no image input" signal and yields `false`.
    */
   vision?: boolean
-  /** Anthropic specific: Indicates support for extended thinking steps. */
+  /** Historical provider capability metadata; consumers must not use it for UI branching. */
   extended_thinking?: boolean
   /** Anthropic specific: A qualitative measure of the model's latency. */
   comparative_latency?: string

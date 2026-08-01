@@ -52,6 +52,11 @@ import { prepareAudioUpload } from './utils'
 import { listModelsForProvider } from './listing/model.lister'
 import * as GroqAudioMapper from './mapping/groq.audio.mapper'
 import * as OpenAIResponsesMapper from './mapping/openai.responses.mapper'
+import {
+  normalizeGenerateResultThinking,
+  normalizeResponsesThinkingStream,
+  normalizeThinkingStream
+} from './streaming/thinking-normalizer'
 
 dotenvConfig()
 
@@ -496,7 +501,9 @@ export class RosettaAI {
       // --- Execute ---
       if (isCustom && mapper.executeGenerate && customConfig) {
         // Custom Provider Execution Path
-        const result = await mapper.executeGenerate(mappedParams, apiKey, customConfig, params)
+        const result = normalizeGenerateResultThinking(
+          await mapper.executeGenerate(mappedParams, apiKey, customConfig, params)
+        )
         if (this._openAICompletions) {
           result.openAIResponse = this._transformToOpenAIResponse(providerKey, result.rawResponse, result)
         }
@@ -548,7 +555,9 @@ export class RosettaAI {
             providerKey
           )
         }
-        const result = mapper.mapFromProviderResponse(providerResponse, model, params.tools)
+        const result = normalizeGenerateResultThinking(
+          mapper.mapFromProviderResponse(providerResponse, model, params.tools)
+        )
         result.rawResponse = providerResponse // Ensure rawResponse is attached
 
         // --- OpenAI Compliance Transformation (New Logic) ---
@@ -692,6 +701,14 @@ export class RosettaAI {
   }
 
   private async *streamInternal(
+    params: GenerateParams,
+    abortSignal: AbortSignal,
+    registerAbort: (abortFn: () => void) => void
+  ): AsyncIterable<StreamChunk> {
+    yield* normalizeThinkingStream(this.streamProviderInternal(params, abortSignal, registerAbort))
+  }
+
+  private async *streamProviderInternal(
     params: GenerateParams,
     abortSignal: AbortSignal,
     registerAbort: (abortFn: () => void) => void
@@ -1274,6 +1291,16 @@ export class RosettaAI {
     abortSignal: AbortSignal,
     registerAbort: (abortFn: () => void) => void
   ): AsyncIterable<ResponsesStreamChunk> {
+    yield* normalizeResponsesThinkingStream(
+      this.streamResponseProviderInternal(params, abortSignal, registerAbort)
+    )
+  }
+
+  private async *streamResponseProviderInternal(
+    params: CreateResponseParams,
+    abortSignal: AbortSignal,
+    registerAbort: (abortFn: () => void) => void
+  ): AsyncIterable<ResponsesStreamChunk> {
     // Validate provider is OpenAI
     if (params.provider !== Provider.OpenAI && params.provider !== 'openai') {
       const error = new UnsupportedFeatureError(
@@ -1734,7 +1761,34 @@ export class RosettaAI {
       finish_reason: finish_reason
     })
 
-    
+    const createOpenAIChoices = (
+      response: OpenAI.Chat.Completions.ChatCompletion
+    ): OpenAICompletionChoice[] =>
+      response.choices.map((choice, index) => {
+        const rawContent = choice.message.content
+        const content =
+          index === 0
+            ? baseResult.content
+            : typeof rawContent === 'string' || rawContent === null
+            ? normalizeGenerateResultThinking({
+                ...baseResult,
+                content: rawContent,
+                finishReason: choice.finish_reason
+              }).content
+            : null
+        return {
+          index: choice.index,
+          message: {
+            role: 'assistant' as const,
+            content,
+            tool_calls: choice.message.tool_calls as OpenAICompletionChoice['message']['tool_calls'],
+            refusal: (choice.message as { refusal?: string | null }).refusal ?? null
+          },
+          logprobs: choice.logprobs,
+          finish_reason: choice.finish_reason
+        }
+      })
+
     if (!this.isBuiltInProvider(providerKey)) {
       // For custom providers, check if the raw response is already OpenAI-compliant
       if (isOpenAICompletion(providerResponse)) {
@@ -1747,17 +1801,7 @@ export class RosettaAI {
           object: openAIResponse.object,
           created: openAIResponse.created,
           model: openAIResponse.model,
-          choices: openAIResponse.choices.map(choice => ({
-            index: choice.index,
-            message: {
-              role: 'assistant' as const,
-              content: choice.message.content,
-              tool_calls: choice.message.tool_calls as OpenAICompletionChoice['message']['tool_calls'],
-              refusal: (choice.message as any).refusal ?? null
-            },
-            logprobs: choice.logprobs,
-            finish_reason: choice.finish_reason
-          })),
+          choices: createOpenAIChoices(openAIResponse),
           usage: {
             prompt_tokens: openAIResponse.usage?.prompt_tokens ?? 0,
             completion_tokens: openAIResponse.usage?.completion_tokens ?? 0,
@@ -1834,17 +1878,7 @@ export class RosettaAI {
             object: 'chat.completion',
             created: providerResponse.created,
             model: providerResponse.model,
-            choices: providerResponse.choices.map(choice => ({
-              index: choice.index,
-              message: {
-                role: 'assistant',
-                content: choice.message.content,
-                tool_calls: choice.message.tool_calls as OpenAICompletionChoice['message']['tool_calls'],
-                refusal: (choice.message as any).refusal ?? null
-              },
-              logprobs: choice.logprobs,
-              finish_reason: choice.finish_reason
-            })),
+            choices: createOpenAIChoices(providerResponse),
             usage: {
               prompt_tokens: providerResponse.usage?.prompt_tokens ?? 0,
               completion_tokens: providerResponse.usage?.completion_tokens ?? 0,

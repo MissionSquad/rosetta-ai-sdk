@@ -666,6 +666,28 @@ describe('Google Mapper', () => {
       expect(result.citations).toBeUndefined()
     })
 
+    it('[Medium] should keep thought parts separate from non-streaming answer parts', () => {
+      const response: GenerateContentResponse = {
+        candidates: [
+          createMockCandidate(
+            [
+              { text: 'First thought. ', thought: true },
+              { text: 'Visible ' },
+              { text: 'Second thought.', thought: true },
+              { text: 'answer.' }
+            ],
+            FinishReason.STOP
+          )
+        ]
+      }
+
+      const result = mapper.mapFromProviderResponse(response, modelUsed)
+
+      expect(result.thinkingSteps).toBe('First thought. Second thought.')
+      expect(result.content).toBe('Visible answer.')
+      expect(result.content).not.toContain('thought')
+    })
+
     it('[Easy] should map response with tool calls', () => {
       const functionCall: FunctionCall = { name: 'get_weather', args: { location: 'Paris' } }
       const response: GenerateContentResponse = {
@@ -969,6 +991,51 @@ describe('Google Mapper', () => {
           usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, cachedContentTokenCount: undefined }
         })
       )
+    })
+
+    it('[Hard] should map thought and answer parts arriving in separate stream chunks', async () => {
+      const mockChunks: GenerateContentResponse[] = [
+        {
+          candidates: [
+            createMockCandidate([{ text: 'Private reasoning.', thought: true }], FinishReason.FINISH_REASON_UNSPECIFIED)
+          ]
+        },
+        {
+          candidates: [createMockCandidate([{ text: 'Visible answer.' }], FinishReason.STOP)]
+        }
+      ]
+
+      const results = await collectStreamChunks(mapper.mapProviderStream(mockGoogleStreamGenerator(mockChunks)))
+
+      expect(results[1]).toEqual({ type: 'thinking_delta', data: { delta: 'Private reasoning.' } })
+      expect(results[2]).toEqual({ type: 'content_delta', data: { delta: 'Visible answer.' } })
+      assertChunkType(results[4], 'final_result')
+      expect(results[4].data.result.thinkingSteps).toBe('Private reasoning.')
+      expect(results[4].data.result.content).toBe('Visible answer.')
+    })
+
+    it('[Hard] should emit thought before answer when both parts arrive in the same stream chunk', async () => {
+      const mockChunks: GenerateContentResponse[] = [
+        {
+          candidates: [
+            createMockCandidate(
+              [
+                { text: 'Same-chunk reasoning.', thought: true },
+                { text: 'Same-chunk answer.' }
+              ],
+              FinishReason.STOP
+            )
+          ]
+        }
+      ]
+
+      const results = await collectStreamChunks(mapper.mapProviderStream(mockGoogleStreamGenerator(mockChunks)))
+
+      expect(results[1]).toEqual({ type: 'thinking_delta', data: { delta: 'Same-chunk reasoning.' } })
+      expect(results[2]).toEqual({ type: 'content_delta', data: { delta: 'Same-chunk answer.' } })
+      assertChunkType(results[4], 'final_result')
+      expect(results[4].data.result.thinkingSteps).toBe('Same-chunk reasoning.')
+      expect(results[4].data.result.content).toBe('Same-chunk answer.')
     })
 
     it('[Hard] should handle stream with tool call', async () => {

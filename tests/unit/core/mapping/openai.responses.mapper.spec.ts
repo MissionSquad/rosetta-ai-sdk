@@ -453,6 +453,56 @@ describe('OpenAI Responses Mapper', () => {
       expect(chunks[4].type).toBe('response.tool_call.done')
     })
 
+    it('prefers reasoning text deltas over buffered summary deltas', async () => {
+      const mockStream = (async function* () {
+        yield { type: 'response.reasoning_summary_text.delta', delta: 'summary duplicate' }
+        yield { type: 'response.reasoning_text.delta', delta: 'private ' }
+        yield { type: 'response.reasoning_text.delta', delta: 'reasoning' }
+        yield { type: 'response.reasoning_text.done', text: 'private reasoning' }
+        yield { type: 'response.output_text.delta', delta: 'answer' }
+      })()
+
+      const chunks: ResponsesStreamChunk[] = []
+      for await (const chunk of mapOpenAIResponsesStream(mockStream)) chunks.push(chunk)
+
+      expect(chunks).toEqual([
+        { type: 'thinking_delta', data: { delta: 'private ' } },
+        { type: 'thinking_delta', data: { delta: 'reasoning' } },
+        { type: 'response.output_text.delta', data: { delta: 'answer' } }
+      ])
+    })
+
+    it('uses summary/done text as fallback without duplicating delta families', async () => {
+      const summaryOnly = (async function* () {
+        yield { type: 'response.reasoning_summary_text.delta', delta: 'summary ' }
+        yield { type: 'response.reasoning_summary_text.delta', delta: 'reasoning' }
+        yield { type: 'response.reasoning_summary_text.done', text: 'summary reasoning' }
+        yield { type: 'response.tool_call.start', tool_call: { id: 'call_1', name: 'lookup' } }
+      })()
+      const doneOnly = (async function* () {
+        yield { type: 'response.reasoning_text.done', text: 'done-only reasoning' }
+        yield { type: 'response.output_text.done', text: 'answer' }
+      })()
+
+      await expect((async () => {
+        const chunks: ResponsesStreamChunk[] = []
+        for await (const chunk of mapOpenAIResponsesStream(summaryOnly)) chunks.push(chunk)
+        return chunks
+      })()).resolves.toEqual([
+        { type: 'thinking_delta', data: { delta: 'summary reasoning' } },
+        { type: 'response.tool_call.start', data: { id: 'call_1', name: 'lookup' } }
+      ])
+
+      await expect((async () => {
+        const chunks: ResponsesStreamChunk[] = []
+        for await (const chunk of mapOpenAIResponsesStream(doneOnly)) chunks.push(chunk)
+        return chunks
+      })()).resolves.toEqual([
+        { type: 'thinking_delta', data: { delta: 'done-only reasoning' } },
+        { type: 'response.output_text.done', data: { text: 'answer' } }
+      ])
+    })
+
     it('should yield error event for failed response', async () => {
       const mockStream = (async function* () {
         yield { type: 'response.created', response: { id: 'resp_123', model: 'gpt-4o' } }

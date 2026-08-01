@@ -24,9 +24,12 @@ import {
   ModelListingSourceConfig,
   RosettaTool,
   ToolArgumentValidationError,
-  CustomProviderConfig
+  CustomProviderConfig,
+  CreateResponseParams,
+  ResponsesStreamChunk
 } from '../../../src'
 import { BaseCustomMapper } from '../../../src/core/mapping/base.custom.mapper'
+import * as ThinkingNormalizer from '../../../src/core/streaming/thinking-normalizer'
 
 // Mock the mapper classes
 jest.mock('../../../src/core/mapping/anthropic.mapper')
@@ -125,6 +128,12 @@ async function collectStreamChunks<T extends CollectableChunk>(stream: AsyncIter
   return chunks
 }
 
+async function collectExactChunks<T>(stream: AsyncIterable<T>): Promise<T[]> {
+  const chunks: T[] = []
+  for await (const chunk of stream) chunks.push(chunk)
+  return chunks
+}
+
 // Define a mock tool for testing
 const mockTool: RosettaTool<any> = {
   type: 'function',
@@ -191,6 +200,46 @@ class MockCustomMapper extends BaseCustomMapper {
   }
 }
 // --- End Mock Custom Mapper ---
+
+class MockThinkingCustomMapper extends BaseCustomMapper {
+  mapToProviderParams(params: GenerateParams): GenerateParams {
+    return params
+  }
+
+  async executeGenerate(): Promise<GenerateResult> {
+    const rawContent = '<think>custom private thought</think>\n{"answer":"custom"}'
+    return {
+      content: rawContent,
+      thinkingSteps: null,
+      parsedContent: null,
+      finishReason: 'stop',
+      model: 'custom-thinking-model',
+      rawResponse: {
+        id: 'custom-response',
+        object: 'chat.completion',
+        created: 1,
+        model: 'custom-thinking-model',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: rawContent, refusal: null },
+            finish_reason: 'stop',
+            logprobs: null
+          }
+        ]
+      }
+    }
+  }
+
+  async *executeStream(): AsyncIterable<StreamChunk> {
+    yield { type: 'message_start', data: { provider: this.provider, model: 'custom-thinking-model' } }
+    yield { type: 'thinking_start' }
+    yield { type: 'thinking_start' }
+    yield { type: 'thinking_delta', data: { delta: 'custom disclosed thought' } }
+    yield { type: 'content_delta', data: { delta: 'custom answer' } }
+    yield { type: 'message_stop', data: { finishReason: 'stop' } }
+  }
+}
 
 describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
   let originalEnv: NodeJS.ProcessEnv
@@ -652,6 +701,129 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       expect(result.parsedContent).toEqual({ a: 1 })
     })
 
+    it('normalizes a built-in result before structured parsing and OpenAI compatibility transformation', async () => {
+      const rawContent = '<think>built-in private thought</think>\n{"answer":"built-in"}'
+      const rawResponse = {
+        id: 'built-in-response',
+        object: 'chat.completion',
+        created: 1,
+        model: 'gpt-4o-mini',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: rawContent, refusal: null },
+            finish_reason: 'stop',
+            logprobs: null
+          }
+        ]
+      }
+      mockOpenAIClientInstance.chat.completions.create.mockResolvedValue(rawResponse)
+      mockOpenAIMapperInstance.mapFromProviderResponse.mockReturnValueOnce({
+        content: rawContent,
+        thinkingSteps: null,
+        parsedContent: null,
+        finishReason: 'stop',
+        model: 'gpt-4o-mini',
+        rawResponse
+      } as GenerateResult)
+      const normalizeSpy = jest.spyOn(ThinkingNormalizer, 'normalizeGenerateResultThinking')
+      const normalizedContent = '{"answer":"built-in"}'
+
+      const result = await new RosettaAI({ openaiApiKey: 'key', openAICompletions: true }).generate({
+        provider: Provider.OpenAI,
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Return structured output' }],
+        responseFormat: { type: 'json_object' }
+      })
+
+      expect(normalizeSpy).toHaveBeenCalledTimes(1)
+      expect(result.content).toBe(normalizedContent)
+      expect(result.thinkingSteps).toBe('built-in private thought')
+      expect(result.parsedContent).toEqual({ answer: 'built-in' })
+      expect(result.openAIResponse?.choices[0]?.message.content).toBe(normalizedContent)
+      normalizeSpy.mockRestore()
+    })
+
+    it('normalizes a custom result before structured parsing and OpenAI compatibility transformation', async () => {
+      const normalizeSpy = jest.spyOn(ThinkingNormalizer, 'normalizeGenerateResultThinking')
+      const normalizedContent = '{"answer":"custom"}'
+      const customProvider: CustomProviderConfig = {
+        providerKey: 'custom-thinking',
+        mapper: MockThinkingCustomMapper,
+        supportedFeatures: ['generate', 'json_mode'],
+        apiKey: 'custom-key',
+        baseURL: 'https://custom.invalid',
+        defaultModel: 'custom-thinking-model'
+      }
+
+      const result = await new RosettaAI({
+        customProviders: [customProvider],
+        openAICompletions: true
+      }).generate({
+        provider: 'custom-thinking',
+        model: 'custom-thinking-model',
+        messages: [{ role: 'user', content: 'Return structured output' }],
+        responseFormat: { type: 'json_object' }
+      })
+
+      expect(normalizeSpy).toHaveBeenCalledTimes(1)
+      expect(result.content).toBe(normalizedContent)
+      expect(result.thinkingSteps).toBe('custom private thought')
+      expect(result.parsedContent).toEqual({ answer: 'custom' })
+      expect(result.openAIResponse?.choices[0]?.message.content).toBe(normalizedContent)
+      normalizeSpy.mockRestore()
+    })
+
+    it('sanitizes primary and additional Groq choices during OpenAI compatibility transformation', async () => {
+      const firstRawContent = '<think>groq private thought</think>\nGroq answer'
+      const secondRawContent = '<analysis>second private thought</analysis>\nSecond Groq answer'
+      const rawResponse = {
+        id: 'groq-response',
+        object: 'chat.completion',
+        created: 1,
+        model: 'groq-thinking-model',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: firstRawContent, refusal: null },
+            finish_reason: 'stop',
+            logprobs: null
+          },
+          {
+            index: 1,
+            message: { role: 'assistant', content: secondRawContent, refusal: null },
+            finish_reason: 'stop',
+            logprobs: null
+          }
+        ]
+      }
+      mockGroqClientInstance.chat.completions.create.mockResolvedValue(rawResponse)
+      mockGroqMapperInstance.mapFromProviderResponse.mockReturnValueOnce({
+        content: firstRawContent,
+        thinkingSteps: null,
+        parsedContent: null,
+        finishReason: 'stop',
+        model: 'groq-thinking-model',
+        rawResponse
+      } as GenerateResult)
+
+      const result = await new RosettaAI({ groqApiKey: 'key', openAICompletions: true }).generate({
+        provider: Provider.Groq,
+        model: 'groq-thinking-model',
+        messages: [{ role: 'user', content: 'Respond' }]
+      })
+
+      expect(result.content).toBe('Groq answer')
+      expect(result.thinkingSteps).toBe('groq private thought')
+      expect(result.openAIResponse?.choices.map(choice => choice.message.content)).toEqual([
+        'Groq answer',
+        'Second Groq answer'
+      ])
+      mockGroqMapperInstance.mapFromProviderResponse.mockReturnValue(
+        ({ mapped: 'groq_result' } as unknown) as GenerateResult
+      )
+    })
+
     it('should throw errors from mapFromProviderResponse (e.g., ToolArgumentValidationError)', async () => {
       const params: GenerateParams = {
         provider: Provider.OpenAI,
@@ -874,6 +1046,75 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       )
     })
 
+    it('normalizes a built-in stream exactly once', async () => {
+      const normalizeSpy = jest.spyOn(ThinkingNormalizer, 'normalizeThinkingStream')
+      mockOpenAIMapperInstance.mapProviderStream.mockImplementation(() =>
+        mockStreamGenerator<StreamChunk>([
+          { type: 'message_start', data: { provider: Provider.OpenAI, model: 'gpt-4o-mini' } },
+          { type: 'thinking_start' },
+          { type: 'thinking_start' },
+          { type: 'thinking_delta', data: { delta: 'built-in disclosed thought' } },
+          { type: 'content_delta', data: { delta: 'built-in answer' } },
+          { type: 'message_stop', data: { finishReason: 'stop' } }
+        ])
+      )
+
+      const results = await collectExactChunks(
+        rosetta.stream({
+          provider: Provider.OpenAI,
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: 'Stream' }]
+        })
+      )
+
+      expect(normalizeSpy).toHaveBeenCalledTimes(1)
+      expect(results).toEqual([
+        { type: 'message_start', data: { provider: Provider.OpenAI, model: 'gpt-4o-mini' } },
+        { type: 'thinking_start' },
+        { type: 'thinking_stop' },
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', data: { delta: 'built-in disclosed thought' } },
+        { type: 'thinking_stop' },
+        { type: 'content_delta', data: { delta: 'built-in answer' } },
+        { type: 'message_stop', data: { finishReason: 'stop' } }
+      ])
+      normalizeSpy.mockRestore()
+    })
+
+    it('normalizes a custom stream exactly once', async () => {
+      const normalizeSpy = jest.spyOn(ThinkingNormalizer, 'normalizeThinkingStream')
+      const customProvider: CustomProviderConfig = {
+        providerKey: 'custom-thinking',
+        mapper: MockThinkingCustomMapper,
+        supportedFeatures: ['generate', 'stream'],
+        apiKey: 'custom-key',
+        baseURL: 'https://custom.invalid',
+        defaultModel: 'custom-thinking-model'
+      }
+      const customRosetta = new RosettaAI({ customProviders: [customProvider] })
+
+      const results = await collectExactChunks(
+        customRosetta.stream({
+          provider: 'custom-thinking',
+          model: 'custom-thinking-model',
+          messages: [{ role: 'user', content: 'Stream' }]
+        })
+      )
+
+      expect(normalizeSpy).toHaveBeenCalledTimes(1)
+      expect(results).toEqual([
+        { type: 'message_start', data: { provider: 'custom-thinking', model: 'custom-thinking-model' } },
+        { type: 'thinking_start' },
+        { type: 'thinking_stop' },
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', data: { delta: 'custom disclosed thought' } },
+        { type: 'thinking_stop' },
+        { type: 'content_delta', data: { delta: 'custom answer' } },
+        { type: 'message_stop', data: { finishReason: 'stop' } }
+      ])
+      normalizeSpy.mockRestore()
+    })
+
     it('should yield error chunk if mapProviderStream throws ToolArgumentValidationError', async () => {
       const params: GenerateParams = {
         provider: Provider.OpenAI,
@@ -1085,6 +1326,54 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       expect(mockOpenAIMapperInstance.wrapProviderError).toHaveBeenCalledWith(iterationError, Provider.OpenAI)
     })
     // --- End New Test ---
+  })
+
+  describe('streamResponse thinking normalization', () => {
+    it('normalizes the Responses API stream exactly once', async () => {
+      const rawResponsesStream = mockStreamGenerator([
+        {
+          type: 'response.created',
+          response: { id: 'response-1', model: 'gpt-5' }
+        },
+        {
+          type: 'response.reasoning_text.delta',
+          delta: 'responses disclosed thought'
+        },
+        {
+          type: 'response.output_text.delta',
+          delta: 'responses answer'
+        }
+      ])
+      const mockResponsesClient = {
+        responses: {
+          create: jest.fn().mockResolvedValue(rawResponsesStream)
+        }
+      }
+      ;(OpenAI as jest.Mock).mockReturnValue(mockResponsesClient)
+      const rosetta = new RosettaAI({ openaiApiKey: 'key' })
+      const normalizeSpy = jest.spyOn(ThinkingNormalizer, 'normalizeResponsesThinkingStream')
+      const params: CreateResponseParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-5',
+        input: 'Respond'
+      }
+
+      const results = await collectExactChunks<ResponsesStreamChunk>(rosetta.streamResponse(params))
+
+      expect(normalizeSpy).toHaveBeenCalledTimes(1)
+      expect(mockResponsesClient.responses.create).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'gpt-5', input: 'Respond', stream: true }),
+        { signal: expect.any(AbortSignal) }
+      )
+      expect(results).toEqual([
+        { type: 'response.created', data: { id: 'response-1', model: 'gpt-5' } },
+        { type: 'thinking_start' },
+        { type: 'thinking_delta', data: { delta: 'responses disclosed thought' } },
+        { type: 'thinking_stop' },
+        { type: 'response.output_text.delta', data: { delta: 'responses answer' } }
+      ])
+      normalizeSpy.mockRestore()
+    })
   })
 
   describe('embed', () => {

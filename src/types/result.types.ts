@@ -28,7 +28,7 @@ export interface GenerateResult {
   usage?: TokenUsage
   /** Citations or grounding information, if provided by the API (e.g., Google grounding). */
   citations?: Citation[]
-  /** Intermediate thinking steps, if requested and provided (Anthropic specific). */
+  /** Provider-neutral disclosed reasoning, when returned by the selected provider. */
   thinkingSteps?: string | null
   /** Managed code execution results emitted by providers that support programmatic execution. */
   codeExecutionResults?: CodeExecutionResultInfo[]

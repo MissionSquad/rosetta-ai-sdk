@@ -84,7 +84,7 @@ export interface GenerateParams {
     source?: 'web' | string[]
   }
 
-  /** Request the model to output intermediate thinking steps (Anthropic specific). */
+  /** Request disclosed reasoning when the selected provider/mapper supports it. */
   thinking?: boolean
 
   // Internal flag, not set by user directly on top-level call
