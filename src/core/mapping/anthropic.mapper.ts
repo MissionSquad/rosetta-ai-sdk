@@ -48,6 +48,7 @@ import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
 import { mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
 import { normalizeSchemaForStrict, supportsStrictToolUse } from './anthropic.strict'
+import { resolveThinkingRequest } from './thinking-request'
 
 // Type alias for the stream type from Anthropic SDK
 type AnthropicMessageStream = AsyncIterable<RawMessageStreamEvent>
@@ -78,7 +79,8 @@ export class AnthropicMapper implements IProviderMapper {
     'claude-opus-4-8',
     'claude-opus-5',
     'claude-sonnet-5',
-    'claude-fable-5'
+    'claude-fable-5',
+    'claude-mythos-5'
   ])
 
   // These models reject thinking budgets ({type: 'enabled', budget_tokens})
@@ -88,7 +90,8 @@ export class AnthropicMapper implements IProviderMapper {
     'claude-opus-4-8',
     'claude-opus-5',
     'claude-sonnet-5',
-    'claude-fable-5'
+    'claude-fable-5',
+    'claude-mythos-5'
   ])
 
   private shouldStripSamplingParams(model: string): boolean {
@@ -629,10 +632,15 @@ export class AnthropicMapper implements IProviderMapper {
 
     const normalizedModel = params.model!.replace(':1m', '')
 
+    const { thinkingRequested, extraParams: sanitizedExtraParams } = resolveThinkingRequest(params, ['thinking'])
+
     let thinkingParam: AnthropicThinkingConfig | undefined = undefined
-    if (params.thinking) {
+    if (thinkingRequested) {
+      // display: 'summarized' opts back into visible thinking text — on Opus 4.7+ and the
+      // Claude 5 family the API defaults to 'omitted', which streams thinking blocks whose
+      // text is empty, so disclosed reasoning would never reach the caller.
       thinkingParam = AnthropicMapper.modelsWithAdaptiveThinking.has(normalizedModel)
-        ? { type: 'adaptive' }
+        ? { type: 'adaptive', display: 'summarized' }
         : { type: 'enabled', budget_tokens: 1024 }
     }
 
@@ -662,7 +670,7 @@ export class AnthropicMapper implements IProviderMapper {
     const anthropicContainerId = this.getAnthropicContainerId(params)
 
     const basePayload: AnthropicMessageCreateParamsBase = {
-      ...(params.extraParams ?? {}),
+      ...(sanitizedExtraParams ?? {}),
       model: normalizedModel,
       messages: messages,
       system: systemParam,
@@ -678,6 +686,13 @@ export class AnthropicMapper implements IProviderMapper {
     }
 
     if (this.shouldStripSamplingParams(normalizedModel)) {
+      delete basePayload.temperature
+      delete basePayload.top_p
+    }
+
+    // Budgeted extended thinking rejects modified sampling parameters with a 400
+    // ("temperature may only be set to 1 when thinking is enabled").
+    if (basePayload.thinking?.type === 'enabled') {
       delete basePayload.temperature
       delete basePayload.top_p
     }

@@ -12,7 +12,8 @@ import {
   HarmCategory,
   HarmBlockThreshold,
   EmbedContentParameters,
-  EmbedContentResponse
+  EmbedContentResponse,
+  ThinkingConfig
 } from '@google/genai'
 import {
   GenerateParams,
@@ -33,6 +34,7 @@ import { MappingError, ProviderAPIError, RosettaAIError, UnsupportedFeatureError
 import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
 import { mapTokenUsage, mapBaseParams } from './common.utils'
+import { resolveThinkingRequest } from './thinking-request'
 import * as GoogleEmbedMapper from './google.embed.mapper'
 
 export class GoogleMapper implements IProviderMapper {
@@ -547,9 +549,27 @@ export class GoogleMapper implements IProviderMapper {
     // Use common utility for base parameters
     const baseMappedParams = mapBaseParams(params)
 
+    const { thinkingRequested, extraParams: sanitizedExtraParams } = resolveThinkingRequest(params, [
+      'thinkingConfig'
+    ])
+    // A caller-provided native thinkingConfig (via extraParams) is preserved; a neutral thinking
+    // request merges includeThoughts into it so thought parts are disclosed in the response.
+    let thinkingConfig: ThinkingConfig | undefined
+    if (thinkingRequested) {
+      const nativeThinkingConfig = sanitizedExtraParams?.thinkingConfig
+      // Merge only plain records — spreading an array (or other exotic object) would produce an
+      // invalid thinkingConfig shape with numeric keys and a 400 from the Google API.
+      const mergeableNativeConfig =
+        typeof nativeThinkingConfig === 'object' && nativeThinkingConfig !== null && !Array.isArray(nativeThinkingConfig)
+          ? nativeThinkingConfig
+          : {}
+      thinkingConfig = { ...mergeableNativeConfig, includeThoughts: true }
+    }
+
     // Build GenerateContentConfig
     const config: GenerateContentConfig = {
-      ...(params.extraParams ?? {}),
+      ...(sanitizedExtraParams ?? {}),
+      ...(thinkingConfig ? { thinkingConfig } : {}),
       maxOutputTokens: baseMappedParams.maxTokens,
       temperature: baseMappedParams.temperature,
       topP: baseMappedParams.topP,

@@ -669,8 +669,15 @@ describe('Anthropic Mapper', () => {
       expect(result.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 })
     })
 
-    it('[Medium] should map thinking to adaptive for models that reject thinking budgets', () => {
-      for (const model of ['claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5']) {
+    it('[Medium] should map thinking to adaptive with summarized display for models that reject thinking budgets', () => {
+      for (const model of [
+        'claude-opus-4-7',
+        'claude-opus-4-8',
+        'claude-opus-5',
+        'claude-sonnet-5',
+        'claude-fable-5',
+        'claude-mythos-5'
+      ]) {
         const params: GenerateParams = {
           ...baseParams,
           model,
@@ -678,8 +685,57 @@ describe('Anthropic Mapper', () => {
           thinking: true
         }
         const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
-        expect(result.thinking).toEqual({ type: 'adaptive' })
+        // display: 'summarized' is required for disclosed thinking text — these models default to
+        // 'omitted', which streams thinking blocks with empty text.
+        expect(result.thinking).toEqual({ type: 'adaptive', display: 'summarized' })
       }
+    })
+
+    it('[Medium] should strip sampling params when budgeted thinking is enabled', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'Test' }],
+        thinking: true,
+        temperature: 0.7,
+        topP: 0.9
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 })
+      expect(result).not.toHaveProperty('temperature')
+      expect(result).not.toHaveProperty('top_p')
+    })
+
+    it('[Medium] should strip foreign provider thinking keys from extraParams and translate their intent', () => {
+      // A Google-shaped thinkingConfig persisted for another provider must never reach the
+      // Anthropic body (400 "thinkingConfig: Extra inputs are not permitted") — instead its
+      // includeThoughts intent enables Anthropic thinking.
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'claude-opus-5',
+        messages: [{ role: 'user', content: 'Test' }],
+        extraParams: {
+          thinkingConfig: { includeThoughts: true },
+          reasoning_effort: 'high',
+          customFlag: 'kept'
+        }
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result).not.toHaveProperty('thinkingConfig')
+      expect(result).not.toHaveProperty('reasoning_effort')
+      expect((result as unknown as Record<string, unknown>).customFlag).toBe('kept')
+      expect(result.thinking).toEqual({ type: 'adaptive', display: 'summarized' })
+    })
+
+    it('[Medium] should preserve a native thinking override passed via extraParams', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'claude-opus-4-6',
+        messages: [{ role: 'user', content: 'Test' }],
+        extraParams: { thinking: { type: 'enabled', budget_tokens: 4096 } },
+        maxTokens: 8192
+      }
+      const result = mapper.mapToProviderParams(params) as Anthropic.Messages.MessageCreateParamsNonStreaming
+      expect(result.thinking).toEqual({ type: 'enabled', budget_tokens: 4096 })
     })
 
     it('[Easy] should map responseFormat json_schema to output_config.format', () => {

@@ -1656,9 +1656,10 @@ export class RosettaAI {
       if (params.grounding?.enabled && provider !== Provider.Google) {
         throw new UnsupportedFeatureError(provider, 'Grounding/Citations')
       }
-      if (params.thinking && provider !== Provider.Anthropic) {
-        throw new UnsupportedFeatureError(provider, 'Thinking steps')
-      }
+      // params.thinking is provider-neutral: every mapper renders it in its own dialect
+      // (Anthropic thinking config, Google thinkingConfig.includeThoughts) or accepts it as a
+      // no-op where the provider offers no disclosure control (OpenAI/Azure Chat Completions,
+      // Groq, OpenAI-compatible endpoints), so no provider gate applies here.
     } else if (
       'input' in params &&
       typeof params.input !== 'undefined' &&
