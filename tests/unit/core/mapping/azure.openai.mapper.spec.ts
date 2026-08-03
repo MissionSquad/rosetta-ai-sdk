@@ -351,11 +351,27 @@ describe('Azure OpenAI Mapper (V2)', () => {
       })
     })
 
-    it('[Medium] should throw UnsupportedFeatureError for thinking/grounding', () => {
+    it('[Medium] should throw UnsupportedFeatureError for grounding but accept thinking as a no-op', () => {
       const paramsThinking: GenerateParams = { ...baseGenerateParams, thinking: true }
       const paramsGrounding: GenerateParams = { ...baseGenerateParams, grounding: { enabled: true } }
-      expect(() => mapper.mapToProviderParams(paramsThinking)).toThrow(UnsupportedFeatureError)
+      const result = mapper.mapToProviderParams(paramsThinking) as Record<string, unknown>
+      expect(result).not.toHaveProperty('thinking')
       expect(() => mapper.mapToProviderParams(paramsGrounding)).toThrow(UnsupportedFeatureError)
+    })
+
+    it('[Medium] should strip foreign provider thinking keys from extraParams', () => {
+      const params: GenerateParams = {
+        ...baseGenerateParams,
+        extraParams: {
+          thinkingConfig: { includeThoughts: true },
+          thinking: { type: 'adaptive' },
+          reasoning_effort: 'low'
+        }
+      }
+      const result = mapper.mapToProviderParams(params) as Record<string, unknown>
+      expect(result).not.toHaveProperty('thinkingConfig')
+      expect(result).not.toHaveProperty('thinking')
+      expect(result.reasoning_effort).toBe('low')
     })
 
     it('[Hard] should map complex message history', () => {

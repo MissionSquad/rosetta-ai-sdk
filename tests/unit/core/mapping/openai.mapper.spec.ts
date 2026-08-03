@@ -285,11 +285,40 @@ describe('OpenAI Mapper', () => {
       })
     })
 
-    it('[Easy] should throw error for unsupported features', () => {
-      const paramsThinking: GenerateParams = { ...baseParams, messages: [], thinking: true }
+    it('[Easy] should throw error for unsupported features (grounding)', () => {
       const paramsGrounding: GenerateParams = { ...baseParams, messages: [], grounding: { enabled: true } }
-      expect(() => mapper.mapToProviderParams(paramsThinking)).toThrow(UnsupportedFeatureError)
       expect(() => mapper.mapToProviderParams(paramsGrounding)).toThrow(UnsupportedFeatureError)
+    })
+
+    it('[Easy] should accept a neutral thinking request as a no-op', () => {
+      // Chat Completions has no reasoning-disclosure parameter; the request must succeed unchanged.
+      const paramsThinking: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'Test' }],
+        thinking: true
+      }
+      const result = mapper.mapToProviderParams(paramsThinking) as Record<string, unknown>
+      expect(result).not.toHaveProperty('thinking')
+      expect(result).not.toHaveProperty('thinkingConfig')
+    })
+
+    it('[Medium] should strip foreign provider thinking keys from extraParams but keep reasoning_effort', () => {
+      // OpenAI rejects unknown parameters with 400 "Unknown parameter: 'thinkingConfig'".
+      const params: GenerateParams = {
+        ...baseParams,
+        messages: [{ role: 'user', content: 'Test' }],
+        extraParams: {
+          thinkingConfig: { includeThoughts: true },
+          thinking: { type: 'adaptive' },
+          reasoning_effort: 'low',
+          customFlag: 'kept'
+        }
+      }
+      const result = mapper.mapToProviderParams(params) as Record<string, unknown>
+      expect(result).not.toHaveProperty('thinkingConfig')
+      expect(result).not.toHaveProperty('thinking')
+      expect(result.reasoning_effort).toBe('low')
+      expect(result.customFlag).toBe('kept')
     })
 
     it('[Medium] should map assistant message with both text content and tool calls', () => {

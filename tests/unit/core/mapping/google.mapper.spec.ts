@@ -642,6 +642,58 @@ describe('Google Mapper', () => {
         expect(result.model).toBe('gemini-2.5-flash')
       })
     })
+
+    describe('neutral thinking request', () => {
+      it('should map thinking: true to thinkingConfig.includeThoughts', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          thinking: true
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect((result.config as any)?.thinkingConfig).toEqual({ includeThoughts: true })
+      })
+
+      it('should merge includeThoughts into a native thinkingConfig from extraParams', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          thinking: true,
+          extraParams: { thinkingConfig: { thinkingBudget: 2048 } }
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect((result.config as any)?.thinkingConfig).toEqual({ thinkingBudget: 2048, includeThoughts: true })
+      })
+
+      it('should preserve a native thinkingConfig untouched when thinking is not requested', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          extraParams: { thinkingConfig: { includeThoughts: false, thinkingBudget: 512 } }
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect((result.config as any)?.thinkingConfig).toEqual({ includeThoughts: false, thinkingBudget: 512 })
+      })
+
+      it('should strip foreign provider thinking keys and translate their intent', () => {
+        // An Anthropic-shaped thinking object persisted for another provider must not reach the
+        // Google config; its adaptive/enabled intent becomes includeThoughts instead.
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          extraParams: {
+            thinking: { type: 'adaptive' },
+            reasoning_effort: 'high',
+            customParam: 'kept'
+          }
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect((result.config as any)?.thinking).toBeUndefined()
+        expect((result.config as any)?.reasoning_effort).toBeUndefined()
+        expect((result.config as any)?.customParam).toBe('kept')
+        expect((result.config as any)?.thinkingConfig).toEqual({ includeThoughts: true })
+      })
+    })
   })
 
   describe('mapFromProviderResponse (Generate)', () => {

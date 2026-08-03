@@ -47,6 +47,7 @@ import {
 } from '../../errors'
 import { IProviderMapper } from './base.mapper'
 import { mapBaseParams, mapBaseToolChoice, mapToOpenAIResponseFormat } from './common.utils'
+import { resolveThinkingRequest } from './thinking-request'
 import {
   mapContentForOpenAIRole,
   mapFromOpenAIResponse,
@@ -188,13 +189,15 @@ export class AzureOpenAIMapper implements IProviderMapper {
       )
     }
 
-    if (params.thinking) throw new UnsupportedFeatureError(this.provider, 'Thinking steps')
+    // Same policy as the OpenAI mapper: Chat Completions cannot disclose reasoning content, so a
+    // neutral thinking request is a no-op and foreign providers' thinking keys are stripped.
+    const { extraParams: sanitizedExtraParams } = resolveThinkingRequest(params, ['reasoning_effort'])
     if (params.grounding) throw new UnsupportedFeatureError(this.provider, 'Grounding/Citations')
 
     const baseMappedParams = mapBaseParams(params)
 
     const basePayload = {
-      ...(params.extraParams ?? {}),
+      ...(sanitizedExtraParams ?? {}),
       model: deploymentId, // Use deployment ID as model for Azure
       messages,
       max_tokens: baseMappedParams.maxTokens,

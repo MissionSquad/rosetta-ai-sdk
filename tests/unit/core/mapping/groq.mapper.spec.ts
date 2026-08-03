@@ -244,12 +244,31 @@ describe('Groq Mapper', () => {
       expect(result.stream).toBe(true)
     })
 
-    it('[Easy] should throw error for unsupported features (thinking)', () => {
+    it('[Easy] should accept a neutral thinking request as a no-op', () => {
+      // Groq reasoning models disclose reasoning without a request toggle; the mapper already
+      // converts message/delta reasoning fields into thinking chunks.
       const paramsThinking: GenerateParams = { ...baseParams, thinking: true }
-      expect(() => mapper.mapToProviderParams(paramsThinking)).toThrow(UnsupportedFeatureError)
-      expect(() => mapper.mapToProviderParams(paramsThinking)).toThrow(
-        "Provider 'groq' does not support the requested feature: Thinking steps"
-      )
+      const result = mapper.mapToProviderParams(paramsThinking) as Record<string, unknown>
+      expect(result).not.toHaveProperty('thinking')
+    })
+
+    it('[Medium] should strip foreign provider thinking keys but keep Groq-native reasoning controls', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        extraParams: {
+          thinkingConfig: { includeThoughts: true },
+          thinking: { type: 'adaptive' },
+          reasoning_format: 'parsed',
+          include_reasoning: true,
+          reasoning_effort: 'default'
+        }
+      }
+      const result = mapper.mapToProviderParams(params) as Record<string, unknown>
+      expect(result).not.toHaveProperty('thinkingConfig')
+      expect(result).not.toHaveProperty('thinking')
+      expect(result.reasoning_format).toBe('parsed')
+      expect(result.include_reasoning).toBe(true)
+      expect(result.reasoning_effort).toBe('default')
     })
 
     it('[Easy] should throw error for unsupported features (grounding)', () => {

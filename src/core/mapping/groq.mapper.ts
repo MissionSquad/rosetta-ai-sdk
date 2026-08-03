@@ -33,6 +33,7 @@ import { CustomProviderConfig } from '../../types/custom.types'
 import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
 import { mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
+import { resolveThinkingRequest } from './thinking-request'
 import * as GroqEmbedMapper from './groq.embed.mapper'
 import * as GroqAudioMapper from './groq.audio.mapper'
 
@@ -259,9 +260,16 @@ export class GroqMapper implements IProviderMapper {
     if (params.responseFormat?.type === 'json_object') {
       console.warn('JSON response format requested, but Groq support is unconfirmed via standard parameters.')
     }
-    if (params.thinking) {
-      throw new UnsupportedFeatureError(this.provider, 'Thinking steps')
-    }
+    // Groq reasoning models return their reasoning in choice.delta/message.reasoning without a
+    // request-side toggle, and this mapper already maps that field to thinking chunks. A neutral
+    // thinking request is therefore a no-op instead of an error; Groq-native reasoning controls
+    // (reasoning_format, include_reasoning, reasoning_effort) still pass through extraParams while
+    // foreign providers' thinking keys are stripped.
+    const { extraParams: sanitizedExtraParams } = resolveThinkingRequest(params, [
+      'reasoning_format',
+      'include_reasoning',
+      'reasoning_effort'
+    ])
     if (params.grounding) {
       throw new UnsupportedFeatureError(this.provider, 'Grounding/Citations')
     }
@@ -270,7 +278,7 @@ export class GroqMapper implements IProviderMapper {
     const baseMappedParams = mapBaseParams(params)
 
     const payload = {
-      ...(params.extraParams ?? {}),
+      ...(sanitizedExtraParams ?? {}),
       model: params.model!,
       messages: messages,
       max_tokens: baseMappedParams.maxTokens,

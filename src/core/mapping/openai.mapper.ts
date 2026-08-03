@@ -34,6 +34,7 @@ import {
 import { MappingError, UnsupportedFeatureError, RosettaAIError, InvalidToolDefinitionError } from '../../errors'
 import { IProviderMapper } from './base.mapper'
 import { mapBaseParams, mapBaseToolChoice, mapToOpenAIResponseFormat } from './common.utils'
+import { resolveThinkingRequest } from './thinking-request'
 import * as OpenAIEmbedMapper from './openai.embed.mapper'
 import * as OpenAIAudioMapper from './openai.audio.mapper'
 import { getGpt5Support } from './gpt5.support'
@@ -165,9 +166,12 @@ export class OpenAIMapper implements IProviderMapper {
       )
     }
 
-    if (params.thinking) {
-      throw new UnsupportedFeatureError(this.provider, 'Thinking steps')
-    }
+    // Chat Completions has no parameter that discloses reasoning content: reasoning models
+    // (o-series, gpt-5*) think server-side regardless, and reasoning summaries exist only on the
+    // Responses API. A neutral thinking request is therefore a no-op here instead of an error, so
+    // one provider-agnostic configuration can serve every provider. Foreign providers' thinking
+    // keys are stripped from extraParams — OpenAI rejects unknown parameters with a 400.
+    const { extraParams: sanitizedExtraParams } = resolveThinkingRequest(params, ['reasoning_effort'])
     if (params.grounding) {
       throw new UnsupportedFeatureError(this.provider, 'Grounding/Citations')
     }
@@ -176,7 +180,7 @@ export class OpenAIMapper implements IProviderMapper {
     const baseMappedParams = mapBaseParams(params)
 
     const basePayload: any = {
-      ...(params.extraParams ?? {}),
+      ...(sanitizedExtraParams ?? {}),
       model: params.model!,
       messages,
       temperature: baseMappedParams.temperature,
