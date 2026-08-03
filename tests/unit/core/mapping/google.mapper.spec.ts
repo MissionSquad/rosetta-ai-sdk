@@ -665,6 +665,17 @@ describe('Google Mapper', () => {
         expect((result.config as any)?.thinkingConfig).toEqual({ thinkingBudget: 2048, includeThoughts: true })
       })
 
+      it('should ignore a malformed (array) native thinkingConfig when merging', () => {
+        const params: GenerateParams = {
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          thinking: true,
+          extraParams: { thinkingConfig: [{ thinkingBudget: 2048 }] }
+        }
+        const result = mapper.mapToProviderParams(params) as GenerateContentParameters
+        expect((result.config as any)?.thinkingConfig).toEqual({ includeThoughts: true })
+      })
+
       it('should preserve a native thinkingConfig untouched when thinking is not requested', () => {
         const params: GenerateParams = {
           ...baseParams,

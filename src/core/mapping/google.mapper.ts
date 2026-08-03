@@ -557,10 +557,13 @@ export class GoogleMapper implements IProviderMapper {
     let thinkingConfig: ThinkingConfig | undefined
     if (thinkingRequested) {
       const nativeThinkingConfig = sanitizedExtraParams?.thinkingConfig
-      thinkingConfig = {
-        ...(typeof nativeThinkingConfig === 'object' && nativeThinkingConfig !== null ? nativeThinkingConfig : {}),
-        includeThoughts: true
-      }
+      // Merge only plain records — spreading an array (or other exotic object) would produce an
+      // invalid thinkingConfig shape with numeric keys and a 400 from the Google API.
+      const mergeableNativeConfig =
+        typeof nativeThinkingConfig === 'object' && nativeThinkingConfig !== null && !Array.isArray(nativeThinkingConfig)
+          ? nativeThinkingConfig
+          : {}
+      thinkingConfig = { ...mergeableNativeConfig, includeThoughts: true }
     }
 
     // Build GenerateContentConfig
