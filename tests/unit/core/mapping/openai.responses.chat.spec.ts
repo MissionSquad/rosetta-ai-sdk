@@ -249,6 +249,18 @@ describe('mapToOpenAIResponsesChatParams', () => {
     const mapped = mapToOpenAIResponsesChatParams({ ...baseParams, verbosity: 'low' })
     expect(mapped.text).toEqual({ verbosity: 'low' })
   })
+
+  it('clamps maxTokens below the Responses minimum of 16 up to 16', () => {
+    // Chat Completions accepted tiny caps (validation pings use maxTokens: 10); the Responses
+    // API 400s below 16 (integer_below_min_value), so the mapper owns the floor.
+    const mapped = mapToOpenAIResponsesChatParams({ ...baseParams, maxTokens: 10 })
+    expect(mapped.max_output_tokens).toBe(16)
+  })
+
+  it('passes maxTokens at or above the minimum through unchanged and omits it when unset', () => {
+    expect(mapToOpenAIResponsesChatParams({ ...baseParams, maxTokens: 16 }).max_output_tokens).toBe(16)
+    expect(mapToOpenAIResponsesChatParams(baseParams)).not.toHaveProperty('max_output_tokens')
+  })
 })
 
 describe('mapOpenAIResponsesChatResponse', () => {
