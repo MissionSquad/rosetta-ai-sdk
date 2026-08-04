@@ -196,6 +196,14 @@ function mapToolChoiceToResponses(
 }
 
 /**
+ * The Responses API rejects `max_output_tokens` below 16 with a 400
+ * (`integer_below_min_value`); Chat Completions accepts caps down to 1, so neutral
+ * `maxTokens` values below the floor are clamped up to keep tiny-budget requests
+ * (validation pings, cheap probes) working across the dialect switch.
+ */
+const RESPONSES_MIN_OUTPUT_TOKENS = 16
+
+/**
  * Resolves the effective `reasoning` request parameter.
  *
  * A neutral thinking request needs reasoning to actually run (effort above 'none') and asks
@@ -282,7 +290,9 @@ export function mapToOpenAIResponsesChatParams(params: GenerateParams): Response
     ...(toolChoice ? { tool_choice: toolChoice } : {}),
     ...(reasoning ? { reasoning } : {}),
     ...(textConfig ? { text: textConfig } : {}),
-    ...(baseMappedParams.maxTokens !== undefined ? { max_output_tokens: baseMappedParams.maxTokens } : {}),
+    ...(baseMappedParams.maxTokens !== undefined
+      ? { max_output_tokens: Math.max(RESPONSES_MIN_OUTPUT_TOKENS, baseMappedParams.maxTokens) }
+      : {}),
     ...(allowsSampling && baseMappedParams.temperature !== undefined
       ? { temperature: baseMappedParams.temperature }
       : {}),
