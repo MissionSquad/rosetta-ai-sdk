@@ -53,6 +53,12 @@ import { listModelsForProvider } from './listing/model.lister'
 import * as GroqAudioMapper from './mapping/groq.audio.mapper'
 import * as OpenAIResponsesMapper from './mapping/openai.responses.mapper'
 import {
+  generateViaOpenAIResponses,
+  mapOpenAIResponsesChatStream,
+  mapToOpenAIResponsesChatParams,
+  shouldUseOpenAIResponsesApi
+} from './mapping/openai.responses.chat'
+import {
   normalizeGenerateResultThinking,
   normalizeResponsesThinkingStream,
   normalizeThinkingStream
@@ -494,6 +500,22 @@ export class RosettaAI {
       const effectiveParams = { ...params, model, stream: false }
       this.checkUnsupportedFeatures(providerKey, effectiveParams, 'Generate', !!this.azureOpenAIClient)
 
+      // gpt-5.x chat traffic routes through the Responses API: Chat Completions rejects function
+      // tools combined with reasoning on gpt-5.4+ (gpt-5.6 requires an explicit
+      // reasoning_effort 'none' merely to attach tools) and never discloses reasoning content.
+      // Azure deployments keep the Chat Completions path.
+      if (providerKey === Provider.OpenAI && !this.azureOpenAIClient && shouldUseOpenAIResponsesApi(effectiveParams)) {
+        const client = this.getClientForProvider(providerKey) as OpenAI
+        const result = normalizeGenerateResultThinking(
+          await generateViaOpenAIResponses(client, effectiveParams, params.tools)
+        )
+        if (this._openAICompletions) {
+          result.openAIResponse = this._transformToOpenAIResponse(providerKey, result.rawResponse, result)
+        }
+        this.applyStructuredOutputParsing(params, result)
+        return result
+      }
+
       // --- Map Parameters ---
       // Use mapper.mapToProviderParams if it exists, otherwise pass raw params to executeGenerate
       const mappedParams = mapper.mapToProviderParams ? mapper.mapToProviderParams(effectiveParams) : effectiveParams
@@ -740,6 +762,22 @@ export class RosettaAI {
 
       const effectiveParams = { ...params, model, stream: true }
       this.checkUnsupportedFeatures(providerKey, effectiveParams, 'Generate', !!this.azureOpenAIClient)
+
+      // gpt-5.x chat traffic routes through the Responses API (see generate() for rationale).
+      if (providerKey === Provider.OpenAI && !this.azureOpenAIClient && shouldUseOpenAIResponsesApi(effectiveParams)) {
+        const client = this.getClientForProvider(providerKey) as OpenAI
+        const responsesParams = mapToOpenAIResponsesChatParams(effectiveParams)
+        const providerStream = await client.responses.create(
+          { ...responsesParams, stream: true },
+          { signal: abortSignal }
+        )
+        registerAbort(() => this.abortStreamResource(providerStream))
+        const mappedStream = mapOpenAIResponsesChatStream(providerStream, effectiveParams.model!, params.tools)
+        yield* this.forwardCancellableStream(mappedStream, abortSignal, () =>
+          this.abortStreamResource(providerStream)
+        )
+        return
+      }
 
       // --- Map Parameters ---
       const mappedParams = mapper.mapToProviderParams ? mapper.mapToProviderParams(effectiveParams) : effectiveParams

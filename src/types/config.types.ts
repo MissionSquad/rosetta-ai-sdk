@@ -7,6 +7,12 @@ import { CustomProviderConfig } from './custom.types'
  * or provide parameters unique to a provider (like Azure deployment IDs).
  */
 export interface ProviderOptions {
+  /**
+   * Forces OpenAI gpt-5.x chat traffic back onto /v1/chat/completions instead of the default
+   * /v1/responses path. Chat Completions cannot disclose reasoning and rejects function tools
+   * combined with reasoning on gpt-5.4+, so this is an escape hatch, not a recommendation.
+   */
+  openaiPreferChatCompletions?: boolean
   /** Base URL override for the provider's API endpoint. */
   baseURL?: string
   /** Azure OpenAI specific deployment ID for chat/completion models. Overrides `azureOpenAIDefaultChatDeploymentName`. */

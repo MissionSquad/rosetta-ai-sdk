@@ -246,6 +246,10 @@ export class OpenAIMapper implements IProviderMapper {
 
         if (effectiveEffort !== undefined && !shouldOmitReasoningForFunctionTools) {
           basePayload.reasoning_effort = effectiveEffort
+        } else if (hasFunctionTools && support.functionToolsRequireExplicitNone) {
+          // gpt-5.6 rejects tools even with reasoning_effort omitted; 'none' is the only
+          // accepted combination on Chat Completions.
+          basePayload.reasoning_effort = 'none'
         } else {
           delete basePayload.reasoning_effort
         }
