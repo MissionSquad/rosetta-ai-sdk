@@ -146,6 +146,22 @@ describe('mapToOpenAIResponsesChatParams', () => {
     ])
   })
 
+  it('rejects null or empty system content and null user content like the chat path', () => {
+    expect(() =>
+      mapToOpenAIResponsesChatParams({ ...baseParams, messages: [{ role: 'system', content: null }] })
+    ).toThrow(`Role 'system' requires non-null content.`)
+    expect(() =>
+      mapToOpenAIResponsesChatParams({ ...baseParams, messages: [{ role: 'system', content: '' }] })
+    ).toThrow(`Role 'system' requires non-empty string content.`)
+    expect(() =>
+      mapToOpenAIResponsesChatParams({ ...baseParams, messages: [{ role: 'user', content: null }] })
+    ).toThrow(`Role 'user' requires non-null content.`)
+    // Empty user strings remain allowed, matching Chat Completions.
+    expect(
+      mapToOpenAIResponsesChatParams({ ...baseParams, messages: [{ role: 'user', content: '' }] }).input
+    ).toEqual([{ role: 'user', content: '' }])
+  })
+
   it('throws when a tool message is missing its toolCallId', () => {
     const params: GenerateParams = {
       ...baseParams,

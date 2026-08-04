@@ -90,13 +90,26 @@ function mapMessagesToResponsesInput(messages: RosettaMessage[]): { instructions
   for (const msg of messages) {
     switch (msg.role) {
       case 'system': {
+        // Match the Chat Completions mapping: reject null/empty system content instead of
+        // silently sending an unintended empty prompt.
+        if (msg.content === null) {
+          throw new MappingError(`Role 'system' requires non-null content.`, Provider.OpenAI)
+        }
         const text = contentToText(msg.content)
-        if (text.length > 0) systemTexts.push(text)
+        if (text.length === 0) {
+          throw new MappingError(`Role 'system' requires non-empty string content.`, Provider.OpenAI)
+        }
+        systemTexts.push(text)
         break
       }
       case 'user': {
-        if (typeof msg.content === 'string' || msg.content === null) {
-          input.push({ role: 'user', content: msg.content ?? '' })
+        // Match the Chat Completions mapping: null user content is an upstream bug, not a
+        // blank message. Empty strings remain allowed, as on the chat path.
+        if (msg.content === null) {
+          throw new MappingError(`Role 'user' requires non-null content.`, Provider.OpenAI)
+        }
+        if (typeof msg.content === 'string') {
+          input.push({ role: 'user', content: msg.content })
         } else {
           input.push({
             role: 'user',
