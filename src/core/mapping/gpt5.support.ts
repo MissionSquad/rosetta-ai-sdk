@@ -8,6 +8,13 @@ export interface Gpt5Support {
   supportsVerbosity: boolean
   supportsSampling: 'never' | 'always' | 'only_with_reasoning_none'
   supportsFunctionToolsWithReasoning?: boolean
+  /**
+   * gpt-5.6 rejects Chat Completions requests that attach function tools unless
+   * reasoning_effort is explicitly 'none' — merely omitting the parameter also 400s
+   * ("Function tools with reasoning_effort are not supported ... set reasoning_effort
+   * to 'none'"). When set, the mapper sends the explicit 'none' instead of omitting.
+   */
+  functionToolsRequireExplicitNone?: boolean
 }
 
 // Chat Completions-supported GPT-5 models verified for this implementation.
@@ -59,6 +66,16 @@ const GPT5_CHAT_COMPLETIONS_SUPPORT: Record<string, Gpt5Support> = {
     supportsVerbosity: true,
     supportsSampling: 'never',
     supportsFunctionToolsWithReasoning: false
+  },
+  // Covers gpt-5.6-terra / gpt-5.6-sol (and future gpt-5.6-* variants) via prefix matching.
+  'gpt-5.6': {
+    chatCompletionsSupported: true,
+    allowedReasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+    defaultReasoningEffort: 'none',
+    supportsVerbosity: true,
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: false,
+    functionToolsRequireExplicitNone: true
   },
   'gpt-5-chat-latest': {
     chatCompletionsSupported: true,

@@ -87,10 +87,13 @@ export interface GenerateParams {
   /**
    * Request disclosed reasoning, provider-neutrally. Mappers render this in their own dialect:
    * Anthropic sends `thinking` (`{type: 'adaptive', display: 'summarized'}` on models with
-   * adaptive thinking, `{type: 'enabled', budget_tokens: 1024}` otherwise) and Google merges
-   * `thinkingConfig: {includeThoughts: true}` into the request config. Providers without a
-   * disclosure control (OpenAI/Azure Chat Completions, Groq, OpenAI-compatible endpoints) accept
-   * the flag as a no-op — models that disclose reasoning there do so without a request toggle.
+   * adaptive thinking, `{type: 'enabled', budget_tokens: 1024}` otherwise); Google merges
+   * `thinkingConfig: {includeThoughts: true}` into the request config; OpenAI gpt-5.x models
+   * route through the Responses API with `reasoning: {summary: 'auto'}` (summary emission is
+   * best-effort on OpenAI's side — reasoning always runs, but a summary is not guaranteed per
+   * response). Surfaces without a disclosure control (other OpenAI models and Azure on Chat
+   * Completions, Groq, OpenAI-compatible endpoints) accept the flag as a no-op — models that
+   * disclose reasoning there do so without a request toggle.
    */
   thinking?: boolean
 

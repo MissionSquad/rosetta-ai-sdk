@@ -7,6 +7,7 @@ import * as OpenAIEmbedMapper from '../../../../src/core/mapping/openai.embed.ma
 import * as OpenAIAudioMapper from '../../../../src/core/mapping/openai.audio.mapper'
 // Import the actual module to spy on its exports
 import * as OpenAICommon from '../../../../src/core/mapping/openai.common'
+import { z } from 'zod'
 import {
   GenerateParams,
   Provider,
@@ -300,6 +301,52 @@ describe('OpenAI Mapper', () => {
       const result = mapper.mapToProviderParams(paramsThinking) as Record<string, unknown>
       expect(result).not.toHaveProperty('thinking')
       expect(result).not.toHaveProperty('thinkingConfig')
+    })
+
+    it('[Medium] should send an explicit reasoning_effort none for gpt-5.6 models with function tools', () => {
+      // gpt-5.6 rejects Chat Completions tool requests even when reasoning_effort is omitted;
+      // the only accepted combination is an explicit 'none'.
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5.6-terra',
+        messages: [{ role: 'user', content: 'Test' }],
+        reasoningEffort: 'high',
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'lookup',
+              description: 'Lookup something',
+              parameters: { type: 'object', properties: {} },
+              zodSchema: z.object({})
+            }
+          }
+        ]
+      }
+      const result = mapper.mapToProviderParams(params) as Record<string, unknown>
+      expect(result.reasoning_effort).toBe('none')
+    })
+
+    it('[Medium] should omit reasoning_effort for gpt-5.4 models with function tools', () => {
+      const params: GenerateParams = {
+        ...baseParams,
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: 'Test' }],
+        reasoningEffort: 'high',
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'lookup',
+              description: 'Lookup something',
+              parameters: { type: 'object', properties: {} },
+              zodSchema: z.object({})
+            }
+          }
+        ]
+      }
+      const result = mapper.mapToProviderParams(params) as Record<string, unknown>
+      expect(result).not.toHaveProperty('reasoning_effort')
     })
 
     it('[Medium] should strip foreign provider thinking keys from extraParams but keep reasoning_effort', () => {
