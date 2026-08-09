@@ -22,9 +22,20 @@ import {
   normalizeProviderDelta,
   normalizeProviderPoint
 } from '../../../../src/core/mapping/openai.computer-use'
-import { CreateResponseParams, ResponsesStreamChunk } from '../../../../src/types/responses.types'
+import {
+  CreateResponseParams,
+  ResponsesInputItem,
+  ResponsesStreamChunk,
+  ResponsesTool
+} from '../../../../src/types/responses.types'
 import { Provider } from '../../../../src/types/common.types'
-import { ComputerUseMappingError } from '../../../../src/errors'
+import {
+  ComputerUseMappingError,
+  InvalidToolDefinitionError,
+  MappingError,
+  ToolArgumentValidationError
+} from '../../../../src/errors'
+import { z } from 'zod'
 
 const dimensions = { width: 1280, height: 720 }
 
@@ -146,6 +157,19 @@ describe('OpenAI Responses mapper', () => {
       ])
     })
 
+    it('keeps GA web search available as a tool and maps code interpreter explicitly', () => {
+      const params: CreateResponseParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-5',
+        tools: [{ type: 'web_search' }, { type: 'code_interpreter' }]
+      }
+
+      expect(mapToOpenAIResponsesParams(params).tools).toEqual([
+        { type: 'web_search' },
+        { type: 'code_interpreter', container: { type: 'auto' } }
+      ])
+    })
+
     it('maps response continuation, screenshot data, and caller acknowledgements without provider leakage', () => {
       const params: CreateResponseParams = {
         provider: Provider.OpenAI,
@@ -209,6 +233,49 @@ describe('OpenAI Responses mapper', () => {
         ],
         stream: false
       })
+    })
+
+    it('rejects an unknown runtime input discriminator instead of treating it as computer output', () => {
+      const params: CreateResponseParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-5',
+        input: [({ type: 'future_input' } as unknown) as ResponsesInputItem]
+      }
+
+      expect(() => mapToOpenAIResponsesParams(params)).toThrow(MappingError)
+      expect(() => mapToOpenAIResponsesParams(params)).toThrow('Unsupported Responses input item type: future_input')
+    })
+
+    it('rejects an unknown runtime tool discriminator instead of mapping code interpreter', () => {
+      const params: CreateResponseParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-5',
+        tools: [({ type: 'future_tool' } as unknown) as ResponsesTool]
+      }
+
+      expect(() => mapToOpenAIResponsesParams(params)).toThrow(InvalidToolDefinitionError)
+      expect(() => mapToOpenAIResponsesParams(params)).toThrow('Unsupported Responses tool type: future_tool')
+    })
+
+    it('excludes forced GA web search from the public type and rejects legacy runtime input', () => {
+      const params: CreateResponseParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-5',
+        // @ts-expect-error openai@6.27.0 declares web_search as a tool, but not as a forced tool choice.
+        tool_choice: { type: 'web_search' }
+      }
+
+      expect(() => mapToOpenAIResponsesParams(params)).toThrow(MappingError)
+    })
+
+    it('rejects stop sequences that the installed Responses request type does not declare', () => {
+      const params: CreateResponseParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-5',
+        stop: 'END'
+      }
+
+      expect(() => mapToOpenAIResponsesParams(params)).toThrow(MappingError)
     })
   })
 
@@ -593,6 +660,56 @@ describe('OpenAI Responses mapper', () => {
           }
         }
       ])
+    })
+
+    it('maps a failed response event without losing provider error context', async () => {
+      const stream = (async function*(): AsyncIterable<unknown> {
+        yield { type: 'response.created', response: { id: 'resp_failed', model: 'gpt-5' } }
+        yield { type: 'response.failed', error: { message: 'Rate limit exceeded', code: 'rate_limit' } }
+      })()
+      const chunks: ResponsesStreamChunk[] = []
+      for await (const chunk of mapOpenAIResponsesStream(stream)) chunks.push(chunk)
+
+      expect(chunks).toEqual([
+        { type: 'response.created', data: { id: 'resp_failed', model: 'gpt-5' } },
+        {
+          type: 'response.failed',
+          data: { error: { message: 'Rate limit exceeded', code: 'rate_limit' } }
+        }
+      ])
+    })
+
+    it('emits a typed error for schema-invalid streamed function arguments', async () => {
+      const tools: ResponsesTool[] = [
+        {
+          type: 'function',
+          name: 'get_weather',
+          parameters: {
+            type: 'object',
+            properties: { location: { type: 'string' } },
+            required: ['location']
+          },
+          zodSchema: z.object({ location: z.string() })
+        }
+      ]
+      const stream = (async function*(): AsyncIterable<unknown> {
+        yield { type: 'response.tool_call.start', tool_call: { id: 'call_weather', name: 'get_weather' } }
+        yield {
+          type: 'response.tool_call.done',
+          tool_call: { id: 'call_weather', name: 'get_weather', arguments: '{"location":123}' }
+        }
+      })()
+      const chunks: ResponsesStreamChunk[] = []
+      for await (const chunk of mapOpenAIResponsesStream(stream, tools)) chunks.push(chunk)
+
+      expect(chunks).toHaveLength(2)
+      expect(chunks[0]).toEqual({
+        type: 'response.tool_call.start',
+        data: { id: 'call_weather', name: 'get_weather' }
+      })
+      expect(chunks[1].type).toBe('error')
+      if (chunks[1].type !== 'error') throw new Error('Expected a streamed validation error')
+      expect(chunks[1].data.error).toBeInstanceOf(ToolArgumentValidationError)
     })
   })
 })

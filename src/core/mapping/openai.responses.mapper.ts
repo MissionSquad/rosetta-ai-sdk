@@ -41,6 +41,12 @@ import { mapOpenAIComputerAction } from './openai.computer-use'
 import { JSONSchema7 } from 'json-schema'
 
 type MappedCreateResponseParams = ResponseCreateParamsNonStreaming | ResponseCreateParamsStreaming
+type RuntimeResponsesToolChoice = NonNullable<CreateResponseParams['tool_choice']> | { type: 'web_search' }
+
+function getRuntimeDiscriminator(value: unknown): string {
+  if (typeof value !== 'object' || value === null || !('type' in value)) return 'unknown'
+  return typeof value.type === 'string' ? value.type : 'unknown'
+}
 
 function asOpenAIJsonSchema(schema: JSONSchema7): Record<string, unknown> {
   // `json-schema` and OpenAI independently declare the same JSON object boundary;
@@ -85,8 +91,10 @@ function mapResponsesInput(items: ResponsesInputItem[]): ResponseInputItem[] {
       const imageUrl =
         'image_url' in item ? item.image_url : `data:${item.image.mimeType};base64,${item.image.base64Data}`
       content.push({ type: 'input_image', image_url: imageUrl, detail: 'auto' })
-    } else {
+    } else if (item.type === 'computer_call_output') {
       topLevelItems.push(mapComputerCallOutput(item))
+    } else {
+      throw new MappingError(`Unsupported Responses input item type: ${getRuntimeDiscriminator(item)}`, Provider.OpenAI)
     }
   }
 
@@ -117,12 +125,12 @@ function mapResponsesTool(tool: ResponsesTool): Tool {
       ...(tool.options && { options: tool.options })
     } as unknown) as Tool
   }
-  return { type: 'code_interpreter', container: { type: 'auto' } }
+  if (tool.type === 'code_interpreter') return { type: 'code_interpreter', container: { type: 'auto' } }
+
+  throw new InvalidToolDefinitionError(`Unsupported Responses tool type: ${getRuntimeDiscriminator(tool)}`)
 }
 
-function mapResponsesToolChoice(
-  choice: NonNullable<CreateResponseParams['tool_choice']>
-): ResponseCreateParamsNonStreaming['tool_choice'] {
+function mapResponsesToolChoice(choice: RuntimeResponsesToolChoice): ResponseCreateParamsNonStreaming['tool_choice'] {
   if (typeof choice === 'string') return choice
   if (choice.type === 'function') return { type: 'function', name: choice.name }
   if (choice.type === 'web_search') {

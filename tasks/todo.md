@@ -45,6 +45,11 @@
 
 ## Review/results
 
+- PR #70 follow-up reviewed every conversation comment, review submission, and inline thread. The
+  suppressed Copilot finding was excluded. Confirmed fixes align forced web-search choice typing with
+  the installed SDK, reject unknown runtime input/tool discriminators, and restore non-suppressed
+  streaming failure/tool-validation regression coverage; intentional contract behavior and nitpicks
+  were left unchanged.
 - All five cross-repo work items are implemented against ADR-0043 and the canonical contract. Package version is set to `1.18.0`, the repository's established minor-version convention for a new public capability.
 - Independent review findings were resolved: unsupported strict-schema `not`/`uniqueItems` keywords were removed, strict JSON results now use the same runtime Zod validator, Responses function strictness is caller-controlled, function item/call IDs remain distinct, and the declaration hash was corrected.
 - `yarn build` and `yarn tsc --noEmit` pass.

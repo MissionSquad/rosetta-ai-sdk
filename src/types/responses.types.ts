@@ -122,7 +122,7 @@ export type ResponsesToolChoice =
   | 'auto'
   | 'required'
   | 'none'
-  | { type: ResponsesBuiltInToolType }
+  | { type: Exclude<ResponsesBuiltInToolType, 'web_search'> }
   | { type: 'function'; name: string }
 
 /**
