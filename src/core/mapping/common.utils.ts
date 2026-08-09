@@ -1,4 +1,5 @@
-import { TokenUsage, GenerateParams } from '../../types'
+import { TokenUsage, GenerateParams, GenerateResult } from '../../types'
+import { StructuredOutputValidationError } from '../../errors'
 import { safeGet } from '../utils' // Import safeGet from the existing utils file
 
 /**
@@ -184,6 +185,51 @@ export function mapToOpenAIResponseFormat(
   }
 
   return undefined
+}
+
+/**
+ * Parses structured output and, when supplied, enforces the caller's runtime Zod schema.
+ * A missing validator preserves the SDK's existing best-effort JSON parsing behavior.
+ *
+ * @throws {StructuredOutputValidationError} If validated output is malformed JSON or fails its Zod schema.
+ */
+export function parseStructuredOutput(
+  responseFormat: GenerateParams['responseFormat'],
+  content: string | null
+): GenerateResult['parsedContent'] | undefined {
+  if (
+    !responseFormat ||
+    (responseFormat.type !== 'json_object' && responseFormat.type !== 'json_schema') ||
+    typeof content !== 'string' ||
+    !content.trim()
+  ) {
+    return undefined
+  }
+
+  const zodSchema = responseFormat.type === 'json_schema' ? responseFormat.json_schema.zodSchema : undefined
+  const schemaName = responseFormat.type === 'json_schema' ? responseFormat.json_schema.name : undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch (error) {
+    if (zodSchema) {
+      throw new StructuredOutputValidationError('Provider output is not valid JSON', [], schemaName, content, error)
+    }
+    return undefined
+  }
+
+  if (!zodSchema) return parsed as GenerateResult['parsedContent']
+
+  const validation = zodSchema.safeParse(parsed)
+  if (!validation.success) {
+    throw new StructuredOutputValidationError(
+      'Provider output failed runtime schema validation',
+      validation.error.issues,
+      schemaName,
+      parsed
+    )
+  }
+  return validation.data as GenerateResult['parsedContent']
 }
 
 /**

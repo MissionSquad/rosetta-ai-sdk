@@ -11,224 +11,321 @@ import {
   ResponsesStreamChunk,
   ResponsesTool,
   ResponsesOutputItem,
-  ResponsesToolCall
+  ResponsesToolCall,
+  ResponsesInputItem
 } from '../../types/responses.types'
 import { Provider } from '../../types/common.types'
-import { MappingError, InvalidToolDefinitionError, ToolArgumentValidationError } from '../../errors'
+import {
+  ComputerUseDecision,
+  computerUseDecisionSchema,
+  COMPUTER_USE_VIEWPORT_HEIGHT,
+  COMPUTER_USE_VIEWPORT_WIDTH
+} from '../../types'
+import {
+  ComputerUseMappingError,
+  MappingError,
+  InvalidToolDefinitionError,
+  ToolArgumentValidationError
+} from '../../errors'
+import {
+  Response,
+  ResponseComputerToolCall,
+  ResponseCreateParamsNonStreaming,
+  ResponseCreateParamsStreaming,
+  ResponseInputContent,
+  ResponseInputItem,
+  Tool
+} from 'openai/resources/responses/responses'
 import { z } from 'zod'
+import { mapOpenAIComputerAction } from './openai.computer-use'
+import { JSONSchema7 } from 'json-schema'
+
+type MappedCreateResponseParams = ResponseCreateParamsNonStreaming | ResponseCreateParamsStreaming
+
+function asOpenAIJsonSchema(schema: JSONSchema7): Record<string, unknown> {
+  // `json-schema` and OpenAI independently declare the same JSON object boundary;
+  // OpenAI's index signature is the only structural difference.
+  return (schema as unknown) as Record<string, unknown>
+}
+
+function mapComputerScreenshot(
+  output: Extract<ResponsesInputItem, { type: 'computer_call_output' }>['output']
+): ResponseInputItem.ComputerCallOutput['output'] {
+  if ('image' in output) {
+    return {
+      type: 'computer_screenshot',
+      image_url: `data:${output.image.mimeType};base64,${output.image.base64Data}`
+    }
+  }
+  if ('image_url' in output) return { type: 'computer_screenshot', image_url: output.image_url }
+  return { type: 'computer_screenshot', file_id: output.file_id }
+}
+
+function mapComputerCallOutput(
+  item: Extract<ResponsesInputItem, { type: 'computer_call_output' }>
+): ResponseInputItem.ComputerCallOutput {
+  return {
+    type: 'computer_call_output',
+    call_id: item.call_id,
+    output: mapComputerScreenshot(item.output),
+    ...(item.acknowledged_safety_checks
+      ? { acknowledged_safety_checks: item.acknowledged_safety_checks.map(check => ({ ...check })) }
+      : {})
+  }
+}
+
+function mapResponsesInput(items: ResponsesInputItem[]): ResponseInputItem[] {
+  const content: ResponseInputContent[] = []
+  const topLevelItems: ResponseInputItem[] = []
+
+  for (const item of items) {
+    if (item.type === 'input_text') {
+      content.push({ type: 'input_text', text: item.text })
+    } else if (item.type === 'input_image') {
+      const imageUrl =
+        'image_url' in item ? item.image_url : `data:${item.image.mimeType};base64,${item.image.base64Data}`
+      content.push({ type: 'input_image', image_url: imageUrl, detail: 'auto' })
+    } else {
+      topLevelItems.push(mapComputerCallOutput(item))
+    }
+  }
+
+  return content.length > 0 ? [{ type: 'message', role: 'user', content }, ...topLevelItems] : topLevelItems
+}
+
+function mapResponsesTool(tool: ResponsesTool): Tool {
+  if (tool.type === 'function') {
+    if (!tool.name) throw new InvalidToolDefinitionError('Function tool missing name', 'unknown')
+    if (!tool.parameters) throw new InvalidToolDefinitionError('Function tool missing parameters', tool.name)
+    return {
+      type: 'function',
+      name: tool.name,
+      description: tool.description,
+      parameters: asOpenAIJsonSchema(tool.parameters),
+      strict: tool.strict ?? null
+    }
+  }
+  if (tool.type === 'computer') return { type: 'computer' }
+  if (tool.type === 'web_search') return { type: 'web_search' }
+  if (tool.type === 'file_search') return { type: 'file_search', vector_store_ids: tool.vector_store_ids ?? [] }
+
+  // This legacy Rosetta image-generation shape predates the installed OpenAI declaration.
+  // Preserve its existing wire mapping without allowing it into the new computer-use types.
+  if (tool.type === 'image_generation') {
+    return ({
+      type: 'image_generation',
+      ...(tool.options && { options: tool.options })
+    } as unknown) as Tool
+  }
+  return { type: 'code_interpreter', container: { type: 'auto' } }
+}
+
+function mapResponsesToolChoice(
+  choice: NonNullable<CreateResponseParams['tool_choice']>
+): ResponseCreateParamsNonStreaming['tool_choice'] {
+  if (typeof choice === 'string') return choice
+  if (choice.type === 'function') return { type: 'function', name: choice.name }
+  if (choice.type === 'web_search') {
+    throw new MappingError(
+      'Installed OpenAI Responses declarations do not support forcing the GA web_search tool',
+      Provider.OpenAI
+    )
+  }
+  return { type: choice.type }
+}
 
 /**
  * Maps CreateResponseParams to OpenAI Responses API parameters.
  */
-export function mapToOpenAIResponsesParams(params: CreateResponseParams): any {
-  // Map input
-  let mappedInput: any
-  if (typeof params.input === 'string') {
-    mappedInput = params.input
-  } else if (Array.isArray(params.input)) {
-    mappedInput = params.input.map(item => {
-      if (item.type === 'input_text') {
-        return { type: 'input_text', text: item.text }
-      } else if (item.type === 'input_image') {
-        if ('image_url' in item) {
-          return { type: 'input_image', image_url: item.image_url }
-        } else if ('image' in item) {
-          // Convert RosettaImageData to OpenAI format
-          const dataUri = `data:${item.image.mimeType};base64,${item.image.base64Data}`
-          return { type: 'input_image', image_url: dataUri }
-        }
-      }
-      throw new MappingError(`Unsupported input item type: ${(item as any).type}`, Provider.OpenAI)
-    })
+export function mapToOpenAIResponsesParams(
+  params: CreateResponseParams & { stream: true }
+): ResponseCreateParamsStreaming
+export function mapToOpenAIResponsesParams(
+  params: CreateResponseParams & { stream?: false }
+): ResponseCreateParamsNonStreaming
+export function mapToOpenAIResponsesParams(params: CreateResponseParams): MappedCreateResponseParams {
+  if (!params.model) throw new MappingError('Responses API model is required', Provider.OpenAI)
+  if (params.stop !== undefined) {
+    throw new MappingError('OpenAI Responses API does not declare a stop parameter', Provider.OpenAI)
   }
 
-  // Map tools
-  let mappedTools: any[] | undefined
-  if (params.tools && params.tools.length > 0) {
-    mappedTools = params.tools.map(tool => {
-      if (tool.type === 'function') {
-        // Validate function tool has required fields
-        if (!tool.name) {
-          throw new InvalidToolDefinitionError('Function tool missing name', 'unknown')
-        }
-        if (!tool.parameters) {
-          throw new InvalidToolDefinitionError('Function tool missing parameters', tool.name)
-        }
-        return {
-          type: 'function',
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters
-        }
-      } else if (tool.type === 'web_search') {
-        return { type: 'web_search' }
-      } else if (tool.type === 'file_search') {
-        return {
-          type: 'file_search',
-          vector_store_ids: tool.vector_store_ids
-        }
-      } else if (tool.type === 'image_generation') {
-        return {
-          type: 'image_generation',
-          ...(tool.options && { options: tool.options })
-        }
-      } else if (tool.type === 'code_interpreter') {
-        return { type: 'code_interpreter' }
-      }
-      throw new InvalidToolDefinitionError(`Unsupported tool type: ${(tool as any).type}`, 'unknown')
-    })
-  }
-
-  // Map tool_choice
-  let mappedToolChoice: any
-  if (params.tool_choice) {
-    if (typeof params.tool_choice === 'string') {
-      mappedToolChoice = params.tool_choice
-    } else if (typeof params.tool_choice === 'object') {
-      mappedToolChoice = {
-        type: params.tool_choice.type,
-        ...(params.tool_choice.name && { name: params.tool_choice.name })
-      }
-    }
-  }
-
-  // Map response_format
-  let mappedResponseFormat: any
-  if (params.response_format) {
-    mappedResponseFormat = {
-      type: 'json_schema',
-      json_schema: {
-        name: params.response_format.json_schema.name,
-        strict: params.response_format.json_schema.strict,
-        schema: params.response_format.json_schema.schema
-      }
-    }
-  }
-
-  // Build the request payload
-  const payload: any = {
+  const payload = {
     model: params.model,
-    ...(params.instructions && { instructions: params.instructions }),
-    ...(mappedInput && { input: mappedInput }),
-    ...(mappedTools && { tools: mappedTools }),
-    ...(mappedToolChoice && { tool_choice: mappedToolChoice }),
-    ...(mappedResponseFormat && { response_format: mappedResponseFormat }),
-    ...(params.previous_response_id && { previous_response_id: params.previous_response_id }),
-    ...(params.max_tokens && { max_tokens: params.max_tokens }),
-    ...(params.temperature !== undefined && { temperature: params.temperature }),
-    ...(params.top_p !== undefined && { top_p: params.top_p }),
-    ...(params.stop && { stop: params.stop }),
-    ...(params.metadata && { metadata: params.metadata }),
-    stream: params.stream ?? false
+    ...(params.instructions !== undefined ? { instructions: params.instructions } : {}),
+    ...(params.input !== undefined
+      ? { input: typeof params.input === 'string' ? params.input : mapResponsesInput(params.input) }
+      : {}),
+    ...(params.tools && params.tools.length > 0 ? { tools: params.tools.map(mapResponsesTool) } : {}),
+    ...(params.tool_choice !== undefined ? { tool_choice: mapResponsesToolChoice(params.tool_choice) } : {}),
+    ...(params.response_format
+      ? {
+          text: {
+            format: {
+              type: 'json_schema' as const,
+              name: params.response_format.json_schema.name,
+              strict: params.response_format.json_schema.strict,
+              schema: asOpenAIJsonSchema(params.response_format.json_schema.schema)
+            }
+          }
+        }
+      : {}),
+    ...(params.previous_response_id !== undefined ? { previous_response_id: params.previous_response_id } : {}),
+    ...(params.max_tokens !== undefined ? { max_output_tokens: params.max_tokens } : {}),
+    ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
+    ...(params.top_p !== undefined ? { top_p: params.top_p } : {}),
+    ...(params.metadata !== undefined ? { metadata: params.metadata } : {})
   }
 
-  return payload
+  return params.stream ? { ...payload, stream: true } : { ...payload, stream: false }
+}
+
+/**
+ * Maps one GA native call only after its shape is proven truthfully acknowledgeable.
+ *
+ * @throws {ComputerUseMappingError} If the call shape, batch size, or canonical decision is invalid.
+ */
+export function mapOpenAIComputerCallToDecision(
+  call: ResponseComputerToolCall,
+  responseId: string
+): ComputerUseDecision {
+  const hasSingularAction = Object.prototype.hasOwnProperty.call(call, 'action')
+  const hasActions = Object.prototype.hasOwnProperty.call(call, 'actions')
+  if (hasSingularAction || !hasActions) {
+    throw new ComputerUseMappingError(
+      'PROVIDER_ACTION_SHAPE_UNSUPPORTED',
+      'OpenAI V1 requires actions[] and rejects singular or mixed action shapes',
+      Provider.OpenAI
+    )
+  }
+  if (!Array.isArray(call.actions) || call.actions.length !== 1) {
+    throw new ComputerUseMappingError(
+      'PROVIDER_ACTION_BATCH_UNSUPPORTED',
+      'OpenAI V1 requires exactly one action in actions[]',
+      Provider.OpenAI
+    )
+  }
+
+  const action = call.actions[0]
+  if (!action) {
+    throw new ComputerUseMappingError(
+      'PROVIDER_ACTION_BATCH_UNSUPPORTED',
+      'OpenAI V1 requires exactly one action in actions[]',
+      Provider.OpenAI
+    )
+  }
+
+  const decision = {
+    schemaVersion: '1' as const,
+    actionId: call.call_id,
+    actions: [
+      mapOpenAIComputerAction(action, 'pixels', {
+        width: COMPUTER_USE_VIEWPORT_WIDTH,
+        height: COMPUTER_USE_VIEWPORT_HEIGHT
+      })
+    ] as const,
+    providerTraceId: call.id,
+    responseId,
+    pendingSafetyChecks: call.pending_safety_checks.map(check => ({
+      id: check.id,
+      code: check.code === undefined ? null : check.code,
+      message: check.message === undefined ? null : check.message
+    }))
+  }
+
+  const parsed = computerUseDecisionSchema.safeParse(decision)
+  if (!parsed.success) {
+    throw new ComputerUseMappingError(
+      'PROVIDER_ACTION_INVALID',
+      'OpenAI computer call failed canonical decision validation',
+      Provider.OpenAI,
+      parsed.error
+    )
+  }
+  return parsed.data
+}
+
+function validateFunctionToolCall(toolCall: ResponsesToolCall, originalTools: ResponsesTool[] | undefined): void {
+  const matchingTool = originalTools?.find(tool => tool.type === 'function' && tool.name === toolCall.function.name)
+  if (!matchingTool || matchingTool.type !== 'function' || !matchingTool.zodSchema) return
+
+  let parsedArgs: unknown
+  try {
+    parsedArgs = JSON.parse(toolCall.function.arguments)
+  } catch (error) {
+    throw new MappingError(
+      `Failed to parse tool arguments JSON for '${toolCall.function.name}'`,
+      Provider.OpenAI,
+      'function_call',
+      error
+    )
+  }
+
+  const validation = matchingTool.zodSchema.safeParse(parsedArgs)
+  if (!validation.success) {
+    throw new ToolArgumentValidationError(
+      `Tool '${toolCall.function.name}' arguments validation failed`,
+      validation.error.issues,
+      toolCall.function.name,
+      toolCall.id,
+      parsedArgs
+    )
+  }
 }
 
 /**
  * Maps OpenAI Responses API response to ResponseResult.
  */
-export function mapFromOpenAIResponsesResponse(
-  response: any,
-  originalTools?: ResponsesTool[]
-): ResponseResult {
-  // Validate response structure
-  if (!response || typeof response !== 'object') {
-    throw new MappingError('Invalid response from OpenAI Responses API', Provider.OpenAI)
-  }
-
-  // Extract output items
+export function mapFromOpenAIResponsesResponse(response: Response, originalTools?: ResponsesTool[]): ResponseResult {
   const output: ResponsesOutputItem[] = []
-  let outputText = ''
+  const toolCalls: ResponsesToolCall[] = []
 
-  if (Array.isArray(response.output)) {
-    for (const item of response.output) {
-      if (item.type === 'text' || item.type === 'output_text') {
-        const text = item.text || item.content || ''
-        output.push({ type: 'output_text', text })
-        outputText += text
-      } else if (item.type === 'function_call') {
-        output.push({
-          type: 'function_call',
-          id: item.id,
-          name: item.name,
-          arguments: item.arguments
-        })
-      } else if (item.type === 'image') {
-        output.push({
-          type: 'image',
-          image_url: item.image_url || item.url
-        })
+  for (const item of response.output) {
+    if (item.type === 'message') {
+      for (const content of item.content) {
+        if (content.type === 'output_text') output.push({ type: 'output_text', text: content.text })
       }
-    }
-  }
-
-  // Handle convenience accessor if available
-  if (response.output_text) {
-    outputText = response.output_text
-  }
-
-  // Extract tool calls
-  let toolCalls: ResponsesToolCall[] | undefined
-  if (response.tool_calls && Array.isArray(response.tool_calls)) {
-    toolCalls = response.tool_calls.map((tc: any) => ({
-      id: tc.id,
-      type: 'function',
-      function: {
-        name: tc.function?.name || tc.name,
-        arguments: tc.function?.arguments || tc.arguments || '{}'
+    } else if (item.type === 'function_call') {
+      const toolCall: ResponsesToolCall = {
+        ...(item.id !== undefined ? { id: item.id } : {}),
+        call_id: item.call_id,
+        type: 'function',
+        function: { name: item.name, arguments: item.arguments }
       }
-    }))
-
-    // Validate tool call arguments if original tools were provided
-    if (originalTools && originalTools.length > 0 && toolCalls) {
-      for (const toolCall of toolCalls) {
-        const matchingTool = originalTools.find(
-          t => t.type === 'function' && t.name === toolCall.function.name
-        )
-        if (matchingTool && matchingTool.type === 'function' && matchingTool.zodSchema) {
-          try {
-            const parsedArgs = JSON.parse(toolCall.function.arguments)
-            matchingTool.zodSchema.parse(parsedArgs)
-          } catch (error) {
-            if (error instanceof z.ZodError) {
-              throw new ToolArgumentValidationError(
-                `Tool '${toolCall.function.name}' arguments validation failed`,
-                error.issues,
-                toolCall.function.name,
-                toolCall.id
-              )
-            } else if (error instanceof SyntaxError) {
-              throw new MappingError(
-                `Failed to parse tool arguments JSON for '${toolCall.function.name}': ${error.message}`,
-                Provider.OpenAI
-              )
-            }
-            throw error
-          }
-        }
-      }
-    }
-  }
-
-  // Extract usage
-  let usage: ResponseResult['usage']
-  if (response.usage) {
-    usage = {
-      input_tokens: response.usage.input_tokens || response.usage.prompt_tokens || 0,
-      output_tokens: response.usage.output_tokens || response.usage.completion_tokens || 0,
-      total_tokens: response.usage.total_tokens || 0
+      validateFunctionToolCall(toolCall, originalTools)
+      toolCalls.push(toolCall)
+      output.push({
+        type: 'function_call',
+        ...(item.id !== undefined ? { id: item.id } : {}),
+        call_id: item.call_id,
+        name: item.name,
+        arguments: item.arguments
+      })
+    } else if (item.type === 'computer_call') {
+      output.push({
+        type: 'computer_call',
+        status: item.status,
+        decision: mapOpenAIComputerCallToDecision(item, response.id)
+      })
+    } else if (item.type === 'image_generation_call' && item.result) {
+      output.push({ type: 'image', image_url: `data:image/png;base64,${item.result}` })
     }
   }
 
   return {
     id: response.id,
     output,
-    output_text: outputText,
-    tool_calls: toolCalls,
-    usage,
+    output_text: response.output_text,
+    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+    ...(response.usage
+      ? {
+          usage: {
+            input_tokens: response.usage.input_tokens,
+            output_tokens: response.usage.output_tokens,
+            total_tokens: response.usage.total_tokens
+          }
+        }
+      : {}),
     model: response.model,
-    finish_reason: response.finish_reason || response.stop_reason,
     rawResponse: response
   }
 }
@@ -240,7 +337,7 @@ export async function* mapOpenAIResponsesStream(
   stream: AsyncIterable<any>,
   originalTools?: ResponsesTool[]
 ): AsyncIterable<ResponsesStreamChunk> {
-  let accumulatedResult: Partial<ResponseResult> = {
+  const accumulatedResult: Partial<ResponseResult> = {
     output: [],
     output_text: ''
   }
@@ -349,9 +446,7 @@ export async function* mapOpenAIResponsesStream(
         if (toolCall) {
           // Validate tool arguments if original tools were provided
           if (originalTools && originalTools.length > 0) {
-            const matchingTool = originalTools.find(
-              t => t.type === 'function' && t.name === toolCall.name
-            )
+            const matchingTool = originalTools.find(t => t.type === 'function' && t.name === toolCall.name)
             if (matchingTool && matchingTool.type === 'function' && matchingTool.zodSchema) {
               try {
                 const parsedArgs = JSON.parse(toolCall.arguments)

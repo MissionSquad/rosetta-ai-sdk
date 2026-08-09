@@ -1,5 +1,6 @@
 import { ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData, GenerateParamsProviderState } from './common.types'
 import { ProviderOptions } from './config.types'
+import { z } from 'zod'
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 export type Verbosity = 'low' | 'medium' | 'high'
@@ -26,6 +27,8 @@ export type RosettaResponseFormat =
         strict?: boolean
         /** JSON Schema (draft-07-ish). */
         schema: Record<string, unknown>
+        /** Optional runtime validator for provider output parsed through this schema. */
+        zodSchema?: z.ZodTypeAny
       }
     }
 

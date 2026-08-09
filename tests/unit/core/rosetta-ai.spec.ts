@@ -23,6 +23,7 @@ import {
   RosettaModelList,
   ModelListingSourceConfig,
   RosettaTool,
+  StructuredOutputValidationError,
   ToolArgumentValidationError,
   CustomProviderConfig,
   CreateResponseParams,
@@ -699,6 +700,32 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
 
       const result = await rosetta.generate(params)
       expect(result.parsedContent).toEqual({ a: 1 })
+    })
+
+    it('rejects structured output that fails an attached runtime Zod schema', async () => {
+      const params: GenerateParams = {
+        provider: Provider.OpenAI,
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Return validated JSON' }],
+        responseFormat: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'validated_response',
+            schema: { type: 'object', properties: { a: { type: 'number' } } },
+            zodSchema: z.object({ a: z.number() }).strict()
+          }
+        }
+      }
+
+      mockOpenAIMapperInstance.mapToProviderParams.mockReturnValue({ mapped: 'openai_params', model: 'gpt-4o-mini' })
+      mockOpenAIMapperInstance.mapFromProviderResponse.mockReturnValue(({
+        content: '{"a":"wrong"}',
+        parsedContent: null,
+        finishReason: 'stop',
+        model: 'gpt-4o-mini'
+      } as unknown) as GenerateResult)
+
+      await expect(rosetta.generate(params)).rejects.toBeInstanceOf(StructuredOutputValidationError)
     })
 
     it('normalizes a built-in result before structured parsing and OpenAI compatibility transformation', async () => {

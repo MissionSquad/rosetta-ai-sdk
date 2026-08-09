@@ -126,6 +126,50 @@ export class MappingError extends RosettaAIError {
   }
 }
 
+export type ComputerUseMappingErrorCode =
+  | 'PROVIDER_ACTION_SHAPE_UNSUPPORTED'
+  | 'PROVIDER_ACTION_BATCH_UNSUPPORTED'
+  | 'PROVIDER_ACTION_MODIFIERS_UNSUPPORTED'
+  | 'PROVIDER_ACTION_UNSUPPORTED'
+  | 'PROVIDER_ACTION_INVALID'
+
+/** A typed, fail-closed provider-to-canonical computer-use mapping failure. */
+export class ComputerUseMappingError extends MappingError {
+  public readonly code: ComputerUseMappingErrorCode
+
+  constructor(code: ComputerUseMappingErrorCode, message: string, provider?: ProviderKey, cause?: unknown) {
+    super(`${code}: ${message}`, provider, 'computer_use', cause)
+    this.name = 'ComputerUseMappingError'
+    this.code = code
+  }
+}
+
+/** A typed failure for structured provider output that does not satisfy its runtime schema. */
+export class StructuredOutputValidationError extends RosettaAIError {
+  public readonly issues: z.ZodIssue[]
+  public readonly schemaName?: string
+  public readonly receivedInput?: unknown
+  public readonly underlyingError?: unknown
+
+  constructor(
+    message: string,
+    issues: z.ZodIssue[],
+    schemaName?: string,
+    receivedInput?: unknown,
+    underlyingError?: unknown
+  ) {
+    super(`Structured Output Validation Error${schemaName ? ` for '${schemaName}'` : ''}: ${message}`)
+    this.name = 'StructuredOutputValidationError'
+    this.issues = issues
+    this.schemaName = schemaName
+    this.receivedInput = receivedInput
+    this.underlyingError = underlyingError
+    if (underlyingError instanceof Error && underlyingError.stack) {
+      this.stack = `${this.name}: ${this.message}\nCaused by: ${underlyingError.stack}`
+    }
+  }
+}
+
 /**
  * Error indicating an issue with a tool definition provided to the SDK.
  * This could be an invalid JSON schema for `parameters` or an invalid `zodSchema`.

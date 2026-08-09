@@ -27,7 +27,7 @@ import {
   mapRoleToOpenAI,
   wrapOpenAIError
 } from './openai.common' // Reuse common OpenAI mapping logic
-import { mapBaseToolChoice, mapToOpenAIResponseFormat } from '../mapping/common.utils'
+import { mapBaseToolChoice, mapToOpenAIResponseFormat, parseStructuredOutput } from '../mapping/common.utils'
 import { MappingError, RosettaAIError, ConfigurationError, UnsupportedFeatureError } from '../../errors'
 import { mapToOpenAIEmbedParams, mapFromOpenAIEmbedResponse } from './openai.embed.mapper'
 import { cloneOpenAICompatibleAssistantProviderState } from './openai-thinking'
@@ -184,7 +184,10 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
       tools,
       tool_choice,
       top_p: originalParams.topP,
-      ...(originalParams.stop ? { stop: originalParams.stop } : {})
+      ...(originalParams.stop ? { stop: originalParams.stop } : {}),
+      ...(originalParams.responseFormat != null
+        ? { response_format: mapToOpenAIResponseFormat(originalParams.responseFormat) }
+        : {})
     }
 
     try {
@@ -192,9 +195,12 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
 
       // Map the OpenAI SDK response back to GenerateResult using common helper
       // Pass original tools for validation within mapFromOpenAIResponse
-      return mapFromOpenAIResponse(response, this.provider, model, originalParams.tools, {
+      const result = mapFromOpenAIResponse(response, this.provider, model, originalParams.tools, {
         captureOpenAICompatibleReplay: true
       })
+      const parsedContent = parseStructuredOutput(originalParams.responseFormat, result.content)
+      if (parsedContent !== undefined) result.parsedContent = parsedContent
+      return result
     } catch (error) {
       // Wrap potential OpenAI SDK errors using the common wrapper
       throw this.wrapProviderError(error, this.provider)
