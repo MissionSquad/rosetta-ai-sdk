@@ -1,7 +1,22 @@
 import OpenAI from 'openai'
 
+import {
+  COMPUTER_ACTION_TOOL_NAME,
+  computerActionToolArgsJsonSchema,
+  computerActionToolArgsSchema,
+  createComputerActionTool,
+  StructuredOutputValidationError,
+  ToolArgumentValidationError
+} from '../../../../src'
 import { OpenAICompatibleMapper } from '../../../../src/core/mapping/openai-compatible.mapper'
-import { CustomProviderConfig, GenerateParams, RosettaMessage, StreamChunk } from '../../../../src/types'
+import {
+  ComputerActionToolArgs,
+  CustomProviderConfig,
+  GenerateParams,
+  ImageMimeType,
+  RosettaMessage,
+  StreamChunk
+} from '../../../../src/types'
 
 const CUSTOM_PROVIDER = 'custom-mistral'
 const REQUEST_MODEL = 'custom-model'
@@ -31,6 +46,37 @@ function createResponse(content = 'mapped response'): OpenAI.Chat.Completions.Ch
           role: 'assistant',
           content,
           refusal: null
+        }
+      }
+    ]
+  }
+}
+
+function createToolCallResponse(argumentsValue: unknown): OpenAI.Chat.Completions.ChatCompletion {
+  return {
+    id: 'chatcmpl-computer-action',
+    object: 'chat.completion',
+    created: 1,
+    model: REQUEST_MODEL,
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'tool_calls',
+        logprobs: null,
+        message: {
+          role: 'assistant',
+          content: null,
+          refusal: null,
+          tool_calls: [
+            {
+              id: 'call-computer-action',
+              type: 'function',
+              function: {
+                name: COMPUTER_ACTION_TOOL_NAME,
+                arguments: JSON.stringify(argumentsValue)
+              }
+            }
+          ]
         }
       }
     ]
@@ -264,5 +310,196 @@ describe('OpenAICompatibleMapper replay metadata', () => {
     })
     expect(finalResult?.data.result.providerState?.openAICompatible?.reasoningDetails).not.toBe(reasoningDetails)
     expect(finalResult?.data.result.providerState?.openAICompatible?.structuredContent).not.toBe(structuredContent)
+  })
+})
+
+describe('OpenAICompatibleMapper computer action fallback', () => {
+  const validArguments: ComputerActionToolArgs = {
+    schemaVersion: '1',
+    actionId: 'action-1',
+    action: {
+      kind: 'click',
+      point: { x: 0.25, y: 0.5 },
+      button: 'left'
+    },
+    rationale: 'Open the selected control.'
+  }
+
+  function createComputerActionParams(mimeType: ImageMimeType): GenerateParams {
+    return {
+      provider: CUSTOM_PROVIDER,
+      model: REQUEST_MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Choose the next action from this screenshot.' },
+            { type: 'image', image: { mimeType, base64Data: 'screenshot-base64' } }
+          ]
+        }
+      ],
+      tools: [createComputerActionTool()],
+      toolChoice: { type: 'function', function: { name: COMPUTER_ACTION_TOOL_NAME } }
+    }
+  }
+
+  function createComputerActionJsonParams(): GenerateParams {
+    return {
+      provider: CUSTOM_PROVIDER,
+      model: REQUEST_MODEL,
+      messages: [{ role: 'user', content: 'Return exactly one canonical computer action as JSON.' }],
+      responseFormat: {
+        type: 'json_schema',
+        json_schema: {
+          name: COMPUTER_ACTION_TOOL_NAME,
+          strict: true,
+          schema: requireRecord(computerActionToolArgsJsonSchema, 'computer action JSON schema'),
+          zodSchema: computerActionToolArgsSchema
+        }
+      }
+    }
+  }
+
+  it.each<ImageMimeType>(['image/png', 'image/jpeg'])(
+    'maps a %s screenshot and accepts a valid forced computer_action tool call',
+    async mimeType => {
+      const config = createConfig()
+      const mapper = new OpenAICompatibleMapper(config)
+      const create = jest.fn().mockResolvedValue(createToolCallResponse(validArguments))
+      installChatCreate(mapper, create)
+
+      const result = await mapper.executeGenerate(undefined, undefined, config, createComputerActionParams(mimeType))
+
+      const request = capturedRequest(create)
+      expect(request.messages).toEqual([
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Choose the next action from this screenshot.' },
+            {
+              type: 'image_url',
+              image_url: { url: `data:${mimeType};base64,screenshot-base64` }
+            }
+          ]
+        }
+      ])
+      expect(request.tools).toEqual([
+        {
+          type: 'function',
+          function: {
+            name: COMPUTER_ACTION_TOOL_NAME,
+            description: createComputerActionTool().function.description,
+            parameters: computerActionToolArgsJsonSchema
+          }
+        }
+      ])
+      expect(request.tool_choice).toEqual({
+        type: 'function',
+        function: { name: COMPUTER_ACTION_TOOL_NAME }
+      })
+      expect(result.toolCalls).toEqual([
+        {
+          id: 'call-computer-action',
+          type: 'function',
+          function: {
+            name: COMPUTER_ACTION_TOOL_NAME,
+            arguments: JSON.stringify(validArguments)
+          }
+        }
+      ])
+    }
+  )
+
+  it('rejects invalid computer_action arguments through the attached Zod schema', async () => {
+    const config = createConfig()
+    const mapper = new OpenAICompatibleMapper(config)
+    const create = jest.fn().mockResolvedValue(
+      createToolCallResponse({
+        ...validArguments,
+        action: {
+          kind: 'click',
+          point: { x: 1.01, y: 0.5 },
+          button: 'left'
+        }
+      })
+    )
+    installChatCreate(mapper, create)
+
+    await expect(
+      mapper.executeGenerate(undefined, undefined, config, createComputerActionParams('image/png'))
+    ).rejects.toBeInstanceOf(ToolArgumentValidationError)
+  })
+
+  it('does not treat free-text JSON as a computer_action tool call', async () => {
+    const config = createConfig()
+    const mapper = new OpenAICompatibleMapper(config)
+    const create = jest.fn().mockResolvedValue(createResponse(JSON.stringify(validArguments)))
+    installChatCreate(mapper, create)
+
+    const result = await mapper.executeGenerate(undefined, undefined, config, createComputerActionParams('image/jpeg'))
+
+    expect(result.content).toBe(JSON.stringify(validArguments))
+    expect(result.toolCalls).toBeUndefined()
+  })
+
+  it('forwards the canonical schema unchanged for strict JSON fallback and parses valid JSON', async () => {
+    const config = createConfig()
+    const mapper = new OpenAICompatibleMapper(config)
+    const create = jest.fn().mockResolvedValue(createResponse(JSON.stringify(validArguments)))
+    installChatCreate(mapper, create)
+    const params = createComputerActionJsonParams()
+
+    const result = await mapper.executeGenerate(undefined, undefined, config, params)
+
+    const responseFormat = requireRecord(capturedRequest(create).response_format, 'response_format')
+    const jsonSchema = requireRecord(responseFormat.json_schema, 'response_format.json_schema')
+    expect(responseFormat).toEqual({
+      type: 'json_schema',
+      json_schema: {
+        name: COMPUTER_ACTION_TOOL_NAME,
+        strict: true,
+        schema: computerActionToolArgsJsonSchema
+      }
+    })
+    expect(jsonSchema.schema).toBe(computerActionToolArgsJsonSchema)
+    expect(result.parsedContent).toEqual(validArguments)
+    expect(computerActionToolArgsSchema.parse(result.parsedContent)).toEqual(validArguments)
+  })
+
+  it.each([
+    ['an unknown property', { ...validArguments, unexpected: true }],
+    ['a missing required field', { ...validArguments, rationale: undefined }],
+    [
+      'an invalid coordinate',
+      { ...validArguments, action: { kind: 'click', point: { x: 1.01, y: 0.5 }, button: 'left' } }
+    ],
+    [
+      'a zero-distance scroll',
+      {
+        ...validArguments,
+        action: { kind: 'scroll', point: { x: 0.5, y: 0.5 }, deltaX: 0, deltaY: 0 }
+      }
+    ],
+    ['an actions array instead of the required singular action', { ...validArguments, action: undefined, actions: [] }]
+  ])('rejects strict JSON fallback output containing %s through the same Zod schema', async (_name, output) => {
+    const config = createConfig()
+    const mapper = new OpenAICompatibleMapper(config)
+    const create = jest.fn().mockResolvedValue(createResponse(JSON.stringify(output)))
+    installChatCreate(mapper, create)
+
+    await expect(
+      mapper.executeGenerate(undefined, undefined, config, createComputerActionJsonParams())
+    ).rejects.toBeInstanceOf(StructuredOutputValidationError)
+  })
+
+  it('rejects malformed strict JSON fallback output before exposing parsed content', async () => {
+    const config = createConfig()
+    const mapper = new OpenAICompatibleMapper(config)
+    const create = jest.fn().mockResolvedValue(createResponse('{"schemaVersion":"1"'))
+    installChatCreate(mapper, create)
+
+    await expect(
+      mapper.executeGenerate(undefined, undefined, config, createComputerActionJsonParams())
+    ).rejects.toBeInstanceOf(StructuredOutputValidationError)
   })
 })

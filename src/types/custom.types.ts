@@ -47,6 +47,7 @@ export interface CustomProviderConfig {
     | 'tool_use'
     | 'image_input'
     | 'json_mode'
+    | 'computer_use'
     | 'list_models' // Model listing
     | 'list_voices' // Voice listing
     // Add other potential features as needed

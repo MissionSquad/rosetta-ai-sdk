@@ -46,7 +46,7 @@ import { GoogleMapper } from './mapping/google.mapper'
 import { GroqMapper } from './mapping/groq.mapper'
 import { OpenAIMapper } from './mapping/openai.mapper'
 import { AzureOpenAIMapper } from './mapping/azure.openai.mapper'
-import { mapTokenUsage } from './mapping/common.utils'
+import { mapTokenUsage, parseStructuredOutput } from './mapping/common.utils'
 
 import { prepareAudioUpload } from './utils'
 import { listModelsForProvider } from './listing/model.lister'
@@ -606,17 +606,8 @@ export class RosettaAI {
   }
 
   private applyStructuredOutputParsing(originalParams: GenerateParams, result: GenerateResult): void {
-    const responseFormatType = originalParams.responseFormat?.type
-    if (responseFormatType !== 'json_object' && responseFormatType !== 'json_schema') return
-
-    if (typeof result.content !== 'string' || !result.content.trim()) return
-
-    try {
-      const parsed = JSON.parse(result.content)
-      result.parsedContent = parsed
-    } catch {
-      // Do not throw: provider refusals/filters can return non-JSON even when requested.
-    }
+    const parsedContent = parseStructuredOutput(originalParams.responseFormat, result.content)
+    if (parsedContent !== undefined) result.parsedContent = parsedContent
   }
 
   private createCancellableStream<T>(
@@ -1290,10 +1281,8 @@ export class RosettaAI {
         stream: false
       })
 
-      // Call OpenAI Responses API
-      // Note: The OpenAI SDK may not have responses.create yet, so we'll use a generic approach
-      // This assumes the SDK will be updated or we use the REST API directly
-      const response = await (client as any).responses.create(mappedParams)
+      // Call the installed OpenAI SDK Responses API using its verified non-streaming overload.
+      const response = await client.responses.create(mappedParams)
 
       // Map response back
       return OpenAIResponsesMapper.mapFromOpenAIResponsesResponse(response, params.tools)
@@ -1366,7 +1355,7 @@ export class RosettaAI {
       })
 
       // Call OpenAI Responses API streaming
-      const stream = await (client as any).responses.create(mappedParams, { signal: abortSignal })
+      const stream = await client.responses.create(mappedParams, { signal: abortSignal })
 
       registerAbort(() => this.abortStreamResource(stream))
       // Map and yield stream chunks

@@ -2,6 +2,7 @@ import { Provider, RosettaImageData } from './common.types'
 import { ThinkingStreamChunk } from './stream.types'
 import { JSONSchema7 } from 'json-schema'
 import { z } from 'zod'
+import { ComputerUseDecision } from './computer-use.types'
 
 /**
  * OpenAI Responses API - New stateful conversation interface.
@@ -25,11 +26,36 @@ export type ResponsesInputItem =
   | { type: 'input_text'; text: string }
   | { type: 'input_image'; image_url: string }
   | { type: 'input_image'; image: RosettaImageData }
+  | ResponsesComputerCallOutput
+
+export type ResponsesComputerScreenshot =
+  | { type: 'computer_screenshot'; image_url: string }
+  | { type: 'computer_screenshot'; file_id: string }
+  | { type: 'computer_screenshot'; image: RosettaImageData }
+
+export interface ResponsesAcknowledgedSafetyCheck {
+  id: string
+  code?: string | null
+  message?: string | null
+}
+
+/** Caller-authorized continuation for one native computer call. */
+export interface ResponsesComputerCallOutput {
+  type: 'computer_call_output'
+  call_id: string
+  output: ResponsesComputerScreenshot
+  acknowledged_safety_checks?: ResponsesAcknowledgedSafetyCheck[]
+}
 
 /**
  * Built-in tool types available in Responses API.
  */
-export type ResponsesBuiltInToolType = 'web_search' | 'file_search' | 'image_generation' | 'code_interpreter'
+export type ResponsesBuiltInToolType =
+  | 'web_search'
+  | 'file_search'
+  | 'image_generation'
+  | 'code_interpreter'
+  | 'computer'
 
 /**
  * Configuration for built-in tools.
@@ -58,6 +84,11 @@ export interface ResponsesCodeInterpreterTool {
   type: 'code_interpreter'
 }
 
+/** OpenAI GA native computer tool. */
+export interface ResponsesComputerTool {
+  type: 'computer'
+}
+
 /**
  * Custom function tool for Responses API.
  * Similar to Chat Completions but in Responses context.
@@ -67,6 +98,8 @@ export interface ResponsesFunctionTool<T extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string
   description?: string
   parameters: JSONSchema7
+  /** Preserve the caller's OpenAI strict-mode selection; null leaves the provider default in effect. */
+  strict?: boolean | null
   /** Zod schema for runtime validation */
   zodSchema?: T
 }
@@ -79,6 +112,7 @@ export type ResponsesTool<T extends z.ZodTypeAny = z.ZodTypeAny> =
   | ResponsesFileSearchTool
   | ResponsesImageGenerationTool
   | ResponsesCodeInterpreterTool
+  | ResponsesComputerTool
   | ResponsesFunctionTool<T>
 
 /**
@@ -88,7 +122,8 @@ export type ResponsesToolChoice =
   | 'auto'
   | 'required'
   | 'none'
-  | { type: ResponsesBuiltInToolType | 'function'; name?: string }
+  | { type: Exclude<ResponsesBuiltInToolType, 'web_search'> }
+  | { type: 'function'; name: string }
 
 /**
  * Response format for structured outputs.
@@ -143,14 +178,25 @@ export interface CreateResponseParams {
  */
 export type ResponsesOutputItem =
   | { type: 'output_text'; text: string }
-  | { type: 'function_call'; id: string; name: string; arguments: string }
+  | { type: 'function_call'; id?: string; call_id: string; name: string; arguments: string }
   | { type: 'image'; image_url: string }
+  | ResponsesComputerCall
+
+/** Provider-neutral representation of a native Responses computer call. */
+export interface ResponsesComputerCall {
+  type: 'computer_call'
+  status: 'in_progress' | 'completed' | 'incomplete'
+  decision: ComputerUseDecision
+}
 
 /**
  * Tool call in Responses API.
  */
 export interface ResponsesToolCall {
-  id: string
+  /** Provider output-item identity used for tracing. */
+  id?: string
+  /** Function-call correlation identity used when returning tool output. */
+  call_id: string
   type: 'function'
   function: {
     name: string
