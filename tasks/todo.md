@@ -38,9 +38,9 @@
 - [x] Run the complete repository test suite, including integration tests.
 - [x] Review the final diff for scope, public exports, declaration output, and accidental changes.
 - [x] Add this file's review/results section and complete the checklist audit.
-- [ ] Commit the scoped changes with specification citations.
-- [ ] Push `agent/comms-agent-integration`.
-- [ ] Open a PR to `main` with specification citations and verify merge readiness.
+- [x] Commit the scoped changes with specification citations.
+- [x] Push `agent/comms-agent-integration`.
+- [x] Open PR #70 to `main` with specification citations and verify merge readiness.
 - [ ] After merge/publish, record the exact published package version without starting downstream work.
 
 ## Review/results
@@ -53,3 +53,4 @@
 - Scoped ESLint reports no errors in every changed file its legacy parser can parse (one pre-existing `no-console` warning in `common.utils.ts`). The final complete `yarn lint --quiet` run remains blocked by 226 baseline errors across unrelated examples/source/tests, including parser failures because the pinned 2019 ESLint/Prettier stack cannot parse existing TypeScript syntax such as `override` and `import type`. The PR does not broaden scope into a repository-wide lint-toolchain migration.
 - `npm pack --dry-run --cache /private/tmp/rosetta-npm-cache` passes for `@missionsquad/rosetta-ai@1.18.0`; the 180-file package includes the root declarations plus the new computer-use JavaScript, source maps, and declarations.
 - `git diff --check` passes. The original dirty checkout remains untouched; all work is isolated on `agent/comms-agent-integration`.
+- Commit `7a9c9e0` is pushed and PR #70 is open, non-draft, cleanly mergeable, and passed its required `build` check.
