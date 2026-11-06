@@ -352,7 +352,7 @@ export class RosettaAI {
         this.mappers.set(providerKey, mapperInstance)
         this.customProviderConfigs.set(providerKey, resolvedCustomConfig) // Store the config with resolved baseURL
         this.customApiKeys.set(providerKey, apiKey) // Store the loaded key
-        console.log(`RosettaAI: Initialized custom provider: ${providerKey} (Base URL: ${finalBaseURL ?? 'Not Set'})`)
+        console.log(`RosettaAI: Initialized custom provider: ${providerKey}`)
       } catch (error) {
         console.error(`RosettaAI Error: Failed to instantiate custom mapper for provider '${providerKey}':`, error)
       }
