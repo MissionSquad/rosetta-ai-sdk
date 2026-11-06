@@ -28,7 +28,7 @@ import {
   wrapOpenAIError
 } from './openai.common' // Reuse common OpenAI mapping logic
 import { mapBaseToolChoice, mapToOpenAIResponseFormat, parseStructuredOutput } from '../mapping/common.utils'
-import { MappingError, RosettaAIError, ConfigurationError, UnsupportedFeatureError } from '../../errors'
+import { MappingError, RosettaAIError, ConfigurationError, UnsupportedFeatureError, ProviderAPIError } from '../../errors'
 import { mapToOpenAIEmbedParams, mapFromOpenAIEmbedResponse } from './openai.embed.mapper'
 import { cloneOpenAICompatibleAssistantProviderState } from './openai-thinking'
 
@@ -203,7 +203,7 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
       return result
     } catch (error) {
       // Wrap potential OpenAI SDK errors using the common wrapper
-      throw this.wrapProviderError(error, this.provider)
+      throw this.wrapInferenceError(error)
     }
   }
 
@@ -273,16 +273,20 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
       const stream = await this.openaiClient.chat.completions.create(openAIParams, { signal: abortSignal })
 
       // Reuse the common OpenAI stream mapping logic with the actual custom provider key.
-      yield* mapOpenAIStream(
+      for await (const chunk of mapOpenAIStream(
         stream as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>,
         this.provider,
         model,
         originalParams.tools,
         { captureOpenAICompatibleReplay: true }
-      )
+      )) {
+        yield chunk.type === 'error'
+          ? { type: 'error', data: { error: this.wrapInferenceError(chunk.data.error) } }
+          : chunk
+      }
     } catch (error) {
       // Wrap potential OpenAI SDK errors using the common wrapper
-      yield { type: 'error', data: { error: this.wrapProviderError(error, this.provider) } }
+      yield { type: 'error', data: { error: this.wrapInferenceError(error) } }
     }
   }
 
@@ -324,6 +328,27 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     }
   }
   // --- End NEW ---
+
+  /** Remove configured connection values before inference failures reach caller logs. */
+  private wrapInferenceError(error: unknown): RosettaAIError {
+    const wrapped = this.wrapProviderError(error, this.provider)
+    // Tool validation/mapping failures keep their typed recovery behavior.
+    if (!(wrapped instanceof ProviderAPIError)) return wrapped
+    const secrets = [this.config.apiKey, this.config.baseURL]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .sort((left, right) => right.length - left.length)
+    const redact = (value: string): string => secrets.reduce((text, secret) => text.split(secret).join('[REDACTED]'), value)
+    const metadata = (value: unknown): string | null | undefined =>
+      typeof value === 'string' ? redact(value) : value === null ? null : undefined
+    const prefix = `[${this.provider}] API Error ${wrapped.statusCode ? `(Status ${wrapped.statusCode}) ` : ''}${wrapped.errorCode ? `[Code: ${wrapped.errorCode}] ` : ''}: `
+    const message = wrapped.message.startsWith(prefix) ? wrapped.message.slice(prefix.length) : wrapped.message
+    return new ProviderAPIError(
+      redact(message), this.provider, wrapped.statusCode,
+      metadata(wrapped.errorCode), metadata(wrapped.errorType)
+      // Deliberately omit the raw upstream cause, including request/response data
+      // and its stack, which may contain credentials even when the message does not.
+    )
+  }
 
   // Override wrapProviderError to delegate to the common OpenAI error wrapper
   override wrapProviderError(error: unknown, _provider: ProviderKey): RosettaAIError {
