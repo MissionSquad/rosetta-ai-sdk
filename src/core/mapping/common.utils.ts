@@ -198,7 +198,9 @@ function mapBillingUsage(
     const responses = format === 'openai-responses'
     const input = detailObject(usage[responses ? 'input_tokens_details' : 'prompt_tokens_details'])
     billing.cachedInputTokens = count(input?.cached_tokens)
-    billing.cacheWriteInputTokens = count(input?.cache_write_tokens)
+    const cacheWriteTokens = input?.cache_write_tokens
+    // Chat Completions defaults omitted writes to zero. Responses preserves absence.
+    billing.cacheWriteInputTokens = count(!responses && cacheWriteTokens === undefined ? 0 : cacheWriteTokens)
     billing.serviceTier = label(serviceTier)
     if (responses) {
       const cacheWrite = detailObject(input?.cache_write_tokens_details)

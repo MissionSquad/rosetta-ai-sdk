@@ -10,7 +10,7 @@ describe('native provider inclusive usage', () => {
   test('includes Anthropic cache input and Google thoughts/tool input exactly once', () => {
     expect(mapTokenUsage({ input_tokens: 10, cache_creation_input_tokens: 4, cache_read_input_tokens: 10, output_tokens: 6 }, 'anthropic')).toEqual({ promptTokens: 24, completionTokens: 6, totalTokens: 30, billing: { cachedInputTokens: 10, cacheWriteInputTokens: 4 } })
     expect(mapTokenUsage({ promptTokenCount: 10, toolUsePromptTokenCount: 3, candidatesTokenCount: 4, thoughtsTokenCount: 5, totalTokenCount: 22 }, 'google')).toEqual({ promptTokens: 13, completionTokens: 9, totalTokens: 22, billing: {} })
-    expect(mapTokenUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, prompt_tokens_details: { cached_tokens: 8 }, completion_tokens_details: { reasoning_tokens: 3 } }, 'openai')).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: { cachedInputTokens: 8 } })
+    expect(mapTokenUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, prompt_tokens_details: { cached_tokens: 8 }, completion_tokens_details: { reasoning_tokens: 3 } }, 'openai')).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: { cachedInputTokens: 8, cacheWriteInputTokens: 0, cacheWrite30mInputTokens: 0 } })
   })
   test('distinguishes optional Google components from unknown required counts', () => {
     expect(mapTokenUsage({ promptTokenCount: 2, candidatesTokenCount: 3 }, 'google')).toEqual({ promptTokens: 2, completionTokens: 3, totalTokens: 5, billing: {} })
@@ -37,11 +37,16 @@ describe('native provider inclusive usage', () => {
       }
     })
   })
-  test('distinguishes missing required Responses cache reads from optional Chat details', () => {
+  test('defaults omitted Chat cache writes to zero and preserves missing Responses cache writes', () => {
+    expect(mapTokenUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }, 'openai'))
+      .toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15,
+        billing: { cacheWriteInputTokens: 0, cacheWrite30mInputTokens: 0 } })
+    expect(mapTokenUsage({ input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 } }, 'openai-responses'))
+      .toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: { cachedInputTokens: 0 } })
+  })
+  test('marks missing required Responses cache reads as incomplete', () => {
     expect(mapTokenUsage({ input_tokens: 10, output_tokens: 5, total_tokens: 15 }, 'openai-responses'))
       .toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: { incomplete: true } })
-    expect(mapTokenUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }, 'openai'))
-      .toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: {} })
   })
   test('marks explicitly null billing counts as malformed', () => {
     expect(mapTokenUsage({
