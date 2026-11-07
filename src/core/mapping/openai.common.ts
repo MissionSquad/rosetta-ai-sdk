@@ -28,7 +28,7 @@ import {
   ToolArgumentValidationError
 } from '../../errors'
 import { safeGet } from '../utils'
-import { mapTokenUsage } from './common.utils'
+import { mapReportedModel, mapTokenUsage } from './common.utils'
 import { extractOpenAIThinking } from './openai-thinking'
 
 export interface OpenAIThinkingMappingOptions {
@@ -216,6 +216,7 @@ export function mapFromOpenAIResponse(
   const usage = mapTokenUsage(response?.usage, 'openai', response?.service_tier)
   observer?.observeUsage(usage, true)
   // Add null/undefined check for response.choices before accessing index 0
+  const reportedModel = mapReportedModel(response?.model)
   const choice = response?.choices?.[0]
   if (!choice) {
     console.warn('OpenAI response missing choices.')
@@ -232,6 +233,7 @@ export function mapFromOpenAIResponse(
       parsedContent: null,
       thinkingSteps: undefined,
       model: response?.model ?? modelUsed,
+      ...(reportedModel !== undefined ? { reportedModel } : {}),
       rawResponse: response
     }
   }
@@ -271,6 +273,7 @@ export function mapFromOpenAIResponse(
     parsedContent: parsedJson,
     thinkingSteps: extraction.thinkingDeltas.join('') || null,
     model: response.model ?? modelUsed,
+    ...(reportedModel !== undefined ? { reportedModel } : {}),
     rawResponse: response,
     ...(hasOpenAICompatibleState ? { providerState: { openAICompatible: openAICompatibleState } } : {})
   }
@@ -357,6 +360,8 @@ export async function* mapOpenAIStream(
 
   try {
     for await (const chunk of stream) {
+      const reportedModel = mapReportedModel(chunk.model)
+      if (reportedModel !== undefined) aggregatedResult.reportedModel = reportedModel
       observer?.observeRequestId(chunk.id)
       serviceTier = chunk.service_tier ?? serviceTier
       for (const choice of chunk.choices) if (choice.finish_reason) finishedChoices.add(choice.index)

@@ -708,6 +708,18 @@ describe('Google Mapper', () => {
   })
 
   describe('mapFromProviderResponse (Generate)', () => {
+    it('reports modelVersion separately from the requested model', () => {
+      const requestedModel = 'gemini-requested-alias'
+      const response = { candidates: [createMockCandidate([{ text: 'Hello' }], FinishReason.STOP)] }
+      const versionedResult = mapper.mapFromProviderResponse(
+        { ...response, modelVersion: 'gemini-provider-snapshot' },
+        requestedModel
+      )
+
+      expect(versionedResult).toMatchObject({ model: requestedModel, reportedModel: 'gemini-provider-snapshot' })
+      expect(mapper.mapFromProviderResponse(response, requestedModel)).not.toHaveProperty('reportedModel')
+    })
+
     const modelUsed = 'gemini-2.5-flash-test'
 
     it('[Easy] should map basic text response', () => {
@@ -1024,6 +1036,21 @@ describe('Google Mapper', () => {
   })
 
   describe('mapProviderStream', () => {
+    it('captures modelVersion from a metadata-only chunk after the last candidate', async () => {
+      const mockChunks: GenerateContentResponse[] = [
+        { candidates: [createMockCandidate([{ text: 'Hello' }], FinishReason.STOP)] },
+        { modelVersion: 'gemini-provider-snapshot', usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 } }
+      ]
+      const params: GenerateParams = { provider: Provider.Google, model: 'gemini-requested-alias', messages: [] }
+      const results = await collectStreamChunks(mapper.mapProviderStream(mockGoogleStreamGenerator(mockChunks), params))
+
+      expect(results[0]).toEqual({ type: 'message_start', data: { provider: Provider.Google, model: '' } })
+      expect(results.at(-1)).toMatchObject({
+        type: 'final_result',
+        data: { result: { model: '', reportedModel: 'gemini-provider-snapshot', content: 'Hello' } }
+      })
+    })
+
     it('[Hard] should handle basic text stream', async () => {
       const mockChunks: GenerateContentResponse[] = [
         { candidates: [createMockCandidate([{ text: 'Hello ' }], FinishReason.FINISH_REASON_UNSPECIFIED)] },

@@ -384,6 +384,10 @@ console.log('Available Providers:', rosettaManual.getConfiguredProviders())
 
 Use `generate` for simple request-response interactions.
 
+`GenerateResult.reportedModel` contains the provider-reported model identifier when available. For example, Google supplies it as `modelVersion`. The field is omitted when the provider supplies no valid identifier. The existing `model` field retains its provider-specific behavior. In streaming calls, look for `reportedModel` in the `final_result` chunk.
+
+Use the exported `getGpt5Support(model)` to read Rosetta's known OpenAI GPT-5 capabilities. It returns a copy of the capability data for a recognized model or `undefined` for an unknown model.
+
 ```typescript
 import { RosettaAI, Provider, RosettaMessage, ProviderKey } from 'rosetta-ai-sdk'
 // ... initialization ...

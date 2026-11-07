@@ -34,7 +34,7 @@ import { MappingError, UnsupportedFeatureError, ProviderAPIError, RosettaAIError
 import { CustomProviderConfig } from '../../types/custom.types'
 import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
-import { mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
+import { mapReportedModel, mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
 import { resolveThinkingRequest } from './thinking-request'
 import * as GroqEmbedMapper from './groq.embed.mapper'
 import * as GroqAudioMapper from './groq.audio.mapper'
@@ -316,6 +316,7 @@ export class GroqMapper implements IProviderMapper {
   mapFromProviderResponse(response: ChatCompletion, modelUsed: string, _originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
     observer?.observeRequestId(response.id)
     observer?.observeUsage(mapTokenUsage(response.usage, 'groq'), true)
+    const reportedModel = mapReportedModel(response.model)
     const choice = response.choices[0]
     if (!choice) {
       console.warn('Groq response missing choices.')
@@ -329,6 +330,7 @@ export class GroqMapper implements IProviderMapper {
         parsedContent: null,
         thinkingSteps: undefined,
         model: response.model ?? modelUsed,
+        ...(reportedModel !== undefined ? { reportedModel } : {}),
         rawResponse: response
       }
     }
@@ -356,6 +358,7 @@ export class GroqMapper implements IProviderMapper {
       parsedContent: parsedJson,
       thinkingSteps,
       model: response.model ?? modelUsed,
+      ...(reportedModel !== undefined ? { reportedModel } : {}),
       rawResponse: response
     }
   }

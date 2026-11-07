@@ -992,6 +992,7 @@ describe('Anthropic Mapper', () => {
         billing: { cachedInputTokens: 0, cacheWriteInputTokens: 0 }
       })
       expect(result.model).toBe('claude-3-opus-20240229-test')
+      expect(result.reportedModel).toBe('claude-3-opus-20240229-test')
     })
 
     it('[Easy] should map response with tool calls', () => {
@@ -1241,6 +1242,7 @@ describe('Anthropic Mapper', () => {
           content: 'Hello world',
           finishReason: 'stop',
           model: modelId,
+          reportedModel: modelId,
           // FIX: Update usage expectation to include calculated totalTokens
           usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12, billing: { cachedInputTokens: 0, cacheWriteInputTokens: 0 } }
         })

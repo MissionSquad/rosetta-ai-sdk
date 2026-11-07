@@ -303,7 +303,9 @@ describe('OpenAICompatibleMapper replay metadata', () => {
     )
 
     expect(messageStart?.data).toEqual({ provider: CUSTOM_PROVIDER, model: 'custom-provider-model-id' })
+    expect(capturedRequest(create).model).toBe(REQUEST_MODEL)
     expect(finalResult?.data.result.model).toBe('custom-provider-model-id')
+    expect(finalResult?.data.result.reportedModel).toBe('custom-provider-model-id')
     expect(finalResult?.data.result.content).toBe('stream answer')
     expect(finalResult?.data.result.providerState).toEqual({
       openAICompatible: { reasoningDetails, structuredContent }

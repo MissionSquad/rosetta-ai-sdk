@@ -63,8 +63,10 @@ export interface GenerateResult {
   codeExecutionResults?: CodeExecutionResultInfo[]
   /** The parsed JSON object if `responseFormat: { type: 'json_object' }` was requested and parsing succeeded. Null otherwise. */
   parsedContent?: Record<string, unknown> | Array<unknown> | null
-  /** The exact model ID string used for the completion, as reported by the provider. */
+  /** The model ID associated with the completion, using the adapter’s existing fallback behavior. */
   model: string
+  /** Model identifier supplied in the provider response, when available. */
+  reportedModel?: string
   /** The raw response object from the underlying SDK (use with caution, structure varies). */
   rawResponse?: unknown
   /** Provider-specific response state for downstream persistence and replay. */

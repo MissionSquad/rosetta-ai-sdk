@@ -34,7 +34,7 @@ import {
 import { MappingError, ProviderAPIError, RosettaAIError, UnsupportedFeatureError } from '../../errors'
 import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
-import { mapTokenUsage, mapBaseParams } from './common.utils'
+import { mapReportedModel, mapTokenUsage, mapBaseParams } from './common.utils'
 import { resolveThinkingRequest } from './thinking-request'
 import * as GoogleEmbedMapper from './google.embed.mapper'
 
@@ -639,6 +639,7 @@ export class GoogleMapper implements IProviderMapper {
   }
 
   mapFromProviderResponse(response: GenerateContentResponse | undefined, model: string, _originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
+    const reportedModel = mapReportedModel(response?.modelVersion)
     observer?.observeRequestId(response?.responseId)
     const usage = mapTokenUsage(response?.usageMetadata, 'google', response?.sdkHttpResponse?.headers?.['x-gemini-service-tier'])
     observer?.observeUsage(usage, true)
@@ -662,6 +663,7 @@ export class GoogleMapper implements IProviderMapper {
         parsedContent: null,
         thinkingSteps: undefined,
         model: model,
+        ...(reportedModel !== undefined ? { reportedModel } : {}),
         rawResponse: response
       }
     }
@@ -681,6 +683,7 @@ export class GoogleMapper implements IProviderMapper {
         parsedContent: null,
         thinkingSteps: undefined,
         model: model,
+        ...(reportedModel !== undefined ? { reportedModel } : {}),
         rawResponse: response
       }
     }
@@ -744,6 +747,7 @@ export class GoogleMapper implements IProviderMapper {
       parsedContent: parsedJson,
       thinkingSteps,
       model: model,
+      ...(reportedModel !== undefined ? { reportedModel } : {}),
       rawResponse: response
     }
   }
@@ -768,7 +772,8 @@ export class GoogleMapper implements IProviderMapper {
     let aggregatedText = ''
     const aggregatedCitations: Citation[] = []
     const aggregatedToolCalls: RosettaToolCallRequest[] = []
-    const model = '' // Model name isn't directly in the stream chunks
+    const model = '' // Preserve the existing normalized stream model value
+    let reportedModel: string | undefined
     let isPotentiallyJson = false
     let aggregatedResult: GenerateResult | null = null
 
@@ -777,6 +782,7 @@ export class GoogleMapper implements IProviderMapper {
       yield { type: 'message_start', data: { provider: this.provider, model: model } }
 
       for await (const chunk of stream) {
+        reportedModel = mapReportedModel(chunk.modelVersion) ?? reportedModel
         observer?.observeRequestId(chunk.responseId)
         serviceTier = chunk.sdkHttpResponse?.headers?.['x-gemini-service-tier'] ?? serviceTier
         for (const candidate of chunk.candidates ?? []) {
@@ -811,7 +817,7 @@ export class GoogleMapper implements IProviderMapper {
               toolCalls: [],
               finishReason: null,
               usage: currentUsage,
-              model: model, // Will be empty initially, maybe update later if possible?
+              model: model,
               thinkingSteps: null,
               citations: [],
               parsedContent: null,
@@ -996,6 +1002,7 @@ export class GoogleMapper implements IProviderMapper {
       }
 
       if (aggregatedResult) {
+        if (reportedModel !== undefined) aggregatedResult.reportedModel = reportedModel
         if (!isPotentiallyJson && aggregatedResult.content === '') aggregatedResult.content = null
         if (aggregatedResult.toolCalls?.length === 0) aggregatedResult.toolCalls = undefined
         if (aggregatedResult.citations?.length === 0) aggregatedResult.citations = undefined
