@@ -1187,9 +1187,12 @@ describe('Google Mapper', () => {
         { candidates: [createMockCandidate([{ text: 'Unsafe ' }], FinishReason.FINISH_REASON_UNSPECIFIED)] },
         {
           candidates: [
-            createMockCandidate([], FinishReason.SAFETY, undefined, [
-              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, probability: HarmProbability.MEDIUM }
-            ])
+            {
+              ...createMockCandidate([], FinishReason.SAFETY, undefined, [
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, probability: HarmProbability.MEDIUM }
+              ]),
+              finishMessage: 'Native safety detail'
+            }
           ],
           usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 1, totalTokenCount: 6 }
         }
@@ -1201,7 +1204,11 @@ describe('Google Mapper', () => {
       expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'content_filter' } })
       expect(results[4].type).toBe('final_usage')
       assertChunkType(results[5], 'final_result')
-      expect(results[5].data.result.finishReason).toBe('content_filter')
+      expect(results[5].data.result).toMatchObject({
+        finishReason: 'content_filter',
+        rawContent: 'Unsafe ',
+        refusal: 'Native safety detail'
+      })
       expect(results[5].data.result.content).toBe('Unsafe \n\nThis response was blocked by the AI provider\'s safety filters. Please modify your request and try again.')
     })
 

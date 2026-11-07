@@ -9,6 +9,10 @@ import {
 } from '../../../../src/core/mapping/openai.common'
 import { RosettaMessage, Provider, RosettaImageData, StreamChunk, GenerateResult } from '../../../../src/types'
 import { MappingError, ProviderAPIError } from '../../../../src/errors'
+import {
+  normalizeGenerateResultThinking,
+  normalizeThinkingStream
+} from '../../../../src/core/streaming/thinking-normalizer'
 
 // Helper type for ChatCompletionMessage mock to satisfy the interface
 type MockChatCompletionMessage = OpenAI.Chat.Completions.ChatCompletionMessage & {
@@ -211,6 +215,32 @@ describe('OpenAI Common Mapping Utilities', () => {
       expect(result).not.toHaveProperty('reportedModel')
     })
 
+    it('preserves raw tagged text and native refusals while keeping normalized content behavior', () => {
+      const raw = '<think>x</think>{"a":1}'
+      const response: OpenAI.Chat.Completions.ChatCompletion = {
+        id: 'chatcmpl-raw',
+        object: 'chat.completion',
+        created: 1,
+        model: modelUsed,
+        choices: [{ index: 0, message: createMockMessage(raw), finish_reason: 'stop', logprobs: null }]
+      }
+      const mapped = mapFromOpenAIResponse(response, Provider.OpenAI, modelUsed, undefined, options)
+      expect(normalizeGenerateResultThinking(mapped)).toMatchObject({
+        content: '{"a":1}',
+        thinkingSteps: 'x',
+        rawContent: raw
+      })
+      expect(() => JSON.parse(mapped.rawContent!)).toThrow(SyntaxError)
+
+      response.choices[0]!.message = { ...createMockMessage(null), refusal: 'I cannot help.' }
+      expect(mapFromOpenAIResponse(response, Provider.OpenAI, modelUsed, undefined, options)).toMatchObject({
+        content: null,
+        rawContent: null,
+        finishReason: 'stop',
+        refusal: 'I cannot help.'
+      })
+    })
+
     it('[Medium] should map response with tool calls', () => {
       const toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] = [
         { id: 't1', type: 'function', function: { name: 'f1', arguments: '{}' } }
@@ -320,6 +350,46 @@ describe('OpenAI Common Mapping Utilities', () => {
         data: {
           result: { model: modelId, reportedModel: 'gpt-provider-snapshot', content: 'Hello', finishReason: 'stop' }
         }
+      })
+    })
+
+    it('retains raw answer chunks before thinking normalization', async () => {
+      const mockChunks: OpenAI.Chat.Completions.ChatCompletionChunk[] = [
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { content: '  <thi' } }] },
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { content: 'nk>x</think>' } }] },
+        {
+          ...baseChunkProps,
+          model: modelId,
+          choices: [{ index: 0, delta: { content: '{"a":1} ' }, finish_reason: 'stop' }]
+        }
+      ]
+      const chunks = await collectStreamChunks(
+        normalizeThinkingStream(
+          mapOpenAIStream(mockOpenAIStreamGenerator(mockChunks), Provider.OpenAI, modelId, undefined, options)
+        )
+      )
+
+      expect(chunks.at(-1)).toMatchObject({
+        type: 'final_result',
+        data: { result: { content: '{"a":1} ', rawContent: '  <think>x</think>{"a":1} ', thinkingSteps: 'x' } }
+      })
+    })
+
+    it('collects late refusal deltas without creating answer content or altering stop reason', async () => {
+      const mockChunks: OpenAI.Chat.Completions.ChatCompletionChunk[] = [
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { role: 'assistant' } }] },
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { refusal: 'Cannot ' } }] },
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: { refusal: 'help.' } }] }
+      ]
+      const chunks = await collectStreamChunks(
+        mapOpenAIStream(mockOpenAIStreamGenerator(mockChunks), Provider.OpenAI, modelId, undefined, options)
+      )
+
+      expect(chunks.some(chunk => chunk.type === 'content_delta')).toBe(false)
+      expect(chunks.at(-1)).toMatchObject({
+        type: 'final_result',
+        data: { result: { content: null, rawContent: null, refusal: 'Cannot help.', finishReason: 'stop' } }
       })
     })
 

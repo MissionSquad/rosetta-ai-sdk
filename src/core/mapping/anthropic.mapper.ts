@@ -801,6 +801,7 @@ export class AnthropicMapper implements IProviderMapper {
         ? 'stop'
         : response.stop_reason ?? 'unknown'
 
+    const refusal = response.stop_details?.explanation
     const reportedModel = mapReportedModel(response.model)
     const usage = mapTokenUsage(response.usage, 'anthropic')
     const providerState = this.mergeAnthropicResultProviderState(undefined, {
@@ -812,6 +813,8 @@ export class AnthropicMapper implements IProviderMapper {
 
     return {
       content: combinedTextContent,
+      ...(Array.isArray(responseContent) ? { rawContent: combinedTextContent } : {}),
+      ...(typeof refusal === 'string' ? { refusal } : {}),
       toolCalls: toolCalls, // Raw tool calls
       finishReason: finishReason,
       usage: usage,
@@ -878,10 +881,13 @@ export class AnthropicMapper implements IProviderMapper {
         switch (event.type) {
           case 'message_start': {
             const reportedModel = mapReportedModel(event.message.model)
+            const refusal = event.message.stop_details?.explanation
             model = safeGet<string>(event.message, 'model') ?? ''
             yield { type: 'message_start', data: { provider: this.provider, model: model } }
             aggregatedResult = {
               content: '',
+              rawContent: null,
+              ...(typeof refusal === 'string' ? { refusal } : {}),
               toolCalls: [],
               finishReason: null,
               usage: undefined,
@@ -966,12 +972,18 @@ export class AnthropicMapper implements IProviderMapper {
               yield this.mapCodeExecutionResultChunk(event.content_block)
             } else {
               rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(event.content_block)
+              if (aggregatedResult && event.content_block.type === 'text') {
+                aggregatedResult.rawContent = (aggregatedResult.rawContent ?? '') + event.content_block.text
+              }
             }
             break
           case 'content_block_delta':
             if (event.delta.type === 'text_delta') {
               yield { type: 'content_delta', data: { delta: event.delta.text } }
-              if (aggregatedResult) aggregatedResult.content = (aggregatedResult.content ?? '') + event.delta.text
+              if (aggregatedResult) {
+                aggregatedResult.content = (aggregatedResult.content ?? '') + event.delta.text
+                aggregatedResult.rawContent = (aggregatedResult.rawContent ?? '') + event.delta.text
+              }
               const rawTextBlock = rawContentBlocksByIndex[event.index] as { type?: string; text?: unknown } | undefined
               if (rawTextBlock?.type === 'text') {
                 rawTextBlock.text = `${typeof rawTextBlock.text === 'string' ? rawTextBlock.text : ''}${event.delta.text}`
@@ -1115,7 +1127,9 @@ export class AnthropicMapper implements IProviderMapper {
               thinkingStarted = false
             }
             break
-          case 'message_delta':
+          case 'message_delta': {
+            const refusal = event.delta.stop_details?.explanation
+            if (aggregatedResult && typeof refusal === 'string') aggregatedResult.refusal = refusal
             if (event.delta.container) {
               const container = {
                 id: event.delta.container.id,
@@ -1157,6 +1171,7 @@ export class AnthropicMapper implements IProviderMapper {
                   : event.delta.stop_reason ?? 'unknown'
             }
             break
+          }
           case 'message_stop':
             finalFinishReason = finalFinishReason ?? 'stop'
             yield { type: 'message_stop', data: { finishReason: finalFinishReason } }

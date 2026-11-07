@@ -386,6 +386,8 @@ Use `generate` for simple request-response interactions.
 
 `GenerateResult.reportedModel` contains the provider-reported model identifier when available. For example, Google supplies it as `modelVersion`. The field is omitted when the provider supplies no valid identifier. The existing `model` field retains its provider-specific behavior. In streaming calls, look for `reportedModel` in the `final_result` chunk.
 
+`GenerateResult.rawContent` preserves provider answer text before SDK normalization, including whitespace, inline tags, and code fences. It excludes separately delivered reasoning and refusal data. A `null` value means the provider supplied no answer text, and an absent field means the answer is unknown. Providers that supply explicit refusal details expose them separately as `GenerateResult.refusal`. Streaming callers can read both fields in `final_result`.
+
 Use the exported `getGpt5Support(model)` to read Rosetta's known OpenAI GPT-5 capabilities. It returns a copy of the capability data for a recognized model or `undefined` for an unknown model.
 
 ```typescript

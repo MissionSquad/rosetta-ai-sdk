@@ -239,7 +239,10 @@ export function mapFromOpenAIResponse(
   }
   let parsedJson: any = null
   const extraction = extractOpenAIThinking(choice.message)
-  const textContent = extraction.answerDeltas.length > 0 ? extraction.answerDeltas.join('') : null
+  const refusal = choice.message?.refusal
+  const hasNoAnswer = choice.message?.content === null || extraction.structuredContent !== undefined || typeof refusal === 'string'
+  const rawContent = extraction.answerDeltas.length > 0 ? extraction.answerDeltas.join('') : hasNoAnswer ? null : undefined
+  const textContent = rawContent ?? null
   if (textContent && choice.finish_reason !== 'tool_calls') {
     const isJsonLike = textContent.trim().startsWith('{') || textContent.trim().startsWith('[')
     if (isJsonLike)
@@ -266,6 +269,8 @@ export function mapFromOpenAIResponse(
     openAICompatibleState !== undefined && Object.keys(openAICompatibleState).length > 0
   return {
     content: textContent,
+    ...(rawContent !== undefined ? { rawContent } : {}),
+    ...(typeof refusal === 'string' ? { refusal } : {}),
     toolCalls: mappedToolCalls, // Use validated (but still raw) tool calls
     finishReason: choice.finish_reason,
     usage,
@@ -393,6 +398,18 @@ export async function* mapOpenAIStream(
 
       // --- Thinking and Content Processing ---
       const extraction = extractOpenAIThinking(choice.delta)
+      if (extraction.answerDeltas.length > 0) {
+        aggregatedResult.rawContent = (aggregatedResult.rawContent ?? '') + extraction.answerDeltas.join('')
+      } else if (
+        aggregatedResult.rawContent === undefined &&
+        (choice.delta?.content === null || extraction.structuredContent !== undefined)
+      ) {
+        aggregatedResult.rawContent = null
+      }
+      if (typeof choice.delta?.refusal === 'string') {
+        aggregatedResult.refusal = (aggregatedResult.refusal ?? '') + choice.delta.refusal
+        if (aggregatedResult.rawContent === undefined) aggregatedResult.rawContent = null
+      }
       if (options.captureOpenAICompatibleReplay) {
         if (extraction.reasoningDetails) accumulatedReasoningDetails.push(...extraction.reasoningDetails)
         if (extraction.structuredContent) accumulatedStructuredContent.push(...extraction.structuredContent)
