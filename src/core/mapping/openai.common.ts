@@ -213,7 +213,8 @@ export function mapFromOpenAIResponse(
   observer?: ProviderUsageObserver
 ): GenerateResult {
   observer?.observeRequestId(safeGet<unknown>(response, '_request_id') ?? response?.id)
-  observer?.observeUsage(mapTokenUsage(response?.usage, 'openai'), true)
+  const usage = mapTokenUsage(response?.usage, 'openai', response?.service_tier)
+  observer?.observeUsage(usage, true)
   // Add null/undefined check for response.choices before accessing index 0
   const choice = response?.choices?.[0]
   if (!choice) {
@@ -226,7 +227,7 @@ export function mapFromOpenAIResponse(
       content: null,
       toolCalls: undefined,
       finishReason,
-      usage: mapTokenUsage(response?.usage, 'openai'), // Use common utility, handle potential null response
+      usage,
       citations: undefined,
       parsedContent: null,
       thinkingSteps: undefined,
@@ -265,7 +266,7 @@ export function mapFromOpenAIResponse(
     content: textContent,
     toolCalls: mappedToolCalls, // Use validated (but still raw) tool calls
     finishReason: choice.finish_reason,
-    usage: mapTokenUsage(response.usage, 'openai'), // Use common utility
+    usage,
     citations: undefined,
     parsedContent: parsedJson,
     thinkingSteps: extraction.thinkingDeltas.join('') || null,
@@ -331,6 +332,7 @@ export async function* mapOpenAIStream(
     Partial<RosettaToolCallRequest & { index: number; function: { name: string; arguments: string } }>
   > = {}
   let finalUsage: TokenUsage | undefined
+  let serviceTier: ChatCompletionChunk['service_tier']
   let finalFinishReason: string | null = null
   const finishedChoices = new Set<number>()
   const expectedChoices = options.expectedChoices ?? 1
@@ -356,10 +358,11 @@ export async function* mapOpenAIStream(
   try {
     for await (const chunk of stream) {
       observer?.observeRequestId(chunk.id)
+      serviceTier = chunk.service_tier ?? serviceTier
       for (const choice of chunk.choices) if (choice.finish_reason) finishedChoices.add(choice.index)
       // Update usage if present and aggregatedResult exists
       if (aggregatedResult && chunk.usage) {
-        finalUsage = mapTokenUsage(chunk.usage, 'openai') // Use common utility
+        finalUsage = mapTokenUsage(chunk.usage, provider === Provider.Groq ? 'groq' : 'openai', serviceTier)
         aggregatedResult.usage = finalUsage
         // Allow loop to continue to check for other fields like delta.content
         // in the same chunk, as some providers (like Novita) send them together.

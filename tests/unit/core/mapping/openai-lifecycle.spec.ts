@@ -35,16 +35,18 @@ async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[
   return chunks
 }
 async function* chatStream(withUsage = true): AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk> {
-  yield { id: 'stream-fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [{ index: 0,
+  yield { id: 'stream-fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', service_tier: 'priority', choices: [{ index: 0,
     delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'validate', arguments: '{"value":"invalid"}' } }] }, finish_reason: 'tool_calls' }] }
-  if (withUsage) yield { id: 'stream-fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [], usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 } }
+  if (withUsage) yield { id: 'stream-fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [], usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12,
+    prompt_tokens_details: { cached_tokens: 2, audio_tokens: 1, cache_write_tokens: 1, image_tokens: 2 },
+    completion_tokens_details: { audio_tokens: 3 } } } as OpenAI.Chat.Completions.ChatCompletionChunk
 }
 const invalidFunction = { type: 'function_call', id: 'item-1', call_id: 'call-1', name: 'validate', arguments: '{"value":"invalid"}' }
 function response(output: unknown[] = []): Response {
   // Fixture deliberately contains only fields consumed by the mapper, as in
   // existing Responses tests; the transport is mocked rather than a live SDK.
-  return { id: 'response-fixture', object: 'response', model: 'gpt-5.6-terra', status: 'completed', output,
-    usage: { input_tokens: 5, output_tokens: 7, total_tokens: 12, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 2 } } } as unknown as Response
+  return { id: 'response-fixture', object: 'response', model: 'gpt-5.6-terra', status: 'completed', service_tier: 'flex', output,
+    usage: { input_tokens: 5, output_tokens: 7, total_tokens: 12, input_tokens_details: { cached_tokens: 1, cache_write_tokens: 3, cache_write_tokens_details: { ttl_30m_tokens: 0, ttl_12h_tokens: 3 } }, output_tokens_details: { reasoning_tokens: 2 } } } as unknown as Response
 }
 async function* responseEvents(events: unknown[]): AsyncIterable<ResponseStreamEvent> {
   for (const event of events) yield event as ResponseStreamEvent
@@ -61,7 +63,7 @@ describe('OpenAI inference lifecycle mapper boundaries', () => {
     expect(seen.markDispatched).toHaveBeenCalledTimes(1)
     expect(seen.transportComplete).toHaveBeenCalledTimes(1)
     expect(seen.observeUsage).toHaveBeenCalledTimes(1)
-    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12 }, true)
+    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12, billing: {} }, true)
     expect(seen.observeRequestId).toHaveBeenCalledWith('chat-fixture')
     expect(seen.beforeDispatch.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]!)
     expect(seen.markDispatched.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]!)
@@ -105,7 +107,8 @@ describe('OpenAI inference lifecycle mapper boundaries', () => {
     const seen = observer()
     const chunks = await collect(mapper.executeStream({}, config.apiKey, config, params, undefined, seen))
     expect(seen.observeUsage).toHaveBeenCalledTimes(1)
-    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12 }, true)
+    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12, billing: { cachedInputTokens: 2, cacheWriteInputTokens: 1, cacheWrite30mInputTokens: 1,
+      inputAudioTokens: 1, outputAudioTokens: 3, inputTokenDetails: [{ modality: 'IMAGE', tokenCount: 2 }], serviceTier: 'priority' } }, true)
     expect(seen.transportComplete).toHaveBeenCalledTimes(1)
     const failure = chunks.find(chunk => chunk.type === 'error')
     expect(failure?.type).toBe('error')
@@ -163,7 +166,7 @@ describe('automatic OpenAI Responses lifecycle', () => {
     const seen = observer()
     await expect(generateViaOpenAIResponses(client, { ...params, provider: 'openai', model: 'gpt-5.6-terra' }, [tool], seen)).rejects.toBeInstanceOf(ToolArgumentValidationError)
     expect(seen.observeUsage).toHaveBeenCalledTimes(1)
-    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12 }, true)
+    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12, billing: { cachedInputTokens: 1, cacheWriteInputTokens: 3, cacheWrite30mInputTokens: 0, cacheWrite12hInputTokens: 3, serviceTier: 'flex' } }, true)
     expect(seen.transportComplete).toHaveBeenCalledTimes(1)
     const denied = new Error('Denied')
     seen.beforeDispatch.mockRejectedValueOnce(denied)
@@ -179,7 +182,7 @@ describe('automatic OpenAI Responses lifecycle', () => {
       { type: 'response.completed', response: response([invalidFunction]) }
     ]), 'gpt-5.6-terra', [tool], seen))
     expect(seen.observeUsage).toHaveBeenCalledTimes(1)
-    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12 }, true)
+    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12, billing: { cachedInputTokens: 1, cacheWriteInputTokens: 3, cacheWrite30mInputTokens: 0, cacheWrite12hInputTokens: 3, serviceTier: 'flex' } }, true)
     expect(seen.transportComplete).toHaveBeenCalledTimes(1)
     const failure = chunks.find(chunk => chunk.type === 'error')
     if (failure?.type !== 'error') throw Error('Expected typed validation error')
@@ -190,7 +193,7 @@ describe('automatic OpenAI Responses lifecycle', () => {
     const seen = observer()
     const failed = { ...response(), status: 'failed', error: { code: 'server_error', message: 'Fixture failure' } }
     const chunks = await collect(mapOpenAIResponsesChatStream(responseEvents([{ type: 'response.failed', response: failed }]), 'gpt-5.6-terra', undefined, seen))
-    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12 }, true)
+    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12, billing: { cachedInputTokens: 1, cacheWriteInputTokens: 3, cacheWrite30mInputTokens: 0, cacheWrite12hInputTokens: 3, serviceTier: 'flex' } }, true)
     expect(chunks.at(-1)?.type).toBe('error')
   })
 })

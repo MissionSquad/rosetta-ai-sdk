@@ -42,6 +42,16 @@ export class InferenceCall implements ProviderUsageObserver {
       return
     }
     const usage = { ...snapshot }
+    if (snapshot.billing) {
+      // Streaming chunks expose usage before settlement. Keep the observed
+      // breakdown independent of mutations by the consumer.
+      const billing = { ...snapshot.billing }
+      for (const key of ['inputTokenDetails', 'cachedInputTokenDetails', 'toolUseInputTokenDetails', 'outputTokenDetails'] as const) {
+        const details = billing[key]
+        if (details) billing[key] = details.map(detail => ({ ...detail }))
+      }
+      usage.billing = billing
+    }
     const split = usage.promptTokens !== undefined && usage.completionTokens !== undefined
       ? usage.promptTokens + usage.completionTokens : undefined
     if (split !== undefined && !Number.isSafeInteger(split)) { this.finalUsage = false; return }

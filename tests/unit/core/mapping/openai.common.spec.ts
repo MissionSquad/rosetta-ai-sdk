@@ -193,7 +193,7 @@ describe('OpenAI Common Mapping Utilities', () => {
       expect(result.content).toBe('Response')
       expect(result.finishReason).toBe('stop')
       expect(result.model).toBe('gpt-4o-mini-id')
-      expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 })
+      expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: {} })
     })
 
     it('[Medium] should map response with tool calls', () => {
@@ -279,7 +279,7 @@ describe('OpenAI Common Mapping Utilities', () => {
       expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'stop' } })
       expect(results[4]).toEqual({
         type: 'final_usage',
-        data: { usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } }
+        data: { usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, billing: {} } }
       })
       expect(results[5].type).toBe('final_result')
       expect((results[5] as any).data.result.content).toBe('Chunk 1 Chunk 2')

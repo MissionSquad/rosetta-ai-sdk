@@ -1,4 +1,4 @@
-import { TokenUsage, GenerateParams, GenerateResult } from '../../types'
+import { BillingTokenDetail, BillingUsage, TokenUsage, GenerateParams, GenerateResult } from '../../types'
 import { StructuredOutputValidationError } from '../../errors'
 import { safeGet } from '../utils' // Import safeGet from the existing utils file
 
@@ -9,8 +9,8 @@ import { safeGet } from '../utils' // Import safeGet from the existing utils fil
  * @param providerUsage - The usage object from the provider's response (type `any` for flexibility).
  * @returns A unified TokenUsage object or undefined if no usage data is available.
  */
-export function mapTokenUsage(providerUsage: any, format?: 'openai' | 'anthropic' | 'google'): TokenUsage | undefined {
-  if (format) return mapExplicitTokenUsage(providerUsage, format)
+export function mapTokenUsage(providerUsage: any, format?: UsageFormat, serviceTier?: unknown): TokenUsage | undefined {
+  if (format) return mapExplicitTokenUsage(providerUsage, format, serviceTier)
 
   if (!providerUsage || typeof providerUsage !== 'object') {
     return undefined
@@ -72,10 +72,17 @@ export function mapTokenUsage(providerUsage: any, format?: 'openai' | 'anthropic
   return undefined
 }
 
+type UsageFormat = 'openai' | 'openai-responses' | 'anthropic' | 'google' | 'groq'
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
+  return undefined
+}
+
 /** Normalize inclusive provider counts without fabricating missing components. */
-function mapExplicitTokenUsage(value: unknown, format: 'openai' | 'anthropic' | 'google'): TokenUsage | undefined {
-  if (!value || typeof value !== 'object') return undefined
-  const usage = value as Record<string, unknown>
+function mapExplicitTokenUsage(value: unknown, format: UsageFormat, serviceTier: unknown): TokenUsage | undefined {
+  const usage = asRecord(value)
+  if (!usage) return undefined
   let invalid = false
   const count = (key: string, optional = false): number | undefined => {
     const value = usage[key]
@@ -107,19 +114,127 @@ function mapExplicitTokenUsage(value: unknown, format: 'openai' | 'anthropic' | 
     completionTokens = sum(count('candidatesTokenCount'), count('thoughtsTokenCount', true))
     totalTokens = count('totalTokenCount')
   } else {
-    promptTokens = count('prompt_tokens')
-    completionTokens = count('completion_tokens')
+    const responses = format === 'openai-responses'
+    promptTokens = count(responses ? 'input_tokens' : 'prompt_tokens')
+    completionTokens = count(responses ? 'output_tokens' : 'completion_tokens')
     totalTokens = count('total_tokens')
   }
   const calculated = sum(promptTokens, completionTokens)
   if (totalTokens !== undefined && calculated !== undefined && totalTokens !== calculated) invalid = true
   totalTokens ??= calculated
   const cachedContentTokenCount = format === 'google' ? count('cachedContentTokenCount') : undefined
+  const billing = format === 'groq' ? undefined : mapBillingUsage(usage, format, serviceTier, promptTokens, completionTokens)
   return {
     promptTokens, completionTokens, totalTokens,
+    ...(billing ? { billing } : {}),
     ...(cachedContentTokenCount !== undefined ? { cachedContentTokenCount } : {}),
     ...(invalid || totalTokens === undefined ? { incomplete: true } : {})
   }
+}
+
+function mapBillingUsage(
+  usage: Record<string, unknown>,
+  format: Exclude<UsageFormat, 'groq'>,
+  serviceTier: unknown,
+  promptTokens: number | undefined,
+  completionTokens: number | undefined
+): BillingUsage {
+  const billing: BillingUsage = {}
+  const count = (value: unknown): number | undefined => {
+    if (value === undefined) return undefined
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value
+    billing.incomplete = true
+    return undefined
+  }
+  const detailObject = (value: unknown): Record<string, unknown> | undefined => {
+    if (value == null) return undefined
+    const result = asRecord(value)
+    if (!result) billing.incomplete = true
+    return result
+  }
+  const label = (value: unknown): string | undefined => {
+    if (value == null) return undefined
+    if (typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) return value
+    billing.incomplete = true
+    return undefined
+  }
+  const details = (value: unknown): BillingTokenDetail[] | undefined => {
+    if (value == null) return undefined
+    if (Array.isArray(value)) {
+      const items: BillingTokenDetail[] = []
+      for (const entry of value) {
+        const item = asRecord(entry)
+        const modality = label(item?.modality)
+        const tokenCount = count(item?.tokenCount)
+        if (modality === undefined || tokenCount === undefined) {
+          billing.incomplete = true
+          return undefined
+        }
+        items.push({ modality, tokenCount })
+      }
+      return items
+    }
+    billing.incomplete = true
+    return undefined
+  }
+
+  if (format === 'anthropic') {
+    const cacheCreation = detailObject(usage.cache_creation)
+    billing.cachedInputTokens = count(usage.cache_read_input_tokens)
+    billing.cacheWriteInputTokens = count(usage.cache_creation_input_tokens)
+    billing.cacheWrite5mInputTokens = count(cacheCreation?.ephemeral_5m_input_tokens)
+    billing.cacheWrite1hInputTokens = count(cacheCreation?.ephemeral_1h_input_tokens)
+    billing.serviceTier = label(usage.service_tier)
+    billing.inferenceGeo = label(usage.inference_geo)
+    billing.speed = label(usage.speed)
+  } else if (format === 'google') {
+    billing.serviceTier = label(serviceTier ?? usage.serviceTier)
+    billing.cachedInputTokens = count(usage.cachedContentTokenCount)
+    billing.inputTokenDetails = details(usage.promptTokensDetails)
+    billing.cachedInputTokenDetails = details(usage.cacheTokensDetails)
+    billing.toolUseInputTokenDetails = details(usage.toolUsePromptTokensDetails)
+    billing.outputTokenDetails = details(usage.candidatesTokensDetails)
+  } else {
+    const responses = format === 'openai-responses'
+    const input = detailObject(usage[responses ? 'input_tokens_details' : 'prompt_tokens_details'])
+    billing.cachedInputTokens = count(input?.cached_tokens)
+    billing.cacheWriteInputTokens = count(input?.cache_write_tokens)
+    billing.serviceTier = label(serviceTier)
+    if (responses) {
+      const cacheWrite = detailObject(input?.cache_write_tokens_details)
+      billing.cacheWrite30mInputTokens = count(cacheWrite?.ttl_30m_tokens)
+      billing.cacheWrite12hInputTokens = count(cacheWrite?.ttl_12h_tokens)
+      if (billing.cachedInputTokens === undefined) billing.incomplete = true
+    } else {
+      const output = detailObject(usage.completion_tokens_details)
+      billing.cacheWrite30mInputTokens = billing.cacheWriteInputTokens
+      billing.inputAudioTokens = count(input?.audio_tokens)
+      billing.outputAudioTokens = count(output?.audio_tokens)
+      const textTokens = count(input?.text_tokens)
+      const imageTokens = count(input?.image_tokens)
+      const inputDetails: BillingTokenDetail[] = []
+      if (textTokens !== undefined) inputDetails.push({ modality: 'TEXT', tokenCount: textTokens })
+      if (imageTokens !== undefined) inputDetails.push({ modality: 'IMAGE', tokenCount: imageTokens })
+      if (inputDetails.length) billing.inputTokenDetails = inputDetails
+    }
+  }
+
+  const cachedAndWritten = (billing.cachedInputTokens ?? 0) + (billing.cacheWriteInputTokens ?? 0)
+  const split = format === 'anthropic'
+    ? [billing.cacheWrite5mInputTokens, billing.cacheWrite1hInputTokens]
+    : [billing.cacheWrite30mInputTokens, billing.cacheWrite12hInputTokens]
+  const [shortWrite, longWrite] = split
+  if ((promptTokens !== undefined && (cachedAndWritten > promptTokens || (billing.inputAudioTokens ?? 0) > promptTokens)) ||
+      (completionTokens !== undefined && (billing.outputAudioTokens ?? 0) > completionTokens) ||
+      (billing.cacheWriteInputTokens !== undefined && shortWrite !== undefined && longWrite !== undefined &&
+        shortWrite + longWrite !== billing.cacheWriteInputTokens)) {
+    billing.incomplete = true
+  }
+  // Omit optional keys that the provider did not report, preserving explicit zeros.
+  for (const key of Object.keys(billing) as Array<keyof BillingUsage>) {
+    if (billing[key] === undefined) delete billing[key]
+  }
+  return billing
 }
 
 /**

@@ -723,7 +723,7 @@ describe('Google Mapper', () => {
         promptTokens: 10,
         completionTokens: 5,
         totalTokens: 15,
-        cachedContentTokenCount: undefined
+        billing: {}
       })
       expect(result.model).toBe(modelUsed)
       expect(result.citations).toBeUndefined()
@@ -1043,7 +1043,7 @@ describe('Google Mapper', () => {
       expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'stop' } })
       expect(results[4]).toEqual({
         type: 'final_usage',
-        data: { usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, cachedContentTokenCount: undefined } }
+        data: { usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, billing: {} } }
       })
       assertChunkType(results[5], 'final_result')
       expect(results[5].data.result).toEqual(
@@ -1051,7 +1051,7 @@ describe('Google Mapper', () => {
           content: 'Hello world',
           finishReason: 'stop',
           model: '',
-          usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, cachedContentTokenCount: undefined }
+          usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, billing: {} }
         })
       )
     })
