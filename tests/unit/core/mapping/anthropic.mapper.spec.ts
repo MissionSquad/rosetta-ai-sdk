@@ -995,6 +995,20 @@ describe('Anthropic Mapper', () => {
       expect(result.reportedModel).toBe('claude-3-opus-20240229-test')
     })
 
+    it('keeps Anthropic refusal details separate from its answer text', () => {
+      const response = {
+        ...createMockAnthropicMessage([], 'refusal', { input_tokens: 10, output_tokens: 0 }, modelUsed),
+        stop_details: { type: 'refusal' as const, category: 'bio' as const, explanation: 'Provider policy refusal' }
+      }
+
+      expect(mapper.mapFromProviderResponse(response, modelUsed)).toMatchObject({
+        content: null,
+        rawContent: null,
+        refusal: 'Provider policy refusal',
+        finishReason: 'refusal'
+      })
+    })
+
     it('[Easy] should map response with tool calls', () => {
       const response = createMockAnthropicMessage(
         [
@@ -1240,6 +1254,7 @@ describe('Anthropic Mapper', () => {
       expect((results[5] as any).data.result).toEqual(
         expect.objectContaining({
           content: 'Hello world',
+          rawContent: 'Hello world',
           finishReason: 'stop',
           model: modelId,
           reportedModel: modelId,

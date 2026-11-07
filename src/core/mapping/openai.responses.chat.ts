@@ -7,7 +7,6 @@ import type {
   ResponseInputItem,
   ResponseFunctionToolCall,
   ResponseOutputItem,
-  ResponseOutputText,
   ResponseReasoningItem,
   ResponseStreamEvent,
   Tool as OpenAIResponsesTool,
@@ -370,6 +369,19 @@ function mapResponsesUsage(response: Response): TokenUsage | undefined {
   return mapTokenUsage(response.usage, 'openai-responses', response.service_tier)
 }
 
+function readResponseAnswer(output: ResponseOutputItem[]): { rawContent: string | null; refusalText: string | null } {
+  const textParts: string[] = []
+  let refusalText: string | null = null
+  for (const item of output) {
+    if (item.type !== 'message' || !Array.isArray(item.content)) continue
+    for (const part of item.content) {
+      if (part.type === 'output_text') textParts.push(part.text)
+      else if (part.type === 'refusal') refusalText = part.refusal
+    }
+  }
+  return { rawContent: textParts.length > 0 ? textParts.join('') : null, refusalText }
+}
+
 export function mapOpenAIResponsesChatResponse(
   response: Response,
   modelUsed: string,
@@ -381,15 +393,7 @@ export function mapOpenAIResponsesChatResponse(
   const outputItems: ResponseOutputItem[] = response.output ?? []
   const reasoningItems = outputItems.filter((item): item is ResponseReasoningItem => item.type === 'reasoning')
 
-  const textParts: string[] = []
-  let refusalText: string | null = null
-  for (const item of outputItems) {
-    if (item.type !== 'message') continue
-    for (const part of item.content) {
-      if (part.type === 'output_text') textParts.push((part as ResponseOutputText).text)
-      else if (part.type === 'refusal') refusalText = part.refusal
-    }
-  }
+  const { rawContent, refusalText } = readResponseAnswer(outputItems)
 
   const toolCalls: RosettaToolCallRequest[] = []
   for (const item of outputItems) {
@@ -408,7 +412,7 @@ export function mapOpenAIResponsesChatResponse(
   }
   attachReasoningMetadata(toolCalls, reasoningItems)
 
-  const content = textParts.length > 0 ? textParts.join('') : refusalText
+  const content = rawContent ?? refusalText
   let parsedJson: Record<string, unknown> | Array<unknown> | null = null
   if (content && toolCalls.length === 0) {
     const trimmed = content.trim()
@@ -426,6 +430,8 @@ export function mapOpenAIResponsesChatResponse(
   const reportedModel = mapReportedModel(response.model)
   return {
     content,
+    ...(Array.isArray(response.output) ? { rawContent } : {}),
+    ...(refusalText !== null ? { refusal: refusalText } : {}),
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     finishReason: mapFinishReason(response, toolCalls.length > 0, refusalText !== null),
     usage: mapResponsesUsage(response),
@@ -459,6 +465,8 @@ export async function* mapOpenAIResponsesChatStream(
   let isJsonMode = false
   let messageStartYielded = false
   let refusalText: string | null = null
+  let refusalDeltas: string | undefined
+  let finalAnswer: ReturnType<typeof readResponseAnswer> | undefined
   let finalUsage: TokenUsage | undefined
   let responseSnapshot: Response | undefined
   const toolCallsByItemId = new Map<string, StreamingToolCallState>()
@@ -517,6 +525,7 @@ export async function* mapOpenAIResponsesChatStream(
         }
         case 'response.output_text.delta': {
           const delta = event.delta
+          aggregatedResult.rawContent = (aggregatedResult.rawContent ?? '') + delta
           if (delta.length === 0) break
           accumulatedContent += delta
           aggregatedResult.content = accumulatedContent
@@ -530,6 +539,10 @@ export async function* mapOpenAIResponsesChatStream(
           } else {
             yield { type: 'content_delta', data: { delta } }
           }
+          break
+        }
+        case 'response.refusal.delta': {
+          refusalDeltas = (refusalDeltas ?? '') + event.delta
           break
         }
         case 'response.refusal.done': {
@@ -607,6 +620,7 @@ export async function* mapOpenAIResponsesChatStream(
         case 'response.completed':
         case 'response.incomplete': {
           responseSnapshot = event.response
+          if (Array.isArray(event.response.output)) finalAnswer = readResponseAnswer(event.response.output)
           finalUsage = mapResponsesUsage(event.response)
           aggregatedResult.usage = finalUsage
           break
@@ -638,6 +652,12 @@ export async function* mapOpenAIResponsesChatStream(
     const hasToolCalls = (aggregatedResult.toolCalls?.length ?? 0) > 0
     if (hasToolCalls) {
       attachReasoningMetadata(aggregatedResult.toolCalls!, reasoningItems)
+    }
+    const refusal = finalAnswer?.refusalText ?? refusalText ?? refusalDeltas
+    if (refusal !== undefined) aggregatedResult.refusal = refusal
+    if (finalAnswer?.rawContent != null) aggregatedResult.rawContent = finalAnswer.rawContent
+    if (aggregatedResult.rawContent === undefined && (finalAnswer || refusal !== undefined)) {
+      aggregatedResult.rawContent = null
     }
     if (aggregatedResult.content === '' && refusalText) aggregatedResult.content = refusalText
     if (!isJsonMode && aggregatedResult.content === '') aggregatedResult.content = null

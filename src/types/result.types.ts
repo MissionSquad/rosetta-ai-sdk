@@ -49,6 +49,10 @@ export interface TokenUsage {
 export interface GenerateResult {
   /** The primary text content of the response, or null if none was generated (e.g., only tool calls). */
   content: string | null
+  /** Provider answer text before SDK normalization. Null means the provider supplied no answer text. */
+  rawContent?: string | null
+  /** Explicit refusal details supplied by the provider. */
+  refusal?: string
   /** Tool calls requested by the model, if any. */
   toolCalls?: RosettaToolCallRequest[]
   /** Reason the generation finished (e.g., 'stop', 'length', 'tool_calls', 'content_filter', 'error', 'recitation_filter'). */

@@ -323,7 +323,11 @@ describe('mapOpenAIResponsesChatResponse', () => {
       { type: 'message', id: 'msg_1', content: [{ type: 'refusal', refusal: 'Cannot help with that.' }] }
     ])
     const refusalResult = mapOpenAIResponsesChatResponse(refusal, 'gpt-5.6-terra', undefined)
-    expect(refusalResult.content).toBe('Cannot help with that.')
+    expect(refusalResult).toMatchObject({
+      content: 'Cannot help with that.',
+      rawContent: null,
+      refusal: 'Cannot help with that.'
+    })
     expect(refusalResult.finishReason).toBe('content_filter')
 
     const truncated = makeResponse([{ type: 'message', id: 'msg_1', content: [{ type: 'output_text', text: 'par' }] }], {
@@ -368,6 +372,24 @@ describe('mapOpenAIResponsesChatStream', () => {
     }
   })
 
+  it('reads native refusal from the final output when no refusal delta was delivered', async () => {
+    const chunks = await collect(
+      mapOpenAIResponsesChatStream(
+        eventStream([
+          createdEvent,
+          completedEvent({ output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'Cannot help.' }] }] })
+        ]),
+        baseParams.model!,
+        undefined
+      )
+    )
+
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'final_result',
+      data: { result: { content: null, rawContent: null, refusal: 'Cannot help.', finishReason: 'stop' } }
+    })
+  })
+
   it('captures model identity from a later response snapshot', async () => {
     const chunks = await collect(
       mapOpenAIResponsesChatStream(
@@ -383,7 +405,7 @@ describe('mapOpenAIResponsesChatStream', () => {
     expect(chunks[0]).toEqual({ type: 'message_start', data: { provider: Provider.OpenAI, model: baseParams.model } })
     expect(chunks.at(-1)).toMatchObject({
       type: 'final_result',
-      data: { result: { model: baseParams.model, reportedModel: 'gpt-provider-snapshot', content: 'Hello' } }
+      data: { result: { model: baseParams.model, reportedModel: 'gpt-provider-snapshot', content: 'Hello', rawContent: 'Hello' } }
     })
   })
 

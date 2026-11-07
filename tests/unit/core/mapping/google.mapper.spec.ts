@@ -842,6 +842,22 @@ describe('Google Mapper', () => {
       warnSpy.mockRestore()
     })
 
+    it.each([
+      [BlockedReason.BLOCKLIST, 'blocklist'],
+      [BlockedReason.PROHIBITED_CONTENT, 'prohibited_content']
+    ])('preserves native prompt refusal details for %s', (blockReason, finishReason) => {
+      const response: GenerateContentResponse = {
+        promptFeedback: { blockReason, blockReasonMessage: 'Native policy detail' }
+      }
+
+      expect(mapper.mapFromProviderResponse(response, modelUsed)).toMatchObject({
+        content: null,
+        rawContent: null,
+        refusal: 'Native policy detail',
+        finishReason
+      })
+    })
+
     it('[Easy] should handle missing candidates gracefully', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
       const response: GenerateContentResponse = {
@@ -1036,6 +1052,34 @@ describe('Google Mapper', () => {
   })
 
   describe('mapProviderStream', () => {
+    it('finalizes a native blocked prompt with no candidates and late usage metadata', async () => {
+      const mockChunks: GenerateContentResponse[] = [
+        {
+          promptFeedback: { blockReason: BlockedReason.BLOCKLIST, blockReasonMessage: 'Native policy detail' }
+        },
+        { modelVersion: 'gemini-provider-snapshot', usageMetadata: { promptTokenCount: 5, totalTokenCount: 5 } }
+      ]
+      const params: GenerateParams = { provider: Provider.Google, model: 'gemini-requested-alias', messages: [] }
+      const results = await collectStreamChunks(mapper.mapProviderStream(mockGoogleStreamGenerator(mockChunks), params))
+
+      expect(results.map(chunk => chunk.type)).toEqual(['message_start', 'message_stop', 'final_usage', 'final_result'])
+      expect(results[1]).toEqual({ type: 'message_stop', data: { finishReason: 'blocklist' } })
+      expect(results[3]).toMatchObject({
+        type: 'final_result',
+        data: {
+          result: {
+            model: '',
+            reportedModel: 'gemini-provider-snapshot',
+            content: null,
+            rawContent: null,
+            finishReason: 'blocklist',
+            refusal: 'Native policy detail',
+            usage: { promptTokens: 5, totalTokens: 5 }
+          }
+        }
+      })
+    })
+
     it('captures modelVersion from a metadata-only chunk after the last candidate', async () => {
       const mockChunks: GenerateContentResponse[] = [
         { candidates: [createMockCandidate([{ text: 'Hello' }], FinishReason.STOP)] },
@@ -1187,9 +1231,12 @@ describe('Google Mapper', () => {
         { candidates: [createMockCandidate([{ text: 'Unsafe ' }], FinishReason.FINISH_REASON_UNSPECIFIED)] },
         {
           candidates: [
-            createMockCandidate([], FinishReason.SAFETY, undefined, [
-              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, probability: HarmProbability.MEDIUM }
-            ])
+            {
+              ...createMockCandidate([], FinishReason.SAFETY, undefined, [
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, probability: HarmProbability.MEDIUM }
+              ]),
+              finishMessage: 'Native safety detail'
+            }
           ],
           usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 1, totalTokenCount: 6 }
         }
@@ -1201,7 +1248,11 @@ describe('Google Mapper', () => {
       expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'content_filter' } })
       expect(results[4].type).toBe('final_usage')
       assertChunkType(results[5], 'final_result')
-      expect(results[5].data.result.finishReason).toBe('content_filter')
+      expect(results[5].data.result).toMatchObject({
+        finishReason: 'content_filter',
+        rawContent: 'Unsafe ',
+        refusal: 'Native safety detail'
+      })
       expect(results[5].data.result.content).toBe('Unsafe \n\nThis response was blocked by the AI provider\'s safety filters. Please modify your request and try again.')
     })
 

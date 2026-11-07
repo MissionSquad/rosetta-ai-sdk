@@ -351,6 +351,7 @@ export class GroqMapper implements IProviderMapper {
     const standardizedFR = fr === 'tool_calls' ? 'tool_calls' : fr === 'stop' ? 'stop' : fr === 'length' ? 'length' : fr
     return {
       content: textContent,
+      ...(choice.message?.content !== undefined ? { rawContent: choice.message.content } : {}),
       toolCalls: mappedToolCalls,
       finishReason: standardizedFR,
       usage: mapTokenUsage(response.usage, 'groq'), // Use common utility

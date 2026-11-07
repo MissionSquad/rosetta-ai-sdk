@@ -10,6 +10,7 @@ import {
   Schema as FunctionDeclarationSchema,
   Part,
   FinishReason,
+  BlockedReason,
   HarmCategory,
   HarmBlockThreshold,
   EmbedContentParameters,
@@ -37,6 +38,12 @@ import { IProviderMapper } from './base.mapper'
 import { mapReportedModel, mapTokenUsage, mapBaseParams } from './common.utils'
 import { resolveThinkingRequest } from './thinking-request'
 import * as GoogleEmbedMapper from './google.embed.mapper'
+
+function mapPromptBlockFinishReason(reason: string): string {
+  if (reason === BlockedReason.SAFETY) return 'content_filter'
+  if (reason === BlockedReason.OTHER) return 'error'
+  return reason.toLowerCase()
+}
 
 export class GoogleMapper implements IProviderMapper {
   readonly supportsInferenceLifecycle = true
@@ -647,15 +654,16 @@ export class GoogleMapper implements IProviderMapper {
     const promptFeedbackSafetyRatings = safeGet<any[]>(response, 'promptFeedback', 'safetyRatings')
 
     if (promptFeedbackReason) {
-      const fr =
-        promptFeedbackReason === 'SAFETY'
-          ? 'content_filter'
-          : promptFeedbackReason === 'OTHER'
-          ? 'error'
-          : promptFeedbackReason.toLowerCase()
+      const fr = mapPromptBlockFinishReason(promptFeedbackReason)
+      const refusal =
+        promptFeedbackReason !== BlockedReason.BLOCKED_REASON_UNSPECIFIED
+          ? response?.promptFeedback?.blockReasonMessage
+          : undefined
       console.warn(`Google prompt blocked. Reason: ${fr}. Ratings: ${JSON.stringify(promptFeedbackSafetyRatings)}`)
       return {
         content: null,
+        rawContent: null,
+        ...(typeof refusal === 'string' ? { refusal } : {}),
         toolCalls: undefined,
         finishReason: fr,
         usage,
@@ -689,6 +697,9 @@ export class GoogleMapper implements IProviderMapper {
     }
 
     let textContent: string | null = null
+    const isSafetyBlocked = candidateFinishReason === FinishReason.SAFETY
+    let rawContent: string | null | undefined = Array.isArray(candidate.content?.parts) || isSafetyBlocked ? null : undefined
+    const refusal = isSafetyBlocked ? candidate.finishMessage : undefined
     let thinkingSteps: string | null = null
     let toolCalls: RosettaToolCallRequest[] | undefined
     let parsedJson: any = null
@@ -700,6 +711,7 @@ export class GoogleMapper implements IProviderMapper {
       if (thoughtParts.length > 0) thinkingSteps = thoughtParts.map(p => p.text ?? '').join('') || null
       if (textParts.length > 0) {
         textContent = textParts.map(p => p.text ?? '').join('')
+        rawContent = textContent
         const isJsonLike = textContent?.trim().startsWith('{') || textContent?.trim().startsWith('[')
         const isBlocked = candidateFinishReason === 'SAFETY' || !!promptFeedbackReason
         if (isJsonLike && !isBlocked) {
@@ -740,6 +752,8 @@ export class GoogleMapper implements IProviderMapper {
 
     return {
       content: textContent,
+      ...(rawContent !== undefined ? { rawContent } : {}),
+      ...(typeof refusal === 'string' ? { refusal } : {}),
       toolCalls: toolCalls,
       finishReason: finishReason,
       usage,
@@ -774,6 +788,8 @@ export class GoogleMapper implements IProviderMapper {
     const aggregatedToolCalls: RosettaToolCallRequest[] = []
     const model = '' // Preserve the existing normalized stream model value
     let reportedModel: string | undefined
+    let refusal: string | undefined
+    let promptBlock: { finishReason: string; refusal?: string } | undefined
     let isPotentiallyJson = false
     let aggregatedResult: GenerateResult | null = null
 
@@ -783,6 +799,14 @@ export class GoogleMapper implements IProviderMapper {
 
       for await (const chunk of stream) {
         reportedModel = mapReportedModel(chunk.modelVersion) ?? reportedModel
+        const blockReason = chunk.promptFeedback?.blockReason
+        if (blockReason && blockReason !== BlockedReason.BLOCKED_REASON_UNSPECIFIED) {
+          const blockMessage = chunk.promptFeedback?.blockReasonMessage
+          promptBlock = {
+            finishReason: mapPromptBlockFinishReason(blockReason),
+            ...(typeof blockMessage === 'string' ? { refusal: blockMessage } : {})
+          }
+        }
         observer?.observeRequestId(chunk.responseId)
         serviceTier = chunk.sdkHttpResponse?.headers?.['x-gemini-service-tier'] ?? serviceTier
         for (const candidate of chunk.candidates ?? []) {
@@ -833,10 +857,13 @@ export class GoogleMapper implements IProviderMapper {
                 .filter((p): p is Part => p && 'text' in p && p.thought === true)
                 .map(p => p.text ?? '')
                 .join('')
-            const textDelta = parts
-                .filter((p): p is Part => p && 'text' in p && p.thought !== true)
-                .map(p => p.text ?? '')
-                .join('')
+            const textParts = parts.filter((p): p is Part => p && 'text' in p && p.thought !== true)
+            const textDelta = textParts.map(p => p.text ?? '').join('')
+            if (textParts.length > 0) {
+              aggregatedResult.rawContent = (aggregatedResult.rawContent ?? '') + textDelta
+            } else if (Array.isArray(candidate.content?.parts) && aggregatedResult.rawContent === undefined) {
+              aggregatedResult.rawContent = null
+            }
 
             if (thinkingDelta) {
               yield { type: 'thinking_delta', data: { delta: thinkingDelta } }
@@ -942,6 +969,8 @@ export class GoogleMapper implements IProviderMapper {
           const reason = candidate.finishReason
 
           if (reason === FinishReason.SAFETY) {
+            if (typeof candidate.finishMessage === 'string') refusal = candidate.finishMessage
+            if (aggregatedResult.rawContent === undefined) aggregatedResult.rawContent = null
             const safetyMessage =
               "\n\nThis response was blocked by the AI provider's safety filters. Please modify your request and try again."
             yield { type: 'content_delta', data: { delta: safetyMessage } }
@@ -970,6 +999,12 @@ export class GoogleMapper implements IProviderMapper {
       } // End main stream loop (for await...)
       observer?.transportComplete()
       if (deferredError) throw deferredError
+
+      // A blocked prompt is reported through feedback without any candidates.
+      if (!aggregatedResult && promptBlock) {
+        finalFinishReason = promptBlock.finishReason
+        aggregatedResult = { content: null, rawContent: null, model, usage: currentUsage, ...promptBlock }
+      }
 
       // --- End of Stream ---
       // --- FIX: Ensure finalFinishReason is set ---
@@ -1003,6 +1038,7 @@ export class GoogleMapper implements IProviderMapper {
 
       if (aggregatedResult) {
         if (reportedModel !== undefined) aggregatedResult.reportedModel = reportedModel
+        if (refusal !== undefined) aggregatedResult.refusal = refusal
         if (!isPotentiallyJson && aggregatedResult.content === '') aggregatedResult.content = null
         if (aggregatedResult.toolCalls?.length === 0) aggregatedResult.toolCalls = undefined
         if (aggregatedResult.citations?.length === 0) aggregatedResult.citations = undefined
