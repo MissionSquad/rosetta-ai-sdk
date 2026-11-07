@@ -98,7 +98,9 @@ Completion is awaited before returning a generated result or exposing stream
 success/error termination. Admission errors preserve their identity (an `error`
 chunk for streams); completion callback failures reject generation/iteration.
 Stream `cancel()` stays synchronous and initiates cleanup even while the consumer
-is paused. Use iterator `return()`/`throw()` when the caller must await closure.
+is paused. Subsequent iterator `next()`/`return()`/`throw()` await the same cleanup
+promise and preserve its failure, even if cancellation has already closed the
+generator. Use iterator `return()`/`throw()` when the caller must await closure.
 Cancellation before consumption never admits or dispatches a request. Consumers
 must close streams they abandon.
 

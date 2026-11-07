@@ -637,6 +637,9 @@ export class RosettaAI {
     let abortFn: (() => void) | undefined
     let cancelled = false
     let wrapped: AsyncGenerator<T, void, unknown>
+    let closeIterator: AsyncGenerator<T, void, unknown>['return']
+    let cancelCleanup: Promise<IteratorResult<T, void>> | undefined
+    let terminalFailure: { error: unknown } | undefined
 
     const registerAbort = (fn: () => void) => {
       abortFn = fn
@@ -652,9 +655,14 @@ export class RosettaAI {
       abortFn?.()
       // Close the same iterator even when the consumer is paused at a yielded chunk.
       // cancel() remains synchronous; explicit next/return/throw can await cleanup.
-      void wrapped.return(undefined).catch(() => {
-        // The lifecycle keeps an unsettled receipt if its completion callback fails.
-        // Cancellation must not produce an unhandled promise rejection.
+      cancelCleanup = closeIterator(undefined).then(result => {
+        // Cleanup may have failed in an already-pending next(), before return()
+        // reached the generator. Retain that failure for callers awaiting closure.
+        if (terminalFailure) throw terminalFailure.error
+        return result
+      })
+      void cancelCleanup.catch(() => {
+        // cancel() is synchronous. Explicit iterator operations join this promise.
       })
     }
 
@@ -667,6 +675,9 @@ export class RosettaAI {
           }
           yield chunk
         }
+      } catch (error) {
+        terminalFailure = { error }
+        throw error
       } finally {
         if (signal.aborted && !cancelled) {
           triggerAbort()
@@ -674,7 +685,21 @@ export class RosettaAI {
       }
     })(controller.signal, factory(controller.signal, registerAbort))
 
+    const nextIterator = wrapped.next.bind(wrapped)
+    closeIterator = wrapped.return.bind(wrapped)
+    const throwIterator = wrapped.throw.bind(wrapped)
     return Object.assign(wrapped, {
+      next: async (...args: [] | [unknown]) => {
+        if (cancelCleanup) await cancelCleanup
+        const result = await nextIterator(...args)
+        if (cancelCleanup) await cancelCleanup
+        return result
+      },
+      return: (value: void | PromiseLike<void>) => cancelCleanup ?? closeIterator(value),
+      throw: async (error: unknown) => {
+        if (cancelCleanup) await cancelCleanup
+        return throwIterator(error)
+      },
       cancel: triggerAbort,
       signal: controller.signal
     })

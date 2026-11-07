@@ -295,6 +295,91 @@ describe('SDK inference lifecycle integration', () => {
     expect(requests).toHaveLength(1)
   })
 
+  test('return after cancellation cleanup has failed still reports the original settlement error', async () => {
+    const unavailable = new Error('Cancelled accounting unavailable'), entered = deferred<void>()
+    const finish = jest.fn(async () => { entered.resolve(); throw unavailable })
+    const stream = sdk({ admit: async () => ({ finish }) }).stream(params('hold'))
+    const iterator = stream[Symbol.asyncIterator]()
+    await bounded(iterator.next())
+    stream.cancel()
+    await bounded(entered.promise)
+    // Background cancellation must handle its rejection, but an explicit later
+    // close must still observe that failure rather than an already-closed success.
+    await new Promise<void>(resolve => setImmediate(resolve))
+    await expect(bounded(iterator.return!())).rejects.toBe(unavailable)
+    expect(finish).toHaveBeenCalledTimes(1)
+    expect(requests).toHaveLength(1)
+  })
+
+  test('explicit returns join pending cancellation settlement and cannot complete early', async () => {
+    const entered = deferred<void>(), release = deferred<void>()
+    const finish = jest.fn(async (_outcome: InferenceOutcome) => { entered.resolve(); await release.promise })
+    const stream = sdk({ admit: async () => ({ finish }) }).stream(params('hold'))
+    const iterator = stream[Symbol.asyncIterator]()
+    await bounded(iterator.next())
+    stream.cancel()
+    await bounded(entered.promise)
+    let closed = 0
+    const first = iterator.return!().then(result => { closed++; return result })
+    const second = iterator.return!().then(result => { closed++; return result })
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(closed).toBe(0)
+      expect(finish).toHaveBeenCalledTimes(1)
+    } finally { release.resolve() }
+    expect((await bounded(Promise.all([first, second]))).every(result => result.done)).toBe(true)
+    expect(closed).toBe(2)
+    expect(finish).toHaveBeenCalledTimes(1)
+    expect(finish.mock.calls[0]?.[0]).toMatchObject({ status: 'cancelled', dispatched: true, usageComplete: false })
+    expect(requests).toHaveLength(1)
+  })
+
+  test.each(['return', 'throw', 'next'] as const)('cancel then %s joins the pending finisher and preserves its failure identity', async action => {
+    const unavailable = new Error('Cancelled accounting unavailable')
+    const entered = deferred<void>(), release = deferred<void>()
+    const finish = jest.fn(async () => { entered.resolve(); await release.promise; throw unavailable })
+    const stream = sdk({ admit: async () => ({ finish }) }).stream(params('hold'))
+    const iterator = stream[Symbol.asyncIterator]()
+    await bounded(iterator.next())
+    stream.cancel()
+    await bounded(entered.promise)
+    const close = action === 'return' ? iterator.return!() : action === 'throw' ? iterator.throw!(new Error('Consumer stopped')) : iterator.next()
+    // Attach the rejection observer before releasing the finisher. The test
+    // must not manufacture an unhandled promise rejection itself.
+    const rejected = expect(bounded(close)).rejects.toBe(unavailable)
+    release.resolve()
+    await rejected
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(finish).toHaveBeenCalledTimes(1)
+    expect(requests).toHaveLength(1)
+  })
+
+  test('native pending-create cancellation shares its settlement failure with pending next and explicit return', async () => {
+    const accepted = deferred<void>(), closed = deferred<void>()
+    pendingNative = { accepted: () => accepted.resolve(), closed: () => closed.resolve() }
+    const unavailable = new Error('Native cancellation accounting unavailable')
+    const finish = jest.fn(async (_outcome: InferenceOutcome) => { throw unavailable })
+    const admit = jest.fn(async () => ({ finish }))
+    const client = new RosettaAI({ openaiApiKey: 'fixture-key', defaultMaxRetries: 0,
+      providerOptions: { openai: { baseURL } }, inferenceLifecycle: { admit } })
+    const stream = client.stream({ ...params('native-pending'), provider: 'openai' })
+    const iterator = stream[Symbol.asyncIterator]()
+    // Observe the request's original pending next immediately; cancellation can
+    // reject it before the explicit return operation below is awaited.
+    const next = iterator.next().then(result => ({ result }), error => ({ error }))
+    await bounded(accepted.promise)
+    stream.cancel()
+    await expect(bounded(iterator.return!())).rejects.toBe(unavailable)
+    const terminal = await bounded(next)
+    expect('error' in terminal && terminal.error).toBe(unavailable)
+    await bounded(closed.promise)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(admit).toHaveBeenCalledTimes(1)
+    expect(finish).toHaveBeenCalledTimes(1)
+    expect(finish.mock.calls[0]?.[0]).toMatchObject({ status: 'cancelled', dispatched: true, usageComplete: false })
+    expect(requests).toHaveLength(1)
+  })
+
   test.each(['generate', 'stream'] as const)('%s settlement callback error preserves identity and is not retried', async operation => {
     const denied = new Error('Accounting unavailable')
     const finish = jest.fn(async () => { throw denied })
