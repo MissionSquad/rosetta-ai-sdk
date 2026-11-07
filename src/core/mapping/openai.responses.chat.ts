@@ -366,11 +366,8 @@ function mapFinishReason(response: Response, hasToolCalls: boolean, hasRefusal: 
   return 'stop'
 }
 
-function mapResponsesUsage(usage: Response['usage']): TokenUsage | undefined {
-  if (!usage) return undefined
-  return mapTokenUsage({
-    prompt_tokens: usage.input_tokens, completion_tokens: usage.output_tokens, total_tokens: usage.total_tokens
-  }, 'openai')
+function mapResponsesUsage(response: Response): TokenUsage | undefined {
+  return mapTokenUsage(response.usage, 'openai-responses', response.service_tier)
 }
 
 export function mapOpenAIResponsesChatResponse(
@@ -380,7 +377,7 @@ export function mapOpenAIResponsesChatResponse(
   observer?: ProviderUsageObserver
 ): GenerateResult {
   observer?.observeRequestId('_request_id' in response ? response._request_id : response.id)
-  observer?.observeUsage(mapResponsesUsage(response.usage), true)
+  observer?.observeUsage(mapResponsesUsage(response), true)
   const outputItems: ResponseOutputItem[] = response.output ?? []
   const reasoningItems = outputItems.filter((item): item is ResponseReasoningItem => item.type === 'reasoning')
 
@@ -430,7 +427,7 @@ export function mapOpenAIResponsesChatResponse(
     content,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     finishReason: mapFinishReason(response, toolCalls.length > 0, refusalText !== null),
-    usage: mapResponsesUsage(response.usage),
+    usage: mapResponsesUsage(response),
     citations: undefined,
     parsedContent: parsedJson,
     thinkingSteps,
@@ -481,7 +478,7 @@ export async function* mapOpenAIResponsesChatStream(
     for await (const event of stream) {
       if ('response' in event) {
         observer?.observeRequestId(event.response.id)
-        const observedUsage = mapResponsesUsage(event.response.usage)
+        const observedUsage = mapResponsesUsage(event.response)
         if (observedUsage) observer?.observeUsage(observedUsage,
           event.type === 'response.completed' || event.type === 'response.incomplete' || event.type === 'response.failed')
       }
@@ -606,7 +603,7 @@ export async function* mapOpenAIResponsesChatStream(
         case 'response.completed':
         case 'response.incomplete': {
           responseSnapshot = event.response
-          finalUsage = mapResponsesUsage(event.response.usage)
+          finalUsage = mapResponsesUsage(event.response)
           aggregatedResult.usage = finalUsage
           break
         }

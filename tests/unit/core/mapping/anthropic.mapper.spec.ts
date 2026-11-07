@@ -989,7 +989,7 @@ describe('Anthropic Mapper', () => {
         promptTokens: 10,
         completionTokens: 5,
         totalTokens: 15,
-        cachedContentTokenCount: undefined
+        billing: { cachedInputTokens: 0, cacheWriteInputTokens: 0 }
       })
       expect(result.model).toBe('claude-3-opus-20240229-test')
     })
@@ -1015,7 +1015,7 @@ describe('Anthropic Mapper', () => {
         promptTokens: 20,
         completionTokens: 15,
         totalTokens: 35,
-        cachedContentTokenCount: undefined
+        billing: { cachedInputTokens: 0, cacheWriteInputTokens: 0 }
       })
       expect(result.model).toBe(modelUsed)
     })
@@ -1232,7 +1232,7 @@ describe('Anthropic Mapper', () => {
       expect(results[4]).toEqual({
         type: 'final_usage',
         data: {
-          usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12, cachedContentTokenCount: undefined }
+          usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12, billing: { cachedInputTokens: 0, cacheWriteInputTokens: 0 } }
         }
       })
       expect(results[5].type).toBe('final_result')
@@ -1242,7 +1242,7 @@ describe('Anthropic Mapper', () => {
           finishReason: 'stop',
           model: modelId,
           // FIX: Update usage expectation to include calculated totalTokens
-          usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12, cachedContentTokenCount: undefined }
+          usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12, billing: { cachedInputTokens: 0, cacheWriteInputTokens: 0 } }
         })
       )
       expect((results[5] as any).data.result.providerState).toEqual({

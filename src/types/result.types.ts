@@ -2,6 +2,32 @@ import { VoiceSettings } from '@elevenlabs/elevenlabs-js/api'
 import { RosettaToolCallRequest, Citation, ProviderKey, GenerateResultProviderState, CodeExecutionResultInfo } from './common.types'
 import { OpenAICompletion } from './openai.types' // Import the new type
 
+export interface BillingTokenDetail {
+  modality: string
+  tokenCount: number
+}
+
+/** Provider-reported breakdown of the inclusive prompt and completion totals. */
+export interface BillingUsage {
+  cachedInputTokens?: number
+  cacheWriteInputTokens?: number
+  cacheWrite5mInputTokens?: number
+  cacheWrite1hInputTokens?: number
+  cacheWrite30mInputTokens?: number
+  cacheWrite12hInputTokens?: number
+  inputAudioTokens?: number
+  outputAudioTokens?: number
+  inputTokenDetails?: BillingTokenDetail[]
+  cachedInputTokenDetails?: BillingTokenDetail[]
+  toolUseInputTokenDetails?: BillingTokenDetail[]
+  outputTokenDetails?: BillingTokenDetail[]
+  serviceTier?: string
+  inferenceGeo?: string
+  speed?: string
+  /** A provider billing field was malformed or contradicted other billing fields. */
+  incomplete?: boolean
+}
+
 /**
  * Represents token usage statistics for an API call.
  * Fields are optional as not all providers/responses include all details.
@@ -14,6 +40,7 @@ export interface TokenUsage {
   totalTokens?: number
   /** Tokens related to cached content (Google specific). */
   cachedContentTokenCount?: number
+  billing?: BillingUsage
 }
 
 /**

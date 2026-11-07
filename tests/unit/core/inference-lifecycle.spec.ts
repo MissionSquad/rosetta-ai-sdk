@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { z } from 'zod'
+import { InferenceCall } from '../../../src/core/inference-lifecycle'
 import { RosettaAI } from '../../../src/core/rosetta-ai'
 import { OpenAICompatibleMapper } from '../../../src/core/mapping/openai-compatible.mapper'
 import { BaseCustomMapper } from '../../../src/core/mapping/base.custom.mapper'
@@ -45,7 +46,8 @@ beforeAll(async () => {
         pendingNative?.accepted()
         return
       }
-      const usage = { prompt_tokens: model === 'second' ? 20 : 5, completion_tokens: 7, total_tokens: model === 'second' ? 27 : 12 }
+      const usage = { prompt_tokens: model === 'second' ? 20 : 5, completion_tokens: 7, total_tokens: model === 'second' ? 27 : 12,
+        prompt_tokens_details: { cached_tokens: 2 } }
       if (body.stream) {
         res.setHeader('content-type', 'text/event-stream')
         const chunk = (choices: unknown[], extra: Record<string, unknown> = {}) => `data: ${JSON.stringify({ id: `stream-${model}`, object: 'chat.completion.chunk', created: 1, model, choices, ...extra })}\n\n`
@@ -92,6 +94,23 @@ function recorder() {
   const admit = jest.fn<ReturnType<InferenceLifecycle['admit']>, Parameters<InferenceLifecycle['admit']>>(async () => ({ finish }))
   return { outcomes, finished, finish, admit, client: sdk({ admit }) }
 }
+
+test('settlement snapshots billing details independently of consumer mutations', async () => {
+  const finish = jest.fn(async (_outcome: InferenceOutcome) => undefined)
+  const call = new InferenceCall({ admit: async () => ({ finish }) }, { operation: 'stream', provider: 'google', model: 'gemini' })
+  await call.beforeDispatch()
+  call.markDispatched()
+  const billing = { cachedInputTokens: 1, inputTokenDetails: [{ modality: 'TEXT', tokenCount: 5 }] }
+  call.observeUsage({ promptTokens: 5, completionTokens: 2, billing }, true)
+  billing.cachedInputTokens = 4
+  billing.inputTokenDetails[0]!.tokenCount = 20
+  await call.finish('completed')
+  expect(finish).toHaveBeenCalledWith(expect.objectContaining({
+    usageComplete: true,
+    usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7,
+      billing: { cachedInputTokens: 1, inputTokenDetails: [{ modality: 'TEXT', tokenCount: 5 }] } }
+  }))
+})
 
 describe('SDK inference lifecycle integration', () => {
   test.each(['generate', 'stream'] as const)('unsupported custom mapper rejects metered %s before admission or transport', async operation => {
@@ -186,7 +205,7 @@ describe('SDK inference lifecycle integration', () => {
       expect(chunks.some(chunk => chunk.type === 'final_result')).toBe(false)
     }
     expect(recorded.finish).toHaveBeenCalledTimes(1)
-    expect(recorded.outcomes[0]).toMatchObject({ status: 'failed', dispatched: true, usageComplete: true, usage: { totalTokens: 12 } })
+    expect(recorded.outcomes[0]).toMatchObject({ status: 'failed', dispatched: true, usageComplete: true, usage: { totalTokens: 12, billing: { cachedInputTokens: 2 } } })
   })
 
   test.each(['generate', 'stream'] as const)('%s missing provider usage remains unknown', async operation => {

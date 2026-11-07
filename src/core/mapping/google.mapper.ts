@@ -789,11 +789,7 @@ export class GoogleMapper implements IProviderMapper {
         }
         if (deferredError) continue
         try {
-          // Aggregate usage metadata if present
-          if (chunk.usageMetadata) {
-            currentUsage = mapTokenUsage(chunk.usageMetadata, 'google') // Use common utility
-            if (aggregatedResult) aggregatedResult.usage = currentUsage
-          }
+          if (chunk.usageMetadata && aggregatedResult) aggregatedResult.usage = currentUsage
 
           // --- FIX: Add check for candidates ---
           if (!chunk.candidates || !Array.isArray(chunk.candidates) || chunk.candidates.length === 0) {

@@ -315,7 +315,7 @@ export class GroqMapper implements IProviderMapper {
 
   mapFromProviderResponse(response: ChatCompletion, modelUsed: string, _originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
     observer?.observeRequestId(response.id)
-    observer?.observeUsage(mapTokenUsage(response.usage, 'openai'), true)
+    observer?.observeUsage(mapTokenUsage(response.usage, 'groq'), true)
     const choice = response.choices[0]
     if (!choice) {
       console.warn('Groq response missing choices.')
@@ -324,7 +324,7 @@ export class GroqMapper implements IProviderMapper {
         content: null,
         toolCalls: undefined,
         finishReason: finishReason,
-        usage: mapTokenUsage(response.usage, 'openai'), // Use common utility
+        usage: mapTokenUsage(response.usage, 'groq'), // Use common utility
         citations: undefined,
         parsedContent: null,
         thinkingSteps: undefined,
@@ -351,7 +351,7 @@ export class GroqMapper implements IProviderMapper {
       content: textContent,
       toolCalls: mappedToolCalls,
       finishReason: standardizedFR,
-      usage: mapTokenUsage(response.usage, 'openai'), // Use common utility
+      usage: mapTokenUsage(response.usage, 'groq'), // Use common utility
       citations: undefined,
       parsedContent: parsedJson,
       thinkingSteps,

@@ -289,7 +289,7 @@ describe('mapOpenAIResponsesChatResponse', () => {
     expect(result.content).toBe('Answer.')
     expect(result.thinkingSteps).toBe('Considering options.')
     expect(result.finishReason).toBe('stop')
-    expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 20, totalTokens: 30 })
+    expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 20, totalTokens: 30, billing: { cachedInputTokens: 0 } })
   })
 
   it('maps function calls, validates arguments, and attaches reasoning replay metadata', () => {
@@ -403,7 +403,7 @@ describe('mapOpenAIResponsesChatStream', () => {
     expect(final.data.result.content).toBe('Answer')
     expect(final.data.result.thinkingSteps).toBe('Thinking hard.')
     expect(final.data.result.finishReason).toBe('stop')
-    expect(final.data.result.usage).toEqual({ promptTokens: 7, completionTokens: 9, totalTokens: 16 })
+    expect(final.data.result.usage).toEqual({ promptTokens: 7, completionTokens: 9, totalTokens: 16, billing: { cachedInputTokens: 0 } })
   })
 
   it('maps streamed function calls with validation and reasoning replay metadata', async () => {
