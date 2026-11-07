@@ -1,3 +1,4 @@
+import type { ProviderUsageObserver } from '../../types/usage.types'
 import OpenAI from 'openai'
 import {
   ChatCompletionToolChoiceOption as OpenAIToolChoiceOption,
@@ -49,6 +50,8 @@ import {
 } from './openai.common'
 
 export class OpenAIMapper implements IProviderMapper {
+  readonly supportsInferenceLifecycle = true
+
   readonly provider = Provider.OpenAI
 
   // --- Chat/Completion Mapping ---
@@ -302,22 +305,25 @@ export class OpenAIMapper implements IProviderMapper {
   mapFromProviderResponse(
     response: ChatCompletion,
     modelUsed: string,
-    originalTools?: RosettaTool<any>[] // Accept original tools
+    originalTools?: RosettaTool<any>[], // Accept original tools
+    observer?: ProviderUsageObserver
   ): GenerateResult {
     // Delegate to the base OpenAI mapper function, passing originalTools
     return mapFromOpenAIResponse(response, this.provider, modelUsed, originalTools, {
       captureOpenAICompatibleReplay: false
-    })
+    }, observer)
   }
 
   async *mapProviderStream(
     stream: Stream<ChatCompletionChunk>,
-    originalParams: GenerateParams // Accept original params to get modelId
+    originalParams: GenerateParams, // Accept original params to get modelId
+    observer?: ProviderUsageObserver
   ): AsyncIterable<StreamChunk> {
     // Delegate to the base OpenAI stream mapper function, passing modelId and originalTools
     yield* mapOpenAIStream(stream, this.provider, originalParams.model!, originalParams.tools, {
-      captureOpenAICompatibleReplay: false
-    })
+      captureOpenAICompatibleReplay: false,
+      expectedChoices: typeof originalParams.extraParams?.n === 'number' ? originalParams.extraParams.n : 1
+    }, observer)
   }
 
   // --- Embedding Mapping ---

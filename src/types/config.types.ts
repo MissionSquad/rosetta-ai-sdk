@@ -1,6 +1,7 @@
 import { ProviderKey } from './common.types' // Import ProviderKey
 import { ModelListingSourceConfig } from './models.types'
 import { CustomProviderConfig } from './custom.types'
+import type { InferenceLifecycle } from './usage.types'
 
 /**
  * Optional provider-specific configuration settings that can override global defaults
@@ -55,6 +56,8 @@ export interface ProviderOptions {
  * API keys can be provided here or loaded from standard environment variables.
  */
 export interface RosettaAIConfig {
+  /** Optional admission and completion hooks for each generate/stream call. */
+  inferenceLifecycle?: InferenceLifecycle
   /** API key for Anthropic. Falls back to `process.env.ANTHROPIC_API_KEY`. */
   anthropicApiKey?: string
   /** API key for Google Generative AI (Gemini API). Falls back to `process.env.GOOGLE_API_KEY`.

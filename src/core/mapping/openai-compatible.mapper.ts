@@ -1,3 +1,4 @@
+import type { ProviderUsageObserver } from '../../types/usage.types'
 /**
  * Mapper for Custom Providers Adhering to the OpenAI API Specification.
  *
@@ -33,6 +34,7 @@ import { mapToOpenAIEmbedParams, mapFromOpenAIEmbedResponse } from './openai.emb
 import { cloneOpenAICompatibleAssistantProviderState } from './openai-thinking'
 
 export class OpenAICompatibleMapper extends BaseCustomMapper {
+  readonly supportsInferenceLifecycle = true
   private openaiClient: OpenAI
 
   constructor(config: CustomProviderConfig) {
@@ -148,7 +150,8 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     _mappedParams: any, // Not used, we map from originalParams
     _apiKey: string | undefined, // Already configured in internal client
     _providerConfig: CustomProviderConfig, // Use config passed to constructor (this.config)
-    originalParams: GenerateParams
+    originalParams: GenerateParams,
+    observer?: ProviderUsageObserver
   ): Promise<GenerateResult> {
     // Feature Check
     if (!this.config.supportedFeatures.includes('generate')) {
@@ -190,19 +193,23 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
         : {})
     }
 
+    await observer?.beforeDispatch()
+    observer?.markDispatched()
+    let response: OpenAI.Chat.Completions.ChatCompletion
     try {
-      const response = await this.openaiClient.chat.completions.create(openAIParams)
-
-      // Map the OpenAI SDK response back to GenerateResult using common helper
-      // Pass original tools for validation within mapFromOpenAIResponse
+      response = await this.openaiClient.chat.completions.create(openAIParams)
+    } catch (error) {
+      throw this.wrapInferenceError(error)
+    }
+    observer?.transportComplete()
+    try {
       const result = mapFromOpenAIResponse(response, this.provider, model, originalParams.tools, {
         captureOpenAICompatibleReplay: true
-      })
+      }, observer)
       const parsedContent = parseStructuredOutput(originalParams.responseFormat, result.content)
       if (parsedContent !== undefined) result.parsedContent = parsedContent
       return result
     } catch (error) {
-      // Wrap potential OpenAI SDK errors using the common wrapper
       throw this.wrapInferenceError(error)
     }
   }
@@ -212,7 +219,8 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
     _apiKey: string | undefined, // Already configured
     _providerConfig: CustomProviderConfig, // Use this.config
     originalParams: GenerateParams,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    observer?: ProviderUsageObserver
   ): AsyncIterable<StreamChunk> {
     // Feature Check
     if (!this.config.supportedFeatures.includes('stream')) {
@@ -267,26 +275,24 @@ export class OpenAICompatibleMapper extends BaseCustomMapper {
         : {})
     }
 
+    if (abortSignal?.aborted) return
+    await observer?.beforeDispatch()
+    if (abortSignal?.aborted) return
+    observer?.markDispatched()
+    let stream: Stream<OpenAI.Chat.Completions.ChatCompletionChunk>
     try {
-      if (abortSignal?.aborted) return
-
-      const stream = await this.openaiClient.chat.completions.create(openAIParams, { signal: abortSignal })
-
-      // Reuse the common OpenAI stream mapping logic with the actual custom provider key.
-      for await (const chunk of mapOpenAIStream(
-        stream as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>,
-        this.provider,
-        model,
-        originalParams.tools,
-        { captureOpenAICompatibleReplay: true }
-      )) {
-        yield chunk.type === 'error'
-          ? { type: 'error', data: { error: this.wrapInferenceError(chunk.data.error) } }
-          : chunk
-      }
+      stream = await this.openaiClient.chat.completions.create(openAIParams, { signal: abortSignal })
     } catch (error) {
-      // Wrap potential OpenAI SDK errors using the common wrapper
       yield { type: 'error', data: { error: this.wrapInferenceError(error) } }
+      return
+    }
+    for await (const chunk of mapOpenAIStream(
+      stream, this.provider, model, originalParams.tools,
+      { captureOpenAICompatibleReplay: true, expectedChoices: openAIParams.n ?? 1 }, observer
+    )) {
+      yield chunk.type === 'error'
+        ? { type: 'error', data: { error: this.wrapInferenceError(chunk.data.error) } }
+        : chunk
     }
   }
 

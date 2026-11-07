@@ -35,8 +35,8 @@ const createMockAnthropicMessage = (
   stop_sequence: null,
   usage: {
     ...usage,
-    cache_creation_input_tokens: null,
-    cache_read_input_tokens: null
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0
   }
 })
 
@@ -1204,7 +1204,7 @@ describe('Anthropic Mapper', () => {
         model: modelId,
         stop_reason: null,
         stop_sequence: null,
-        usage: { input_tokens: 10, output_tokens: 0, cache_creation_input_tokens: null, cache_read_input_tokens: null }
+        usage: { input_tokens: 10, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
       }
     }
 

@@ -1,5 +1,6 @@
 import {
   GenerateParams,
+  ProviderUsageObserver,
   GenerateResult,
   EmbedParams,
   EmbedResult,
@@ -54,11 +55,11 @@ export abstract class BaseCustomMapper implements IProviderMapper {
     return params
   }
 
-  mapFromProviderResponse?(_response: any, _modelId: string, _originalTools?: RosettaTool<any>[]): GenerateResult {
+  mapFromProviderResponse?(_response: any, _modelId: string, _originalTools?: RosettaTool<any>[], _observer?: ProviderUsageObserver): GenerateResult {
     throw new UnsupportedFeatureError(this.provider, 'mapFromProviderResponse (required if not using executeGenerate)')
   }
 
-  mapProviderStream?(_stream: AsyncIterable<any>, _originalParams: GenerateParams): AsyncIterable<StreamChunk> {
+  mapProviderStream?(_stream: AsyncIterable<any>, _originalParams: GenerateParams, _observer?: ProviderUsageObserver): AsyncIterable<StreamChunk> {
     throw new UnsupportedFeatureError(this.provider, 'mapProviderStream (required if not using executeStream)')
   }
 
@@ -117,7 +118,8 @@ export abstract class BaseCustomMapper implements IProviderMapper {
     _mappedParams: any,
     _apiKey: string | undefined,
     _providerConfig: CustomProviderConfig,
-    _originalParams: GenerateParams // Updated signature
+    _originalParams: GenerateParams,
+    _observer?: ProviderUsageObserver
   ): Promise<GenerateResult> {
     throw new UnsupportedFeatureError(this.provider, 'generate (executeGenerate not implemented)')
   }
@@ -126,7 +128,9 @@ export abstract class BaseCustomMapper implements IProviderMapper {
     _mappedParams: any,
     _apiKey: string | undefined,
     _providerConfig: CustomProviderConfig,
-    _originalParams: GenerateParams // Updated signature
+    _originalParams: GenerateParams,
+    _abortSignal?: AbortSignal,
+    _observer?: ProviderUsageObserver
   ): AsyncIterable<StreamChunk> {
     throw new UnsupportedFeatureError(this.provider, 'stream (executeStream not implemented)')
   }

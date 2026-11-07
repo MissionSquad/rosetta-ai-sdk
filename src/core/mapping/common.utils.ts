@@ -9,7 +9,9 @@ import { safeGet } from '../utils' // Import safeGet from the existing utils fil
  * @param providerUsage - The usage object from the provider's response (type `any` for flexibility).
  * @returns A unified TokenUsage object or undefined if no usage data is available.
  */
-export function mapTokenUsage(providerUsage: any): TokenUsage | undefined {
+export function mapTokenUsage(providerUsage: any, format?: 'openai' | 'anthropic' | 'google'): TokenUsage | undefined {
+  if (format) return mapExplicitTokenUsage(providerUsage, format)
+
   if (!providerUsage || typeof providerUsage !== 'object') {
     return undefined
   }
@@ -68,6 +70,56 @@ export function mapTokenUsage(providerUsage: any): TokenUsage | undefined {
   }
 
   return undefined
+}
+
+/** Normalize inclusive provider counts without fabricating missing components. */
+function mapExplicitTokenUsage(value: unknown, format: 'openai' | 'anthropic' | 'google'): TokenUsage | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const usage = value as Record<string, unknown>
+  let invalid = false
+  const count = (key: string, optional = false): number | undefined => {
+    const value = usage[key]
+    if (value === undefined) return optional ? 0 : undefined
+    if (value === null) { invalid = true; return undefined }
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+      invalid = true
+      return undefined
+    }
+    return value
+  }
+  const sum = (...values: Array<number | undefined>): number | undefined => {
+    let result = 0
+    for (const value of values) {
+      if (value === undefined) return undefined
+      result += value
+    }
+    if (!Number.isSafeInteger(result)) { invalid = true; return undefined }
+    return result
+  }
+  let promptTokens: number | undefined
+  let completionTokens: number | undefined
+  let totalTokens: number | undefined
+  if (format === 'anthropic') {
+    promptTokens = sum(count('input_tokens'), count('cache_creation_input_tokens'), count('cache_read_input_tokens'))
+    completionTokens = count('output_tokens')
+  } else if (format === 'google') {
+    promptTokens = sum(count('promptTokenCount'), count('toolUsePromptTokenCount', true))
+    completionTokens = sum(count('candidatesTokenCount'), count('thoughtsTokenCount', true))
+    totalTokens = count('totalTokenCount')
+  } else {
+    promptTokens = count('prompt_tokens')
+    completionTokens = count('completion_tokens')
+    totalTokens = count('total_tokens')
+  }
+  const calculated = sum(promptTokens, completionTokens)
+  if (totalTokens !== undefined && calculated !== undefined && totalTokens !== calculated) invalid = true
+  totalTokens ??= calculated
+  const cachedContentTokenCount = format === 'google' ? count('cachedContentTokenCount') : undefined
+  return {
+    promptTokens, completionTokens, totalTokens,
+    ...(cachedContentTokenCount !== undefined ? { cachedContentTokenCount } : {}),
+    ...(invalid || totalTokens === undefined ? { incomplete: true } : {})
+  }
 }
 
 /**

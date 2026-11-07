@@ -78,6 +78,38 @@ Ensure you have **Node.js v20 or later** installed.
 
 ## Configuration
 
+### Optional inference accounting
+
+`RosettaAIConfig.inferenceLifecycle` supplies server-owned hooks for each `generate`
+or `stream` call. `admit({ operation, provider, model })` runs after request preparation
+and before dispatch. It returns an object with an async `finish(outcome)` method.
+Rejecting admission prevents the provider request; underlying SDK transport retries
+remain part of the same admitted call. Each successful admission is finished once.
+
+The outcome contains `status`, `dispatched`, `usage`, `usageComplete`, and, when
+available, `providerRequestId`. Usage is captured before tool/JSON validation.
+Counts are cumulative snapshots, not increments. Missing components stay absent;
+missing or invalid usage is not treated as zero. A valid final total can be complete
+without an input/output breakdown. Anthropic cached input and Google tool/thought
+tokens are included in their input/output totals; OpenAI cached/reasoning details
+are subsets and are not added again.
+
+Completion is awaited before returning a generated result or exposing stream
+success/error termination. Admission errors preserve their identity (an `error`
+chunk for streams); completion callback failures reject generation/iteration.
+Stream `cancel()` stays synchronous and initiates cleanup even while the consumer
+is paused. Use iterator `return()`/`throw()` when the caller must await closure.
+Cancellation before consumption never admits or dispatches a request. Consumers
+must close streams they abandon.
+
+These hooks apply to chat generation, including its OpenAI Responses routing, not
+embeddings, audio, or direct Responses operations. Built-in chat mappers and
+`OpenAICompatibleMapper` support them. Other custom mappers must explicitly declare
+`supportsInferenceLifecycle` and honor `ProviderUsageObserver`; unsupported mappers
+fail before transport when hooks are configured. With no hooks configured, no
+admission or completion callbacks run. Persistence, limits, and reconciliation of
+unresolved usage belong to the calling application.
+
 RosettaAI can be configured using environment variables (loaded via `dotenv` or set directly) or by passing a configuration object to the constructor.
 
 **1. Environment Variables (.env file):**

@@ -1,3 +1,4 @@
+import type { ProviderUsageObserver } from '../../types/usage.types'
 import Anthropic, { APIError } from '@anthropic-ai/sdk'
 import {
   RawMessageStreamEvent,
@@ -72,6 +73,7 @@ type ToolUseAccumulator = {
 }
 
 export class AnthropicMapper implements IProviderMapper {
+  readonly supportsInferenceLifecycle = true
   readonly provider = Provider.Anthropic
   // These models reject sampling parameters (temperature, top_p) with a 400.
   private static readonly modelsWithoutSamplingParams = new Set([
@@ -757,8 +759,11 @@ export class AnthropicMapper implements IProviderMapper {
   mapFromProviderResponse(
     response: AnthropicMessage,
     model: string,
-    originalTools?: RosettaTool<any>[]
+    originalTools?: RosettaTool<any>[],
+    observer?: ProviderUsageObserver
   ): GenerateResult {
+    observer?.observeRequestId(response.id)
+    observer?.observeUsage(mapTokenUsage(response.usage, 'anthropic'), true)
     let combinedTextContent: string | null = null
     const thinkingParts: string[] = []
     const codeExecutionResults: CodeExecutionResultInfo[] = []
@@ -796,7 +801,7 @@ export class AnthropicMapper implements IProviderMapper {
         ? 'stop'
         : response.stop_reason ?? 'unknown'
 
-    const usage = mapTokenUsage(response.usage)
+    const usage = mapTokenUsage(response.usage, 'anthropic')
     const providerState = this.mergeAnthropicResultProviderState(undefined, {
       containerId: response.container?.id,
       expiresAt: response.container?.expires_at,
@@ -831,9 +836,12 @@ export class AnthropicMapper implements IProviderMapper {
 
   async *mapProviderStream(
     stream: AnthropicMessageStream,
-    originalParams: GenerateParams // Changed from originalTools
+    originalParams: GenerateParams,
+    observer?: ProviderUsageObserver
   ): AsyncIterable<StreamChunk> {
     const originalTools = originalParams.tools // Extract tools for validation
+    let rawUsage: Record<string, unknown> = {}
+    let deferredError: unknown
     let currentUsage: TokenUsage | undefined
     let finalFinishReason: string | null = null
     let thinkingStarted = false
@@ -851,11 +859,24 @@ export class AnthropicMapper implements IProviderMapper {
           continue
         }
 
+        if (event.type === 'message_start') {
+          observer?.observeRequestId(event.message.id)
+          rawUsage = { ...event.message.usage }
+          currentUsage = mapTokenUsage(rawUsage, 'anthropic')
+          observer?.observeUsage(currentUsage, false)
+        } else if (event.type === 'message_delta') {
+          for (const [key, value] of Object.entries(event.usage)) {
+            if (value !== null && value !== undefined) rawUsage[key] = value
+          }
+          currentUsage = mapTokenUsage(rawUsage, 'anthropic')
+          observer?.observeUsage(currentUsage, Boolean(event.delta.stop_reason))
+        }
+        if (deferredError) continue
+        try {
         switch (event.type) {
           case 'message_start':
             model = safeGet<string>(event.message, 'model') ?? ''
             yield { type: 'message_start', data: { provider: this.provider, model: model } }
-            currentUsage = mapTokenUsage(safeGet<Anthropic.Usage>(event.message, 'usage'))
             aggregatedResult = {
               content: '',
               toolCalls: [],
@@ -1118,17 +1139,6 @@ export class AnthropicMapper implements IProviderMapper {
                 })
               }
             }
-            const deltaUsage = mapTokenUsage(event.usage)
-            if (deltaUsage?.completionTokens !== undefined) {
-              currentUsage = {
-                promptTokens: currentUsage?.promptTokens,
-                completionTokens: deltaUsage.completionTokens,
-                totalTokens:
-                  currentUsage?.promptTokens !== undefined
-                    ? currentUsage.promptTokens + deltaUsage.completionTokens
-                    : deltaUsage.completionTokens
-              }
-            }
             if (event.delta.stop_reason) {
               finalFinishReason =
                 event.delta.stop_reason === 'tool_use'
@@ -1173,7 +1183,13 @@ export class AnthropicMapper implements IProviderMapper {
             }
             break
         }
+        } catch (error) {
+          if (!observer) throw error
+          deferredError = error
+        }
       }
+      observer?.transportComplete()
+      if (deferredError) throw deferredError
     } catch (error) {
       // Wrap and yield errors, including ToolArgumentValidationError
       const mappedError = this.wrapProviderError(error, this.provider)

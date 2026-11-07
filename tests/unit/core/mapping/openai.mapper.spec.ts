@@ -762,7 +762,7 @@ describe('OpenAI Mapper', () => {
       // Use the spy to check the call
       expect(spyMapFromOpenAIResponse).toHaveBeenCalledWith(mockResponse, Provider.OpenAI, 'model', undefined, {
         captureOpenAICompatibleReplay: false
-      })
+      }, undefined)
     })
   })
 
@@ -785,7 +785,8 @@ describe('OpenAI Mapper', () => {
         Provider.OpenAI,
         'test-model-id', // Expect modelId from originalParams
         [], // Expect tools array from originalParams
-        { captureOpenAICompatibleReplay: false }
+        { captureOpenAICompatibleReplay: false, expectedChoices: 1 },
+        undefined
       )
     })
   })
