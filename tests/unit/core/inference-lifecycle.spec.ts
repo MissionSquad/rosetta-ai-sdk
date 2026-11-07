@@ -29,6 +29,7 @@ const params = (model = 'plain'): GenerateParams => ({ provider: 'fixture', mode
 
 let server: Server, baseURL: string
 let requests: Array<Record<string, unknown>> = []
+let pendingNative: { accepted: () => void; closed: () => void } | undefined
 beforeAll(async () => {
   server = createServer((req, res) => {
     let text = ''
@@ -37,6 +38,13 @@ beforeAll(async () => {
       const body = JSON.parse(text) as Record<string, unknown>
       requests.push(body)
       const model = String(body.model)
+      if (body.stream && model === 'native-pending') {
+        // No headers: the native SDK create() promise is still pending and no
+        // provider stream resource has been registered when cancellation starts.
+        res.on('close', () => pendingNative?.closed())
+        pendingNative?.accepted()
+        return
+      }
       const usage = { prompt_tokens: model === 'second' ? 20 : 5, completion_tokens: 7, total_tokens: model === 'second' ? 27 : 12 }
       if (body.stream) {
         res.setHeader('content-type', 'text/event-stream')
@@ -63,7 +71,7 @@ beforeAll(async () => {
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   baseURL = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`
 })
-beforeEach(() => { requests = [] })
+beforeEach(() => { requests = []; pendingNative = undefined })
 afterAll(async () => {
   server.closeAllConnections()
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
@@ -235,6 +243,29 @@ describe('SDK inference lifecycle integration', () => {
     else if (action === 'return') await bounded(iterator.return!())
     else await expect(bounded(iterator.throw!(new Error('Consumer stopped')))).rejects.toThrow('Consumer stopped')
     expect(await bounded(recorded.finished.promise)).toMatchObject({ status: 'cancelled', dispatched: true, usage: null, usageComplete: false })
+    expect(recorded.finish).toHaveBeenCalledTimes(1)
+    expect(requests).toHaveLength(1)
+  })
+
+  test('native cancellation while transport create awaits headers settles cancelled once', async () => {
+    const accepted = deferred<void>(), closed = deferred<void>()
+    pendingNative = { accepted: () => accepted.resolve(), closed: () => closed.resolve() }
+    const recorded = recorder()
+    const client = new RosettaAI({ openaiApiKey: 'fixture-key', defaultMaxRetries: 0,
+      providerOptions: { openai: { baseURL } }, inferenceLifecycle: { admit: recorded.admit } })
+    const stream = client.stream({ ...params('native-pending'), provider: 'openai' })
+    const next = stream[Symbol.asyncIterator]().next()
+    await bounded(accepted.promise)
+    expect(recorded.finish).not.toHaveBeenCalled()
+    stream.cancel()
+    expect(stream.signal.aborted).toBe(true)
+    expect((await bounded(next)).done).toBe(true)
+    expect(await bounded(recorded.finished.promise)).toMatchObject({ status: 'cancelled', dispatched: true, usage: null, usageComplete: false })
+    await bounded(closed.promise)
+    // Let queued iterator cleanup finish too; Jest treats an unhandled cleanup
+    // rejection as a test failure rather than suppressing it in this fixture.
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(recorded.admit).toHaveBeenCalledTimes(1)
     expect(recorded.finish).toHaveBeenCalledTimes(1)
     expect(requests).toHaveLength(1)
   })

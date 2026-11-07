@@ -762,7 +762,7 @@ export class RosettaAI {
         }
         if (chunk.type === 'final_result' || chunk.type === 'error') {
           settled = true
-          await call?.finish(chunk.type === 'error' ? 'failed' : 'completed')
+          await call?.finish(abortSignal.aborted ? 'cancelled' : chunk.type === 'error' ? 'failed' : 'completed')
           if (chunk.type === 'final_result' && messageStop) yield messageStop
           messageStop = undefined
         }
