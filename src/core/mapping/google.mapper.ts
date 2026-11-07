@@ -10,6 +10,7 @@ import {
   Schema as FunctionDeclarationSchema,
   Part,
   FinishReason,
+  BlockedReason,
   HarmCategory,
   HarmBlockThreshold,
   EmbedContentParameters,
@@ -37,6 +38,12 @@ import { IProviderMapper } from './base.mapper'
 import { mapReportedModel, mapTokenUsage, mapBaseParams } from './common.utils'
 import { resolveThinkingRequest } from './thinking-request'
 import * as GoogleEmbedMapper from './google.embed.mapper'
+
+function mapPromptBlockFinishReason(reason: string): string {
+  if (reason === BlockedReason.SAFETY) return 'content_filter'
+  if (reason === BlockedReason.OTHER) return 'error'
+  return reason.toLowerCase()
+}
 
 export class GoogleMapper implements IProviderMapper {
   readonly supportsInferenceLifecycle = true
@@ -647,13 +654,11 @@ export class GoogleMapper implements IProviderMapper {
     const promptFeedbackSafetyRatings = safeGet<any[]>(response, 'promptFeedback', 'safetyRatings')
 
     if (promptFeedbackReason) {
-      const fr =
-        promptFeedbackReason === 'SAFETY'
-          ? 'content_filter'
-          : promptFeedbackReason === 'OTHER'
-          ? 'error'
-          : promptFeedbackReason.toLowerCase()
-      const refusal = promptFeedbackReason === 'SAFETY' ? response?.promptFeedback?.blockReasonMessage : undefined
+      const fr = mapPromptBlockFinishReason(promptFeedbackReason)
+      const refusal =
+        promptFeedbackReason !== BlockedReason.BLOCKED_REASON_UNSPECIFIED
+          ? response?.promptFeedback?.blockReasonMessage
+          : undefined
       console.warn(`Google prompt blocked. Reason: ${fr}. Ratings: ${JSON.stringify(promptFeedbackSafetyRatings)}`)
       return {
         content: null,
@@ -784,6 +789,7 @@ export class GoogleMapper implements IProviderMapper {
     const model = '' // Preserve the existing normalized stream model value
     let reportedModel: string | undefined
     let refusal: string | undefined
+    let promptBlock: { finishReason: string; refusal?: string } | undefined
     let isPotentiallyJson = false
     let aggregatedResult: GenerateResult | null = null
 
@@ -793,8 +799,13 @@ export class GoogleMapper implements IProviderMapper {
 
       for await (const chunk of stream) {
         reportedModel = mapReportedModel(chunk.modelVersion) ?? reportedModel
-        if (chunk.promptFeedback?.blockReason === 'SAFETY' && typeof chunk.promptFeedback.blockReasonMessage === 'string') {
-          refusal = chunk.promptFeedback.blockReasonMessage
+        const blockReason = chunk.promptFeedback?.blockReason
+        if (blockReason && blockReason !== BlockedReason.BLOCKED_REASON_UNSPECIFIED) {
+          const blockMessage = chunk.promptFeedback?.blockReasonMessage
+          promptBlock = {
+            finishReason: mapPromptBlockFinishReason(blockReason),
+            ...(typeof blockMessage === 'string' ? { refusal: blockMessage } : {})
+          }
         }
         observer?.observeRequestId(chunk.responseId)
         serviceTier = chunk.sdkHttpResponse?.headers?.['x-gemini-service-tier'] ?? serviceTier
@@ -988,6 +999,12 @@ export class GoogleMapper implements IProviderMapper {
       } // End main stream loop (for await...)
       observer?.transportComplete()
       if (deferredError) throw deferredError
+
+      // A blocked prompt is reported through feedback without any candidates.
+      if (!aggregatedResult && promptBlock) {
+        finalFinishReason = promptBlock.finishReason
+        aggregatedResult = { content: null, rawContent: null, model, usage: currentUsage, ...promptBlock }
+      }
 
       // --- End of Stream ---
       // --- FIX: Ensure finalFinishReason is set ---
