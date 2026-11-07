@@ -640,7 +640,8 @@ export class GoogleMapper implements IProviderMapper {
 
   mapFromProviderResponse(response: GenerateContentResponse | undefined, model: string, _originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
     observer?.observeRequestId(response?.responseId)
-    observer?.observeUsage(mapTokenUsage(response?.usageMetadata, 'google'), true)
+    const usage = mapTokenUsage(response?.usageMetadata, 'google', response?.sdkHttpResponse?.headers?.['x-gemini-service-tier'])
+    observer?.observeUsage(usage, true)
     const promptFeedbackReason = safeGet<string>(response, 'promptFeedback', 'blockReason')
     const promptFeedbackSafetyRatings = safeGet<any[]>(response, 'promptFeedback', 'safetyRatings')
 
@@ -656,7 +657,7 @@ export class GoogleMapper implements IProviderMapper {
         content: null,
         toolCalls: undefined,
         finishReason: fr,
-        usage: mapTokenUsage(response?.usageMetadata, 'google'), // Use common utility
+        usage,
         citations: undefined,
         parsedContent: null,
         thinkingSteps: undefined,
@@ -675,7 +676,7 @@ export class GoogleMapper implements IProviderMapper {
         content: null,
         toolCalls: undefined,
         finishReason: 'error',
-        usage: mapTokenUsage(response?.usageMetadata, 'google'), // Use common utility
+        usage,
         citations: undefined,
         parsedContent: null,
         thinkingSteps: undefined,
@@ -738,7 +739,7 @@ export class GoogleMapper implements IProviderMapper {
       content: textContent,
       toolCalls: toolCalls,
       finishReason: finishReason,
-      usage: mapTokenUsage(response.usageMetadata, 'google'), // Use common utility
+      usage,
       citations: citations,
       parsedContent: parsedJson,
       thinkingSteps,
@@ -762,6 +763,7 @@ export class GoogleMapper implements IProviderMapper {
       ? configuredCount : 1
     const finishedCandidates = new Set<number>()
     let currentUsage: TokenUsage | undefined
+    let serviceTier: string | undefined
     let finalFinishReason: string | null = null
     let aggregatedText = ''
     const aggregatedCitations: Citation[] = []
@@ -776,6 +778,7 @@ export class GoogleMapper implements IProviderMapper {
 
       for await (const chunk of stream) {
         observer?.observeRequestId(chunk.responseId)
+        serviceTier = chunk.sdkHttpResponse?.headers?.['x-gemini-service-tier'] ?? serviceTier
         for (const candidate of chunk.candidates ?? []) {
           const index = candidate.index ?? (expectedCandidates === 1 ? 0 : undefined)
           if (index !== undefined && Number.isSafeInteger(index) && index >= 0 && index < expectedCandidates &&
@@ -784,7 +787,7 @@ export class GoogleMapper implements IProviderMapper {
           }
         }
         if (chunk.usageMetadata) {
-          currentUsage = mapTokenUsage(chunk.usageMetadata, 'google')
+          currentUsage = mapTokenUsage(chunk.usageMetadata, 'google', serviceTier)
           observer?.observeUsage(currentUsage, finishedCandidates.size === expectedCandidates)
         }
         if (deferredError) continue

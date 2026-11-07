@@ -1,5 +1,5 @@
 import { GoogleMapper } from '../../../../src/core/mapping/google.mapper'
-import { GenerateContentResponse, FinishReason } from '@google/genai'
+import { GenerateContentResponse, FinishReason, HttpResponse } from '@google/genai'
 import { mapTokenUsage } from '../../../../src/core/mapping/common.utils'
 import { AnthropicMapper } from '../../../../src/core/mapping/anthropic.mapper'
 import type { ProviderUsageObserver } from '../../../../src/types/usage.types'
@@ -20,7 +20,7 @@ describe('native provider inclusive usage', () => {
   test('preserves allowlisted Gemini modality counts without retaining provider objects', () => {
     expect(mapTokenUsage({
       promptTokenCount: 10, cachedContentTokenCount: 4, toolUsePromptTokenCount: 2,
-      candidatesTokenCount: 3, thoughtsTokenCount: 2, totalTokenCount: 17,
+      candidatesTokenCount: 3, thoughtsTokenCount: 2, totalTokenCount: 17, serviceTier: 'priority',
       promptTokensDetails: [{ modality: 'TEXT', tokenCount: 6, extra: 'ignored' }, { modality: 'AUDIO', tokenCount: 4 }],
       cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 4 }],
       toolUsePromptTokensDetails: [{ modality: 'TEXT', tokenCount: 2 }],
@@ -28,6 +28,7 @@ describe('native provider inclusive usage', () => {
     }, 'google')).toEqual({
       promptTokens: 12, completionTokens: 5, totalTokens: 17, cachedContentTokenCount: 4,
       billing: {
+        serviceTier: 'priority',
         cachedInputTokens: 4,
         inputTokenDetails: [{ modality: 'TEXT', tokenCount: 6 }, { modality: 'AUDIO', tokenCount: 4 }],
         cachedInputTokenDetails: [{ modality: 'TEXT', tokenCount: 4 }],
@@ -109,7 +110,8 @@ describe('native provider inclusive usage', () => {
     const observeUsage = jest.fn()
     const observer: ProviderUsageObserver = { beforeDispatch: async () => {}, markDispatched() {}, observeRequestId() {}, transportComplete() {}, observeUsage }
     async function* stream(): AsyncIterable<GenerateContentResponse> {
-      yield { candidates: [{ index: 0, finishReason: FinishReason.STOP }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, totalTokenCount: 12 } } as GenerateContentResponse
+      yield { candidates: [{ index: 0, finishReason: FinishReason.STOP }],
+        sdkHttpResponse: new HttpResponse(new Response(null, { headers: { 'x-gemini-service-tier': 'flex' } })), usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, totalTokenCount: 12 } } as GenerateContentResponse
       yield { candidates: [{ index: 1, finishReason: FinishReason.STOP }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 6, totalTokenCount: 16,
         cachedContentTokenCount: 2, promptTokensDetails: [{ modality: 'AUDIO', tokenCount: 10 }] } } as GenerateContentResponse
     }
@@ -117,9 +119,9 @@ describe('native provider inclusive usage', () => {
     expect(new GoogleMapper().mapToProviderParams(params).config.candidateCount).toBe(2)
     for await (const _chunk of new GoogleMapper().mapProviderStream(stream(), params, observer)) { /* consume */ }
     expect(observeUsage.mock.calls).toEqual([
-      [{ promptTokens: 10, completionTokens: 2, totalTokens: 12, billing: {} }, false],
+      [{ promptTokens: 10, completionTokens: 2, totalTokens: 12, billing: { serviceTier: 'flex' } }, false],
       [{ promptTokens: 10, completionTokens: 6, totalTokens: 16, cachedContentTokenCount: 2,
-        billing: { cachedInputTokens: 2, inputTokenDetails: [{ modality: 'AUDIO', tokenCount: 10 }] } }, true]
+        billing: { serviceTier: 'flex', cachedInputTokens: 2, inputTokenDetails: [{ modality: 'AUDIO', tokenCount: 10 }] } }, true]
     ])
   })
 })

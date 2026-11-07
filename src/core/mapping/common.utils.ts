@@ -188,6 +188,7 @@ function mapBillingUsage(
     billing.inferenceGeo = label(usage.inference_geo)
     billing.speed = label(usage.speed)
   } else if (format === 'google') {
+    billing.serviceTier = label(serviceTier ?? usage.serviceTier)
     billing.cachedInputTokens = count(usage.cachedContentTokenCount)
     billing.inputTokenDetails = details(usage.promptTokensDetails)
     billing.cachedInputTokenDetails = details(usage.cacheTokensDetails)
