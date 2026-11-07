@@ -2,6 +2,11 @@ import { BillingTokenDetail, BillingUsage, TokenUsage, GenerateParams, GenerateR
 import { StructuredOutputValidationError } from '../../errors'
 import { safeGet } from '../utils' // Import safeGet from the existing utils file
 
+/** Reads a provider model identifier without changing its value. */
+export function mapReportedModel(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
 /**
  * Maps various provider-specific usage objects to the unified RosettaAI TokenUsage type.
  * Handles differences in field names (e.g., input_tokens vs prompt_tokens).

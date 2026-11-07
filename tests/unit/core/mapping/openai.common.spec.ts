@@ -193,7 +193,22 @@ describe('OpenAI Common Mapping Utilities', () => {
       expect(result.content).toBe('Response')
       expect(result.finishReason).toBe('stop')
       expect(result.model).toBe('gpt-4o-mini-id')
+      expect(result.reportedModel).toBe('gpt-4o-mini-id')
       expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: { cacheWriteInputTokens: 0, cacheWrite30mInputTokens: 0 } })
+    })
+
+    it.each([undefined, '', '   '])('omits reportedModel for native model value %p', model => {
+      const response = {
+        id: 'chatcmpl-1',
+        object: 'chat.completion',
+        created: 1,
+        model,
+        choices: [{ index: 0, message: createMockMessage('Response'), finish_reason: 'stop', logprobs: null }]
+      } as OpenAI.Chat.Completions.ChatCompletion
+
+      const result = mapFromOpenAIResponse(response, Provider.OpenAI, modelUsed, undefined, options)
+      expect(result.model).toBe(model ?? modelUsed)
+      expect(result).not.toHaveProperty('reportedModel')
     })
 
     it('[Medium] should map response with tool calls', () => {
@@ -283,6 +298,29 @@ describe('OpenAI Common Mapping Utilities', () => {
       })
       expect(results[5].type).toBe('final_result')
       expect((results[5] as any).data.result.content).toBe('Chunk 1 Chunk 2')
+    })
+
+    it('captures the provider model from a late usage-only chunk without changing the normalized model', async () => {
+      const mockChunks: OpenAI.Chat.Completions.ChatCompletionChunk[] = [
+        { ...baseChunkProps, model: '', choices: [{ index: 0, delta: { content: 'Hello' }, finish_reason: 'stop' }] },
+        {
+          ...baseChunkProps,
+          model: 'gpt-provider-snapshot',
+          choices: [],
+          usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }
+        },
+        { ...baseChunkProps, model: '', choices: [] }
+      ]
+      const results = await collectStreamChunks(
+        mapOpenAIStream(mockOpenAIStreamGenerator(mockChunks), Provider.OpenAI, modelId, undefined, options)
+      )
+      expect(results[0]).toEqual({ type: 'message_start', data: { provider: Provider.OpenAI, model: modelId } })
+      expect(results.at(-1)).toMatchObject({
+        type: 'final_result',
+        data: {
+          result: { model: modelId, reportedModel: 'gpt-provider-snapshot', content: 'Hello', finishReason: 'stop' }
+        }
+      })
     })
 
     it('[Hard] should map stream with tool calls', async () => {

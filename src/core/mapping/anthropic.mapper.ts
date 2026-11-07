@@ -47,7 +47,7 @@ import {
 } from '../../errors'
 import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
-import { mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
+import { mapReportedModel, mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
 import { normalizeSchemaForStrict, supportsStrictToolUse } from './anthropic.strict'
 import { resolveThinkingRequest } from './thinking-request'
 
@@ -801,6 +801,7 @@ export class AnthropicMapper implements IProviderMapper {
         ? 'stop'
         : response.stop_reason ?? 'unknown'
 
+    const reportedModel = mapReportedModel(response.model)
     const usage = mapTokenUsage(response.usage, 'anthropic')
     const providerState = this.mergeAnthropicResultProviderState(undefined, {
       containerId: response.container?.id,
@@ -819,6 +820,7 @@ export class AnthropicMapper implements IProviderMapper {
       citations: undefined,
       parsedContent: null,
       model: response.model ?? model,
+      ...(reportedModel !== undefined ? { reportedModel } : {}),
       rawResponse: response,
       ...(providerState ? { providerState } : {}),
       ...(response.container
@@ -874,7 +876,8 @@ export class AnthropicMapper implements IProviderMapper {
         if (deferredError) continue
         try {
         switch (event.type) {
-          case 'message_start':
+          case 'message_start': {
+            const reportedModel = mapReportedModel(event.message.model)
             model = safeGet<string>(event.message, 'model') ?? ''
             yield { type: 'message_start', data: { provider: this.provider, model: model } }
             aggregatedResult = {
@@ -883,6 +886,7 @@ export class AnthropicMapper implements IProviderMapper {
               finishReason: null,
               usage: undefined,
               model: model,
+              ...(reportedModel !== undefined ? { reportedModel } : {}),
               thinkingSteps: null,
               codeExecutionResults: [],
               citations: undefined,
@@ -909,6 +913,7 @@ export class AnthropicMapper implements IProviderMapper {
               })
             }
             break
+          }
           case 'content_block_start':
             if (event.content_block.type === 'thinking') {
               rawContentBlocksByIndex[event.index] = this.cloneRawContentBlock(event.content_block)

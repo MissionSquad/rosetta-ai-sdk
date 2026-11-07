@@ -27,7 +27,7 @@ import {
   TokenUsage
 } from '../../types'
 import { MappingError, ProviderAPIError, ToolArgumentValidationError } from '../../errors'
-import { mapBaseParams, mapBaseToolChoice, mapTokenUsage } from './common.utils'
+import { mapBaseParams, mapBaseToolChoice, mapReportedModel, mapTokenUsage } from './common.utils'
 import { getGpt5Support } from './gpt5.support'
 import { isGPT5Model, wrapOpenAIError } from './openai.common'
 import { resolveThinkingRequest } from './thinking-request'
@@ -423,6 +423,7 @@ export function mapOpenAIResponsesChatResponse(
 
   const thinkingSteps = reasoningItems.map(summaryText).filter(text => text.length > 0).join('\n\n') || null
 
+  const reportedModel = mapReportedModel(response.model)
   return {
     content,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
@@ -432,6 +433,7 @@ export function mapOpenAIResponsesChatResponse(
     parsedContent: parsedJson,
     thinkingSteps,
     model: response.model ?? modelUsed,
+    ...(reportedModel !== undefined ? { reportedModel } : {}),
     rawResponse: response
   }
 }
@@ -477,6 +479,8 @@ export async function* mapOpenAIResponsesChatStream(
   try {
     for await (const event of stream) {
       if ('response' in event) {
+        const reportedModel = mapReportedModel(event.response.model)
+        if (reportedModel !== undefined) aggregatedResult.reportedModel = reportedModel
         observer?.observeRequestId(event.response.id)
         const observedUsage = mapResponsesUsage(event.response)
         if (observedUsage) observer?.observeUsage(observedUsage,

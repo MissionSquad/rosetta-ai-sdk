@@ -182,10 +182,13 @@ export const GPT5_SUPPORT_TABLE: Record<string, Gpt5Support> = {
 
 const GPT5_SUPPORT_KEYS = Object.keys(GPT5_SUPPORT_TABLE).sort((a, b) => b.length - a.length)
 
+/** Returns a copy of Rosetta's known capabilities for an OpenAI GPT-5 model. */
 export function getGpt5Support(model: string): Gpt5Support | undefined {
-  const exact = GPT5_SUPPORT_TABLE[model]
-  if (exact) return exact
+  const key = Object.prototype.hasOwnProperty.call(GPT5_SUPPORT_TABLE, model)
+    ? model
+    : GPT5_SUPPORT_KEYS.find(key => model.startsWith(`${key}-`))
+  const support = key === undefined ? undefined : GPT5_SUPPORT_TABLE[key]
+  if (support === undefined) return undefined
 
-  const prefix = GPT5_SUPPORT_KEYS.find(key => model.startsWith(`${key}-`))
-  return prefix ? GPT5_SUPPORT_TABLE[prefix] : undefined
+  return { ...support, allowedReasoningEfforts: [...support.allowedReasoningEfforts] }
 }

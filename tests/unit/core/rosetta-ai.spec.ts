@@ -660,6 +660,35 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       mockOpenAIMapperInstance.wrapProviderError.mockClear()
     })
 
+    it('routes by the requested model and returns the Responses endpoint model identity', async () => {
+      const responsesCreate = jest.fn().mockResolvedValue({
+        id: 'resp-routing',
+        model: 'gpt-provider-snapshot',
+        status: 'completed',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'Reply' }] }]
+      })
+      const chatCreate = jest.fn()
+      ;(OpenAI as jest.Mock).mockReturnValue({
+        responses: { create: responsesCreate },
+        chat: { completions: { create: chatCreate } }
+      })
+      const sdk = new RosettaAI({ openaiApiKey: 'key' })
+      const result = await sdk.generate({
+        provider: Provider.OpenAI,
+        model: 'gpt-5',
+        messages: [{ role: 'user', content: 'Hi' }]
+      })
+
+      expect(responsesCreate).toHaveBeenCalledTimes(1)
+      expect(responsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-5' }))
+      expect(chatCreate).not.toHaveBeenCalled()
+      expect(result).toMatchObject({
+        model: 'gpt-provider-snapshot',
+        reportedModel: 'gpt-provider-snapshot',
+        content: 'Reply'
+      })
+    })
+
     it('should pass tools to mapFromProviderResponse', async () => {
       const params: GenerateParams = {
         provider: Provider.OpenAI,

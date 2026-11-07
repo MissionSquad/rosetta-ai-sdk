@@ -368,6 +368,25 @@ describe('mapOpenAIResponsesChatStream', () => {
     }
   })
 
+  it('captures model identity from a later response snapshot', async () => {
+    const chunks = await collect(
+      mapOpenAIResponsesChatStream(
+        eventStream([
+          { ...createdEvent, response: { ...createdEvent.response, model: undefined } },
+          { type: 'response.output_text.delta', delta: 'Hello' },
+          completedEvent({ model: 'gpt-provider-snapshot' })
+        ]),
+        baseParams.model!,
+        undefined
+      )
+    )
+    expect(chunks[0]).toEqual({ type: 'message_start', data: { provider: Provider.OpenAI, model: baseParams.model } })
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'final_result',
+      data: { result: { model: baseParams.model, reportedModel: 'gpt-provider-snapshot', content: 'Hello' } }
+    })
+  })
+
   it('maps reasoning summaries and text into canonical thinking/content chunks', async () => {
     const chunks = await collect(
       mapOpenAIResponsesChatStream(
@@ -524,7 +543,7 @@ describe('generateViaOpenAIResponses', () => {
   it('creates a non-streaming response and maps it', async () => {
     const create = jest.fn().mockResolvedValue({
       id: 'resp_1',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-provider-snapshot',
       status: 'completed',
       output: [{ type: 'message', id: 'msg_1', content: [{ type: 'output_text', text: 'Hi.' }] }],
       usage: {
@@ -544,6 +563,6 @@ describe('generateViaOpenAIResponses', () => {
         reasoning: { effort: 'medium', summary: 'auto' }
       })
     )
-    expect(result.content).toBe('Hi.')
+    expect(result).toMatchObject({ content: 'Hi.', model: 'gpt-provider-snapshot', reportedModel: 'gpt-provider-snapshot' })
   })
 })

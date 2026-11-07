@@ -521,6 +521,7 @@ describe('Groq Mapper', () => {
       expect(result.finishReason).toBe('stop')
       expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 })
       expect(result.model).toBe('llama-3.1-8b-instant-test-id')
+      expect(result.reportedModel).toBe('llama-3.1-8b-instant-test-id')
     })
 
     it('[Medium] should map typed message reasoning separately from answer content', () => {
