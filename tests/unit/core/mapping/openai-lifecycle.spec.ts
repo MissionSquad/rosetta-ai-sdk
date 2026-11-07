@@ -63,7 +63,7 @@ describe('OpenAI inference lifecycle mapper boundaries', () => {
     expect(seen.markDispatched).toHaveBeenCalledTimes(1)
     expect(seen.transportComplete).toHaveBeenCalledTimes(1)
     expect(seen.observeUsage).toHaveBeenCalledTimes(1)
-    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12, billing: {} }, true)
+    expect(seen.observeUsage).toHaveBeenCalledWith({ promptTokens: 5, completionTokens: 7, totalTokens: 12, billing: { cacheWriteInputTokens: 0, cacheWrite30mInputTokens: 0 } }, true)
     expect(seen.observeRequestId).toHaveBeenCalledWith('chat-fixture')
     expect(seen.beforeDispatch.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]!)
     expect(seen.markDispatched.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]!)
