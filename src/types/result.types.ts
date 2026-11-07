@@ -7,6 +7,8 @@ import { OpenAICompletion } from './openai.types' // Import the new type
  * Fields are optional as not all providers/responses include all details.
  */
 export interface TokenUsage {
+  /** The provider omitted required counts or supplied invalid/inconsistent usage. */
+  incomplete?: boolean
   promptTokens?: number
   completionTokens?: number
   totalTokens?: number

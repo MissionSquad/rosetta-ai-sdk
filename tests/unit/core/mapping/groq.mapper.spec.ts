@@ -856,8 +856,8 @@ describe('Groq Mapper', () => {
       expect(results[2]).toEqual({ type: 'content_delta', data: { delta: 'Visible answer.' } })
       expect(results[2]).not.toEqual(expect.objectContaining({ data: { delta: expect.stringContaining('Private') } }))
       expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'stop' } })
-      expect(results[5].type).toBe('final_result')
-      const finalResult = (results[5] as Extract<StreamChunk, { type: 'final_result' }>).data.result
+      expect(results[4].type).toBe('final_result')
+      const finalResult = (results[4] as Extract<StreamChunk, { type: 'final_result' }>).data.result
       expect(finalResult.thinkingSteps).toBe('Private reasoning.')
       expect(finalResult.content).toBe('Visible answer.')
     })
@@ -1161,7 +1161,7 @@ describe('Groq Mapper', () => {
       const stream = mapper.mapProviderStream(mockGroqStreamGenerator(mockChunks))
       const results = await collectStreamChunks(stream)
 
-      // FIX: Expect 5 chunks now (start, delta, stop, usage, final)
+      // Usage is emitted when actually reported.
       expect(results).toHaveLength(5)
       expect(results[0].type).toBe('message_start')
       expect(results[1].type).toBe('content_delta')
@@ -1197,17 +1197,15 @@ describe('Groq Mapper', () => {
       const results = await collectStreamChunks(stream)
 
       // FIX: Expect 6 chunks now (start, tool_start, tool_delta, stop, usage, final)
-      expect(results).toHaveLength(6)
+      expect(results).toHaveLength(5)
       expect(results[0].type).toBe('message_start')
       expect(results[1].type).toBe('tool_call_start')
       expect(results[2].type).toBe('tool_call_delta')
       expect(results[3].type).toBe('message_stop') // Default stop
       expect((results[3] as any).data.finishReason).toBe('stop')
-      expect(results[4].type).toBe('final_usage') // Usage will be undefined
-      expect((results[4] as any).data.usage).toBeUndefined()
-      expect(results[5].type).toBe('final_result')
+      expect(results[4].type).toBe('final_result')
       // Tool call might not be fully aggregated in final result if stream ended abruptly
-      expect((results[5] as any).data.result.toolCalls).toBeUndefined()
+      expect((results[4] as any).data.result.toolCalls).toBeUndefined()
     })
 
     // FIX: Update test expectation based on code fix
@@ -1222,13 +1220,11 @@ describe('Groq Mapper', () => {
       const results = await collectStreamChunks(stream)
 
       // FIX: Expect 5 chunks now (start, delta, stop, usage, final) - usage is missing but yielded
-      expect(results).toHaveLength(5)
+      expect(results).toHaveLength(4)
       expect(results[0].type).toBe('message_start')
       expect(results[1].type).toBe('content_delta')
       expect(results[2].type).toBe('message_stop')
-      expect(results[3].type).toBe('final_usage') // Usage yielded even if undefined
-      expect((results[3] as any).data.usage).toBeUndefined()
-      expect(results[4].type).toBe('final_result')
+      expect(results[3].type).toBe('final_result')
     })
   })
 

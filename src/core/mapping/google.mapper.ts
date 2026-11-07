@@ -1,3 +1,4 @@
+import type { ProviderUsageObserver } from '../../types/usage.types'
 import {
   Content,
   Tool,
@@ -38,6 +39,7 @@ import { resolveThinkingRequest } from './thinking-request'
 import * as GoogleEmbedMapper from './google.embed.mapper'
 
 export class GoogleMapper implements IProviderMapper {
+  readonly supportsInferenceLifecycle = true
   readonly provider = Provider.Google
   private static readonly ALLOWED_SCHEMA_KEYS = new Set([
     'anyOf',
@@ -636,7 +638,9 @@ export class GoogleMapper implements IProviderMapper {
     }))
   }
 
-  mapFromProviderResponse(response: GenerateContentResponse | undefined, model: string): GenerateResult {
+  mapFromProviderResponse(response: GenerateContentResponse | undefined, model: string, _originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
+    observer?.observeRequestId(response?.responseId)
+    observer?.observeUsage(mapTokenUsage(response?.usageMetadata, 'google'), true)
     const promptFeedbackReason = safeGet<string>(response, 'promptFeedback', 'blockReason')
     const promptFeedbackSafetyRatings = safeGet<any[]>(response, 'promptFeedback', 'safetyRatings')
 
@@ -652,7 +656,7 @@ export class GoogleMapper implements IProviderMapper {
         content: null,
         toolCalls: undefined,
         finishReason: fr,
-        usage: mapTokenUsage(response?.usageMetadata), // Use common utility
+        usage: mapTokenUsage(response?.usageMetadata, 'google'), // Use common utility
         citations: undefined,
         parsedContent: null,
         thinkingSteps: undefined,
@@ -671,7 +675,7 @@ export class GoogleMapper implements IProviderMapper {
         content: null,
         toolCalls: undefined,
         finishReason: 'error',
-        usage: mapTokenUsage(response?.usageMetadata), // Use common utility
+        usage: mapTokenUsage(response?.usageMetadata, 'google'), // Use common utility
         citations: undefined,
         parsedContent: null,
         thinkingSteps: undefined,
@@ -734,7 +738,7 @@ export class GoogleMapper implements IProviderMapper {
       content: textContent,
       toolCalls: toolCalls,
       finishReason: finishReason,
-      usage: mapTokenUsage(response.usageMetadata), // Use common utility
+      usage: mapTokenUsage(response.usageMetadata, 'google'), // Use common utility
       citations: citations,
       parsedContent: parsedJson,
       thinkingSteps,
@@ -747,10 +751,16 @@ export class GoogleMapper implements IProviderMapper {
 
   async *mapProviderStream(
     stream: AsyncIterable<GenerateContentResponse>,
-    _originalParams: GenerateParams // Changed from originalTools
+    _originalParams: GenerateParams,
+    observer?: ProviderUsageObserver
   ): AsyncIterable<StreamChunk> {
     // Note: originalParams is not directly used in this implementation,
     // but included for interface consistency. Tool validation happens in mapFromProviderResponse.
+    let deferredError: unknown
+    const configuredCount = _originalParams?.extraParams?.candidateCount
+    const expectedCandidates = typeof configuredCount === 'number' && Number.isSafeInteger(configuredCount) && configuredCount > 0
+      ? configuredCount : 1
+    const finishedCandidates = new Set<number>()
     let currentUsage: TokenUsage | undefined
     let finalFinishReason: string | null = null
     let aggregatedText = ''
@@ -765,10 +775,23 @@ export class GoogleMapper implements IProviderMapper {
       yield { type: 'message_start', data: { provider: this.provider, model: model } }
 
       for await (const chunk of stream) {
+        observer?.observeRequestId(chunk.responseId)
+        for (const candidate of chunk.candidates ?? []) {
+          const index = candidate.index ?? (expectedCandidates === 1 ? 0 : undefined)
+          if (index !== undefined && Number.isSafeInteger(index) && index >= 0 && index < expectedCandidates &&
+              candidate.finishReason && candidate.finishReason !== FinishReason.FINISH_REASON_UNSPECIFIED) {
+            finishedCandidates.add(index)
+          }
+        }
+        if (chunk.usageMetadata) {
+          currentUsage = mapTokenUsage(chunk.usageMetadata, 'google')
+          observer?.observeUsage(currentUsage, finishedCandidates.size === expectedCandidates)
+        }
+        if (deferredError) continue
         try {
           // Aggregate usage metadata if present
           if (chunk.usageMetadata) {
-            currentUsage = mapTokenUsage(chunk.usageMetadata) // Use common utility
+            currentUsage = mapTokenUsage(chunk.usageMetadata, 'google') // Use common utility
             if (aggregatedResult) aggregatedResult.usage = currentUsage
           }
 
@@ -933,11 +956,15 @@ export class GoogleMapper implements IProviderMapper {
         } catch (streamProcessingError) {
           // Catch errors during the loop itself (including the part processing error re-thrown above)
           console.error('Error during Google stream processing loop:', streamProcessingError)
-          const mappedError = this.wrapProviderError(streamProcessingError, this.provider)
-          yield { type: 'error', data: { error: mappedError } }
-          return // Stop the generator on error
+          if (!observer) {
+            yield { type: 'error', data: { error: this.wrapProviderError(streamProcessingError, this.provider) } }
+            return
+          }
+          deferredError = streamProcessingError
         }
       } // End main stream loop (for await...)
+      observer?.transportComplete()
+      if (deferredError) throw deferredError
 
       // --- End of Stream ---
       // --- FIX: Ensure finalFinishReason is set ---

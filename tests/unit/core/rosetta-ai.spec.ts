@@ -675,7 +675,8 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       expect(mockOpenAIMapperInstance.mapFromProviderResponse).toHaveBeenCalledWith(
         { mapped: 'openai_raw_response' },
         'gpt-4o-mini',
-        [mockTool] // Expect tools to be passed
+        [mockTool], // Expect tools to be passed
+        undefined // Lifecycle is opt-in
       )
     })
 
@@ -875,7 +876,8 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       expect(mockOpenAIMapperInstance.mapFromProviderResponse).toHaveBeenCalledWith(
         { mapped: 'openai_raw_response' },
         'gpt-4o-mini',
-        [mockTool]
+        [mockTool],
+        undefined
       )
       // Ensure wrapProviderError is NOT called for SDK-specific errors like ToolArgumentValidationError
       // Check the mock on the *mapper instance*
@@ -914,7 +916,8 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       expect(mockOpenAIMapperInstance.mapFromProviderResponse).toHaveBeenCalledWith(
         { mapped: 'openai_raw_response' },
         'gpt-4o-mini',
-        undefined // No tools passed in this specific test
+        undefined, // No tools passed in this specific test
+        undefined
       )
       expect(result).toEqual({
         mapped: 'openai_result',
@@ -1069,7 +1072,8 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
 
       expect(mockOpenAIMapperInstance.mapProviderStream).toHaveBeenCalledWith(
         expect.any(Object), // The raw provider stream
-        params // Expect params to be passed
+        { ...params, stream: true },
+        undefined
       )
     })
 
@@ -1231,7 +1235,8 @@ describe('RosettaAI Core (with V2 Mappers & Custom Providers)', () => {
       // Check mock calls - should receive the full params object now
       expect(mockOpenAIMapperInstance.mapProviderStream).toHaveBeenCalledWith(
         expect.any(Object), // Raw stream
-        params // Expect the full params object
+        { ...params, stream: true },
+        undefined
       )
       expect(results).toHaveLength(3)
       expect(results[1]).toEqual({ type: 'content_delta', data: { delta: 'Mapped Stream' } })

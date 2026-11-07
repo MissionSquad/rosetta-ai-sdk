@@ -1,3 +1,4 @@
+import type { ProviderUsageObserver } from '../../types/usage.types'
 import OpenAI from 'openai'
 import type {
   Response,
@@ -26,7 +27,7 @@ import {
   TokenUsage
 } from '../../types'
 import { MappingError, ProviderAPIError, ToolArgumentValidationError } from '../../errors'
-import { mapBaseParams, mapBaseToolChoice } from './common.utils'
+import { mapBaseParams, mapBaseToolChoice, mapTokenUsage } from './common.utils'
 import { getGpt5Support } from './gpt5.support'
 import { isGPT5Model, wrapOpenAIError } from './openai.common'
 import { resolveThinkingRequest } from './thinking-request'
@@ -367,18 +368,19 @@ function mapFinishReason(response: Response, hasToolCalls: boolean, hasRefusal: 
 
 function mapResponsesUsage(usage: Response['usage']): TokenUsage | undefined {
   if (!usage) return undefined
-  return {
-    promptTokens: usage.input_tokens,
-    completionTokens: usage.output_tokens,
-    totalTokens: usage.total_tokens
-  }
+  return mapTokenUsage({
+    prompt_tokens: usage.input_tokens, completion_tokens: usage.output_tokens, total_tokens: usage.total_tokens
+  }, 'openai')
 }
 
 export function mapOpenAIResponsesChatResponse(
   response: Response,
   modelUsed: string,
-  originalTools: RosettaTool<any>[] | undefined
+  originalTools: RosettaTool<any>[] | undefined,
+  observer?: ProviderUsageObserver
 ): GenerateResult {
+  observer?.observeRequestId('_request_id' in response ? response._request_id : response.id)
+  observer?.observeUsage(mapResponsesUsage(response.usage), true)
   const outputItems: ResponseOutputItem[] = response.output ?? []
   const reasoningItems = outputItems.filter((item): item is ResponseReasoningItem => item.type === 'reasoning')
 
@@ -449,8 +451,10 @@ type StreamingToolCallState = {
 export async function* mapOpenAIResponsesChatStream(
   stream: AsyncIterable<ResponseStreamEvent>,
   modelId: string,
-  originalTools: RosettaTool<any>[] | undefined
+  originalTools: RosettaTool<any>[] | undefined,
+  observer?: ProviderUsageObserver
 ): AsyncIterable<StreamChunk> {
+  let deferredValidation: { error: unknown } | undefined
   let accumulatedContent = ''
   let accumulatedThinking = ''
   let isJsonMode = false
@@ -475,6 +479,15 @@ export async function* mapOpenAIResponsesChatStream(
 
   try {
     for await (const event of stream) {
+      if ('response' in event) {
+        observer?.observeRequestId(event.response.id)
+        const observedUsage = mapResponsesUsage(event.response.usage)
+        if (observedUsage) observer?.observeUsage(observedUsage,
+          event.type === 'response.completed' || event.type === 'response.incomplete' || event.type === 'response.failed')
+      }
+      if (deferredValidation && event.type !== 'response.completed' && event.type !== 'response.incomplete' &&
+          event.type !== 'response.failed' && event.type !== 'error') continue
+
       switch (event.type) {
         case 'response.created': {
           responseSnapshot = event.response
@@ -567,11 +580,17 @@ export async function* mapOpenAIResponsesChatStream(
             const state = toolCallsByItemId.get(fnCall.id ?? fnCall.call_id)
             if (state && !state.done) {
               state.argumentsAccumulator = fnCall.arguments ?? state.argumentsAccumulator
-              validateToolCall(
-                { id: state.callId, name: state.name, arguments: state.argumentsAccumulator },
-                originalTools,
-                'mapOpenAIResponsesChatStream validation'
-              )
+              try {
+                validateToolCall(
+                  { id: state.callId, name: state.name, arguments: state.argumentsAccumulator },
+                  originalTools,
+                  'mapOpenAIResponsesChatStream validation'
+                )
+              } catch (error) {
+                if (!observer) throw error
+                deferredValidation = { error }
+                break
+              }
               state.done = true
               yield { type: 'tool_call_done', data: { index: state.toolIndex, id: state.callId } }
               aggregatedResult.toolCalls = aggregatedResult.toolCalls ?? []
@@ -602,6 +621,9 @@ export async function* mapOpenAIResponsesChatStream(
           break
       }
     }
+
+    observer?.transportComplete()
+    if (deferredValidation) throw deferredValidation.error
 
     if (isJsonMode) {
       let finalParsedJson: Record<string, unknown> | Array<unknown> | null = null
@@ -643,9 +665,13 @@ export async function* mapOpenAIResponsesChatStream(
 export async function generateViaOpenAIResponses(
   client: OpenAI,
   params: GenerateParams,
-  originalTools: RosettaTool<any>[] | undefined
+  originalTools: RosettaTool<any>[] | undefined,
+  observer?: ProviderUsageObserver
 ): Promise<GenerateResult> {
   const mappedParams = mapToOpenAIResponsesChatParams(params)
+  await observer?.beforeDispatch()
+  observer?.markDispatched()
   const response = await client.responses.create(mappedParams)
-  return mapOpenAIResponsesChatResponse(response, params.model!, originalTools)
+  observer?.transportComplete()
+  return mapOpenAIResponsesChatResponse(response, params.model!, originalTools, observer)
 }

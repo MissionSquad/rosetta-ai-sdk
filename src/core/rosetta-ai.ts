@@ -38,6 +38,7 @@ import {
 import { OpenAICompletion, OpenAICompletionChoice } from '../types/openai.types' // Import the new types
 import { ConfigurationError, ProviderAPIError, UnsupportedFeatureError, RosettaAIError, MappingError } from '../errors'
 import { CustomProviderConfig } from '../types/custom.types'
+import { InferenceCall } from './inference-lifecycle'
 
 // Import Mappers and Interface
 import { IProviderMapper } from './mapping/base.mapper'
@@ -131,6 +132,7 @@ export class RosettaAI {
 
     // Load configuration, prioritizing constructor args > env vars
     this.config = {
+      inferenceLifecycle: config.inferenceLifecycle,
       anthropicApiKey: config.anthropicApiKey ?? loadEnv('ANTHROPIC_API_KEY'),
       googleApiKey: config.googleApiKey ?? loadEnv('GOOGLE_API_KEY'),
       googleVertexAIProject: config.googleVertexAIProject ?? loadEnv('GOOGLE_CLOUD_PROJECT'),
@@ -481,6 +483,7 @@ export class RosettaAI {
    */
   public async generate(params: GenerateParams): Promise<GenerateResult> {
     const providerKey = params.provider // Now ProviderKey
+    let call: InferenceCall | undefined
     try {
       const mapper = this.getMapper(providerKey)
       const isCustom = !this.isBuiltInProvider(providerKey)
@@ -498,6 +501,7 @@ export class RosettaAI {
       }
 
       const effectiveParams = { ...params, model, stream: false }
+      call = this.createInferenceCall(mapper, providerKey, model, 'generate')
       this.checkUnsupportedFeatures(providerKey, effectiveParams, 'Generate', !!this.azureOpenAIClient)
 
       // gpt-5.x chat traffic routes through the Responses API: Chat Completions rejects function
@@ -507,12 +511,13 @@ export class RosettaAI {
       if (providerKey === Provider.OpenAI && !this.azureOpenAIClient && shouldUseOpenAIResponsesApi(effectiveParams)) {
         const client = this.getClientForProvider(providerKey) as OpenAI
         const result = normalizeGenerateResultThinking(
-          await generateViaOpenAIResponses(client, effectiveParams, params.tools)
+          await generateViaOpenAIResponses(client, effectiveParams, params.tools, call)
         )
         if (this._openAICompletions) {
           result.openAIResponse = this._transformToOpenAIResponse(providerKey, result.rawResponse, result)
         }
         this.applyStructuredOutputParsing(params, result)
+        await call?.finish('completed')
         return result
       }
 
@@ -524,19 +529,21 @@ export class RosettaAI {
       if (isCustom && mapper.executeGenerate && customConfig) {
         // Custom Provider Execution Path
         const result = normalizeGenerateResultThinking(
-          await mapper.executeGenerate(mappedParams, apiKey, customConfig, params)
+          await mapper.executeGenerate(mappedParams, apiKey, customConfig, effectiveParams, call)
         )
         if (this._openAICompletions) {
           result.openAIResponse = this._transformToOpenAIResponse(providerKey, result.rawResponse, result)
         }
 
         this.applyStructuredOutputParsing(params, result)
-
+        await call?.finish('completed')
         return result
       } else if (this.isBuiltInProvider(providerKey)) {
         // Built-in Provider Execution Path
         const client = this.getClientForProvider(providerKey) // Safe cast here
         let providerResponse: any
+        await call?.beforeDispatch()
+        call?.markDispatched()
 
         // Abort is forwarded through the SDK options for every built-in provider;
         // mapper implementations do not need provider-specific cancellation hooks.
@@ -570,6 +577,7 @@ export class RosettaAI {
           throw new RosettaAIError(`Unsupported built-in provider: ${_e}`)
         }
 
+        call?.transportComplete()
         // --- Map Response ---
         if (!mapper.mapFromProviderResponse) {
           throw new MappingError(
@@ -578,7 +586,7 @@ export class RosettaAI {
           )
         }
         const result = normalizeGenerateResultThinking(
-          mapper.mapFromProviderResponse(providerResponse, model, params.tools)
+          mapper.mapFromProviderResponse(providerResponse, model, params.tools, call)
         )
         result.rawResponse = providerResponse // Ensure rawResponse is attached
 
@@ -588,7 +596,7 @@ export class RosettaAI {
         }
 
         this.applyStructuredOutputParsing(params, result)
-
+        await call?.finish('completed')
         return result
       } else {
         // Custom provider without executeGenerate or built-in provider without mapFromProviderResponse
@@ -597,6 +605,8 @@ export class RosettaAI {
         )
       }
     } catch (error) {
+      await call?.finish('failed')
+      if (call?.isCallbackError(error)) throw error
       // Check if error is already RosettaAIError before wrapping
       if (error instanceof RosettaAIError) {
         throw error
@@ -610,12 +620,23 @@ export class RosettaAI {
     if (parsedContent !== undefined) result.parsedContent = parsedContent
   }
 
+  private createInferenceCall(
+    mapper: IProviderMapper, provider: ProviderKey, model: string, operation: 'generate' | 'stream'
+  ): InferenceCall | undefined {
+    if (!this.config.inferenceLifecycle) return undefined
+    if (!mapper.supportsInferenceLifecycle) {
+      throw new UnsupportedFeatureError(provider, 'inference lifecycle (mapper has not opted in)')
+    }
+    return new InferenceCall(this.config.inferenceLifecycle, { operation, provider, model })
+  }
+
   private createCancellableStream<T>(
     factory: (signal: AbortSignal, registerAbort: (abortFn: () => void) => void) => AsyncIterable<T>
   ): CancellableAsyncIterable<T> {
     const controller = new AbortController()
     let abortFn: (() => void) | undefined
     let cancelled = false
+    let wrapped: AsyncGenerator<T, void, unknown>
 
     const registerAbort = (fn: () => void) => {
       abortFn = fn
@@ -625,13 +646,19 @@ export class RosettaAI {
     const triggerAbort = (reason?: any) => {
       if (cancelled) return
       cancelled = true
-      abortFn?.()
       if (!controller.signal.aborted) {
         controller.abort(reason)
       }
+      abortFn?.()
+      // Close the same iterator even when the consumer is paused at a yielded chunk.
+      // cancel() remains synchronous; explicit next/return/throw can await cleanup.
+      void wrapped.return(undefined).catch(() => {
+        // The lifecycle keeps an unsettled receipt if its completion callback fails.
+        // Cancellation must not produce an unhandled promise rejection.
+      })
     }
 
-    const wrapped = (async function* (signal: AbortSignal, source: AsyncIterable<T>) {
+    wrapped = (async function* (signal: AbortSignal, source: AsyncIterable<T>) {
       try {
         for await (const chunk of source) {
           if (signal.aborted) {
@@ -654,26 +681,29 @@ export class RosettaAI {
   }
 
   private abortStreamResource(resource: any, reason?: any): void {
+    const ignoreAbortFailure = () => {
+      // Transport cleanup is best effort; inference settlement owns error reporting.
+    }
     try {
       if (!resource) return
       if (typeof resource.abort === 'function') {
-        resource.abort(reason)
+        void Promise.resolve(resource.abort(reason)).catch(ignoreAbortFailure)
         return
       }
       if (resource.controller && typeof resource.controller.abort === 'function') {
-        resource.controller.abort(reason)
+        void Promise.resolve(resource.controller.abort(reason)).catch(ignoreAbortFailure)
         return
       }
       if (typeof resource.cancel === 'function') {
-        resource.cancel(reason)
+        void Promise.resolve(resource.cancel(reason)).catch(ignoreAbortFailure)
         return
       }
       if (typeof resource.return === 'function') {
-        resource.return(undefined)
+        void Promise.resolve(resource.return(undefined)).catch(ignoreAbortFailure)
         return
       }
       if (resource.body && typeof resource.body.cancel === 'function') {
-        resource.body.cancel(reason)
+        void Promise.resolve(resource.body.cancel(reason)).catch(ignoreAbortFailure)
       }
     } catch (abortError) {
       console.warn('Failed to abort stream resource', abortError)
@@ -718,13 +748,41 @@ export class RosettaAI {
     abortSignal: AbortSignal,
     registerAbort: (abortFn: () => void) => void
   ): AsyncIterable<StreamChunk> {
-    yield* normalizeThinkingStream(this.streamProviderInternal(params, abortSignal, registerAbort))
+    let call: InferenceCall | undefined
+    let settled = false
+    let messageStop: StreamChunk | undefined
+    try {
+      const source = this.streamProviderInternal(params, abortSignal, registerAbort, value => { call = value })
+      for await (const chunk of normalizeThinkingStream(source)) {
+        // Usage trailers may follow the provider stop marker. Do not expose success
+        // until the mapper has drained those trailers and accounting has completed.
+        if (call && chunk.type === 'message_stop') {
+          messageStop = chunk
+          continue
+        }
+        if (chunk.type === 'final_result' || chunk.type === 'error') {
+          settled = true
+          await call?.finish(chunk.type === 'error' ? 'failed' : 'completed')
+          if (chunk.type === 'final_result' && messageStop) yield messageStop
+          messageStop = undefined
+        }
+        yield chunk
+      }
+      if (!settled) {
+        settled = true
+        await call?.finish(abortSignal.aborted ? 'cancelled' : call.transportCompleted ? 'completed' : 'failed')
+        if (!abortSignal.aborted && messageStop) yield messageStop
+      }
+    } finally {
+      if (!settled) await call?.finish('cancelled')
+    }
   }
 
   private async *streamProviderInternal(
     params: GenerateParams,
     abortSignal: AbortSignal,
-    registerAbort: (abortFn: () => void) => void
+    registerAbort: (abortFn: () => void) => void,
+    onCall: (call: InferenceCall | undefined) => void
   ): AsyncIterable<StreamChunk> {
     const providerKey = params.provider // Now ProviderKey
     let mapper: IProviderMapper
@@ -732,6 +790,7 @@ export class RosettaAI {
     let customConfig: CustomProviderConfig | undefined
     let apiKey: string | undefined
     let model: string | undefined
+    let call: InferenceCall | undefined
 
     try {
       if (abortSignal.aborted) return
@@ -752,18 +811,23 @@ export class RosettaAI {
       }
 
       const effectiveParams = { ...params, model, stream: true }
+      call = this.createInferenceCall(mapper, providerKey, model, 'stream')
+      onCall(call)
       this.checkUnsupportedFeatures(providerKey, effectiveParams, 'Generate', !!this.azureOpenAIClient)
 
       // gpt-5.x chat traffic routes through the Responses API (see generate() for rationale).
       if (providerKey === Provider.OpenAI && !this.azureOpenAIClient && shouldUseOpenAIResponsesApi(effectiveParams)) {
         const client = this.getClientForProvider(providerKey) as OpenAI
         const responsesParams = mapToOpenAIResponsesChatParams(effectiveParams)
+        await call?.beforeDispatch()
+        if (abortSignal.aborted) return
+        call?.markDispatched()
         const providerStream = await client.responses.create(
           { ...responsesParams, stream: true },
           { signal: abortSignal }
         )
         registerAbort(() => this.abortStreamResource(providerStream))
-        const mappedStream = mapOpenAIResponsesChatStream(providerStream, effectiveParams.model!, params.tools)
+        const mappedStream = mapOpenAIResponsesChatStream(providerStream, effectiveParams.model!, params.tools, call)
         yield* this.forwardCancellableStream(mappedStream, abortSignal, () =>
           this.abortStreamResource(providerStream)
         )
@@ -780,7 +844,7 @@ export class RosettaAI {
       // --- Execute ---
       if (isCustom && mapper.executeStream && customConfig) {
         // Custom Provider Execution Path
-        const customStream = mapper.executeStream(mappedParams, apiKey, customConfig, params, abortSignal)
+        const customStream = mapper.executeStream(mappedParams, apiKey, customConfig, effectiveParams, abortSignal, call)
         registerAbort(() => this.abortStreamResource(customStream))
         yield* this.forwardCancellableStream(customStream, abortSignal, () =>
           this.abortStreamResource(customStream)
@@ -789,6 +853,9 @@ export class RosettaAI {
         // Built-in Provider Execution Path
         const client = this.getClientForProvider(providerKey)
         let providerStream: any
+        await call?.beforeDispatch()
+        if (abortSignal.aborted) return
+        call?.markDispatched()
 
         if (providerKey === Provider.Anthropic) {
           // Detect :1m suffix for extended context or use explicit betas from providerOptions
@@ -850,7 +917,7 @@ export class RosettaAI {
 
         registerAbort(() => this.abortStreamResource(providerStream))
         // Pass the full params object to mapProviderStream and honor cancellation
-        const mappedStream = mapper.mapProviderStream(providerStream as AsyncIterable<any>, params)
+        const mappedStream = mapper.mapProviderStream(providerStream as AsyncIterable<any>, effectiveParams, call)
         yield* this.forwardCancellableStream(mappedStream, abortSignal, () =>
           this.abortStreamResource(providerStream)
         )
@@ -862,7 +929,8 @@ export class RosettaAI {
       }
     } catch (error) {
       // Check if error is already RosettaAIError before wrapping
-      const wrappedError = error instanceof RosettaAIError ? error : this.wrapProviderError(error, providerKey)
+      const wrappedError = error instanceof RosettaAIError || call?.isCallbackError(error)
+        ? error as Error : this.wrapProviderError(error, providerKey)
       yield { type: 'error', data: { error: wrappedError } }
       return // Exit generator after yielding error
     }

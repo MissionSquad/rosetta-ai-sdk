@@ -1,5 +1,6 @@
 import {
   GenerateParams,
+  ProviderUsageObserver,
   GenerateResult,
   EmbedParams,
   EmbedResult,
@@ -26,6 +27,8 @@ import { CustomProviderConfig } from '../../types/custom.types'
 export interface IProviderMapper {
   /** The provider key (enum value or custom string) this mapper handles. */
   readonly provider: ProviderKey
+  /** Opt in only when raw usage is observed before validation and transport is gated. */
+  readonly supportsInferenceLifecycle?: boolean
 
   // --- Chat/Completion Mapping ---
 
@@ -56,7 +59,7 @@ export interface IProviderMapper {
    * @throws {MappingError} If the response structure is unexpected or argument parsing fails.
    * @throws {ToolArgumentValidationError} If tool arguments fail Zod validation.
    */
-  mapFromProviderResponse?(response: any, modelId: string, originalTools?: RosettaTool<any>[]): GenerateResult // Provider-specific response type
+  mapFromProviderResponse?(response: any, modelId: string, originalTools?: RosettaTool<any>[], observer?: ProviderUsageObserver): GenerateResult // Provider-specific response type
 
   /**
    * Maps the provider's streaming chat completion response chunks to RosettaAI's StreamChunk union type.
@@ -72,7 +75,7 @@ export interface IProviderMapper {
    * @throws {MappingError} If argument parsing fails during streaming.
    * @throws {ToolArgumentValidationError} If tool arguments fail Zod validation during streaming (yielded as error).
    */
-  mapProviderStream?(stream: AsyncIterable<any>, originalParams: GenerateParams): AsyncIterable<StreamChunk> // Provider-specific stream chunk type
+  mapProviderStream?(stream: AsyncIterable<any>, originalParams: GenerateParams, observer?: ProviderUsageObserver): AsyncIterable<StreamChunk> // Provider-specific stream chunk type
 
   // --- Embedding Mapping ---
 
@@ -171,7 +174,8 @@ export interface IProviderMapper {
     mappedParams: any,
     apiKey: string | undefined,
     providerConfig: CustomProviderConfig,
-    originalParams: GenerateParams // Pass original params for access to tools
+    originalParams: GenerateParams, // Pass original params for access to tools
+    observer?: ProviderUsageObserver
   ): Promise<GenerateResult>
 
   /**
@@ -193,7 +197,8 @@ export interface IProviderMapper {
     apiKey: string | undefined,
     providerConfig: CustomProviderConfig,
     originalParams: GenerateParams, // Pass original params for access to tools
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    observer?: ProviderUsageObserver
   ): AsyncIterable<StreamChunk>
 
   /**

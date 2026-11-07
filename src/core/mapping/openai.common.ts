@@ -1,3 +1,4 @@
+import type { ProviderUsageObserver } from '../../types/usage.types'
 import OpenAI from 'openai'
 import {
   ChatCompletionContentPart as OpenAIContentPart,
@@ -9,7 +10,6 @@ import {
   ChatCompletion,
   ChatCompletionChunk
 } from 'openai/resources/chat/completions'
-import { Stream } from 'openai/streaming'
 import {
   GenerateResult,
   Provider,
@@ -33,6 +33,7 @@ import { extractOpenAIThinking } from './openai-thinking'
 
 export interface OpenAIThinkingMappingOptions {
   captureOpenAICompatibleReplay: boolean
+  expectedChoices?: number
 }
 
 export function mapRoleToOpenAI(role: RosettaMessage['role']): OpenAIRole {
@@ -208,8 +209,11 @@ export function mapFromOpenAIResponse(
   _provider: ProviderKey,
   modelUsed: string,
   originalTools: RosettaTool<any>[] | undefined,
-  options: OpenAIThinkingMappingOptions
+  options: OpenAIThinkingMappingOptions,
+  observer?: ProviderUsageObserver
 ): GenerateResult {
+  observer?.observeRequestId(safeGet<unknown>(response, '_request_id') ?? response?.id)
+  observer?.observeUsage(mapTokenUsage(response?.usage, 'openai'), true)
   // Add null/undefined check for response.choices before accessing index 0
   const choice = response?.choices?.[0]
   if (!choice) {
@@ -222,7 +226,7 @@ export function mapFromOpenAIResponse(
       content: null,
       toolCalls: undefined,
       finishReason,
-      usage: mapTokenUsage(response?.usage), // Use common utility, handle potential null response
+      usage: mapTokenUsage(response?.usage, 'openai'), // Use common utility, handle potential null response
       citations: undefined,
       parsedContent: null,
       thinkingSteps: undefined,
@@ -261,7 +265,7 @@ export function mapFromOpenAIResponse(
     content: textContent,
     toolCalls: mappedToolCalls, // Use validated (but still raw) tool calls
     finishReason: choice.finish_reason,
-    usage: mapTokenUsage(response.usage), // Use common utility
+    usage: mapTokenUsage(response.usage, 'openai'), // Use common utility
     citations: undefined,
     parsedContent: parsedJson,
     thinkingSteps: extraction.thinkingDeltas.join('') || null,
@@ -314,11 +318,12 @@ export function wrapOpenAIError(error: unknown, provider: ProviderKey): RosettaA
 }
 
 export async function* mapOpenAIStream(
-  stream: Stream<ChatCompletionChunk>,
+  stream: AsyncIterable<ChatCompletionChunk>,
   provider: ProviderKey,
   modelId: string, // Accept modelId as argument
   originalTools: RosettaTool<any>[] | undefined,
-  options: OpenAIThinkingMappingOptions
+  options: OpenAIThinkingMappingOptions,
+  observer?: ProviderUsageObserver
 ): AsyncIterable<StreamChunk> {
   let accumulatedContent = ''
   const accumulatedToolCalls: Record<
@@ -327,6 +332,9 @@ export async function* mapOpenAIStream(
   > = {}
   let finalUsage: TokenUsage | undefined
   let finalFinishReason: string | null = null
+  const finishedChoices = new Set<number>()
+  const expectedChoices = options.expectedChoices ?? 1
+  let deferredValidation: { error: unknown } | undefined
   let isJsonMode = false
   let messageStartYielded = false // Track if message_start has been yielded
   const accumulatedReasoningDetails: unknown[] = []
@@ -347,6 +355,20 @@ export async function* mapOpenAIStream(
 
   try {
     for await (const chunk of stream) {
+      observer?.observeRequestId(chunk.id)
+      for (const choice of chunk.choices) if (choice.finish_reason) finishedChoices.add(choice.index)
+      // Update usage if present and aggregatedResult exists
+      if (aggregatedResult && chunk.usage) {
+        finalUsage = mapTokenUsage(chunk.usage, 'openai') // Use common utility
+        aggregatedResult.usage = finalUsage
+        // Allow loop to continue to check for other fields like delta.content
+        // in the same chunk, as some providers (like Novita) send them together.
+        // Removed: continue
+      }
+
+      if (chunk.usage) observer?.observeUsage(finalUsage, finishedChoices.size >= expectedChoices)
+      if (deferredValidation) continue
+
       // Yield message_start only once, when the first relevant chunk arrives
       if (!messageStartYielded && (chunk.choices[0]?.delta || chunk.model)) {
         // Update model in aggregatedResult if a more specific one arrives in the stream
@@ -355,15 +377,6 @@ export async function* mapOpenAIStream(
         }
         yield { type: 'message_start', data: { provider, model: aggregatedResult?.model ?? modelId } }
         messageStartYielded = true
-      }
-
-      // Update usage if present and aggregatedResult exists
-      if (aggregatedResult && chunk.usage) {
-        finalUsage = mapTokenUsage(chunk.usage) // Use common utility
-        aggregatedResult.usage = finalUsage
-        // Allow loop to continue to check for other fields like delta.content
-        // in the same chunk, as some providers (like Novita) send them together.
-        // Removed: continue
       }
 
       // Check for choices AFTER processing potential usage in the same chunk
@@ -448,38 +461,45 @@ export async function* mapOpenAIStream(
             const toolDefinition = originalTools?.find(t => t.function.name === tc.function!.name)
             const rawArguments = tc.function.arguments ?? '{}'
 
-            if (toolDefinition) {
-              let parsedArgs: any
-              try {
-                parsedArgs = JSON.parse(rawArguments)
-              } catch (parseError) {
-                // When finish_reason is 'length', the LLM ran out of output tokens and
-                // truncated the JSON mid-stream. Provide a specific, actionable message.
-                const truncated = reason === 'length'
-                const hint = truncated
-                  ? ` The LLM output was truncated (finish_reason=length) — the tool call arguments exceeded the model's remaining output token budget. Consider increasing max_tokens or reducing argument size (e.g. shorter systemPrompt).`
-                  : ''
-                const argsPreview = rawArguments.length > 200
-                  ? rawArguments.slice(0, 200) + `... (${rawArguments.length} chars total)`
-                  : rawArguments
-                throw new MappingError(
-                  `Failed to parse arguments for tool '${tc.function!.name}' (ID: ${tc.id}).${hint} Raw args preview: ${argsPreview}`,
-                  provider,
-                  'mapOpenAIStream validation',
-                  parseError
-                )
+            try {
+              if (toolDefinition) {
+                let parsedArgs: any
+                try {
+                  parsedArgs = JSON.parse(rawArguments)
+                } catch (parseError) {
+                  // When finish_reason is 'length', the LLM ran out of output tokens and
+                  // truncated the JSON mid-stream. Provide a specific, actionable message.
+                  const truncated = reason === 'length'
+                  const hint = truncated
+                    ? ` The LLM output was truncated (finish_reason=length) — the tool call arguments exceeded the model's remaining output token budget. Consider increasing max_tokens or reducing argument size (e.g. shorter systemPrompt).`
+                    : ''
+                  const argsPreview = rawArguments.length > 200
+                    ? rawArguments.slice(0, 200) + `... (${rawArguments.length} chars total)`
+                    : rawArguments
+                  throw new MappingError(
+                    `Failed to parse arguments for tool '${tc.function!.name}' (ID: ${tc.id}).${hint} Raw args preview: ${argsPreview}`,
+                    provider,
+                    'mapOpenAIStream validation',
+                    parseError
+                  )
+                }
+                const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
+                if (!validationResult.success) {
+                  throw new ToolArgumentValidationError(
+                    `Streamed arguments failed validation for tool '${tc.function!.name}'.`,
+                    validationResult.error.issues,
+                    tc.function!.name,
+                    tc.id
+                  )
+                }
+              } else {
+                console.warn(`Skipping validation for unknown streamed tool '${tc.function!.name}'.`)
               }
-              const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
-              if (!validationResult.success) {
-                throw new ToolArgumentValidationError(
-                  `Streamed arguments failed validation for tool '${tc.function!.name}'.`,
-                  validationResult.error.issues,
-                  tc.function!.name,
-                  tc.id
-                )
-              }
-            } else {
-              console.warn(`Skipping validation for unknown streamed tool '${tc.function!.name}'.`)
+
+            } catch (error) {
+              if (!observer) throw error
+              deferredValidation = { error }
+              break
             }
 
             // Yield done chunk after validation (or skipping)
@@ -498,6 +518,8 @@ export async function* mapOpenAIStream(
           }
         }
 
+        if (deferredValidation) continue
+
         if (isJsonMode) {
           let finalParsedJson = null
           try {
@@ -508,6 +530,9 @@ export async function* mapOpenAIStream(
         }
       }
     } // End for await loop
+
+    observer?.transportComplete()
+    if (deferredValidation) throw deferredValidation.error
 
     // --- Stream End Logic ---
     finalFinishReason = finalFinishReason ?? 'stop' // Default finish reason

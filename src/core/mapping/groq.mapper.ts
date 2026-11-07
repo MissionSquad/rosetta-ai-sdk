@@ -1,3 +1,6 @@
+import type { ChatCompletionChunk as OpenAIChatCompletionChunk } from 'openai/resources/chat/completions'
+import { mapOpenAIStream } from './openai.common'
+import type { ProviderUsageObserver } from '../../types/usage.types'
 import Groq, { type Uploadable as GroqUploadable } from 'groq-sdk'
 import {
   ChatCompletionMessageParam,
@@ -19,7 +22,6 @@ import {
   StreamChunk,
   RosettaMessage,
   RosettaToolCallRequest,
-  TokenUsage,
   Provider,
   EmbedParams,
   EmbedResult,
@@ -38,6 +40,7 @@ import * as GroqEmbedMapper from './groq.embed.mapper'
 import * as GroqAudioMapper from './groq.audio.mapper'
 
 export class GroqMapper implements IProviderMapper {
+  readonly supportsInferenceLifecycle = true
   readonly provider = Provider.Groq
 
   // --- Parameter Mapping (Chat/Completion) ---
@@ -310,7 +313,9 @@ export class GroqMapper implements IProviderMapper {
       })
   }
 
-  mapFromProviderResponse(response: ChatCompletion, modelUsed: string): GenerateResult {
+  mapFromProviderResponse(response: ChatCompletion, modelUsed: string, _originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
+    observer?.observeRequestId(response.id)
+    observer?.observeUsage(mapTokenUsage(response.usage, 'openai'), true)
     const choice = response.choices[0]
     if (!choice) {
       console.warn('Groq response missing choices.')
@@ -319,7 +324,7 @@ export class GroqMapper implements IProviderMapper {
         content: null,
         toolCalls: undefined,
         finishReason: finishReason,
-        usage: mapTokenUsage(response.usage), // Use common utility
+        usage: mapTokenUsage(response.usage, 'openai'), // Use common utility
         citations: undefined,
         parsedContent: null,
         thinkingSteps: undefined,
@@ -346,7 +351,7 @@ export class GroqMapper implements IProviderMapper {
       content: textContent,
       toolCalls: mappedToolCalls,
       finishReason: standardizedFR,
-      usage: mapTokenUsage(response.usage), // Use common utility
+      usage: mapTokenUsage(response.usage, 'openai'), // Use common utility
       citations: undefined,
       parsedContent: parsedJson,
       thinkingSteps,
@@ -359,189 +364,32 @@ export class GroqMapper implements IProviderMapper {
 
   async *mapProviderStream(
     stream: AsyncIterable<ChatCompletionChunk>,
-    _originalParams: GenerateParams // Changed from originalTools
+    originalParams: GenerateParams,
+    observer?: ProviderUsageObserver
   ): AsyncIterable<StreamChunk> {
-    // Note: originalParams is not directly used in this implementation,
-    // but included for interface consistency. Tool validation happens in mapFromProviderResponse.
-    let accumulatedContent = ''
-    const accumulatedToolCalls: Record<
-      number,
-      Partial<RosettaToolCallRequest & { index: number; function: { name: string; arguments: string } }>
-    > = {}
-    let finalUsage: TokenUsage | undefined
-    let finalFinishReason: string | null = null
-    let model = ''
-    let aggregatedResult: GenerateResult | null = null
-
-    try {
+    const wrapError = this.wrapProviderError.bind(this)
+    const provider = this.provider
+    async function* normalizeStream(): AsyncIterable<OpenAIChatCompletionChunk> {
+      try {
       for await (const chunk of stream) {
-        // FIX: Add safety check for chunk structure
-        if (typeof chunk !== 'object' || chunk === null) {
-          console.warn('Received unexpected non-object chunk from Groq stream:', chunk)
-          continue
-        }
-
-        if (!model && chunk.model) {
-          model = chunk.model
-          yield { type: 'message_start', data: { provider: this.provider, model: model } }
-          aggregatedResult = {
-            content: '',
-            toolCalls: [],
-            finishReason: null,
-            usage: undefined,
-            model: model,
-            thinkingSteps: null,
-            citations: undefined,
-            parsedContent: null,
-            rawResponse: undefined
-          }
-        }
-
-        // FIX: Add safety check for choices array
-        const choice = chunk.choices?.[0]
-        if (!choice) {
-          // Handle chunks without choices (like usage-only chunks)
-          const usageFromChunk = safeGet<Groq.CompletionUsage>(chunk, 'x_groq', 'usage')
-          if (usageFromChunk) {
-            finalUsage = mapTokenUsage(usageFromChunk) // Use common utility
-            if (aggregatedResult) aggregatedResult.usage = finalUsage
-          }
-          continue // Skip to next chunk if no choice
-        }
-
-        if (choice.delta?.reasoning) {
-          if (aggregatedResult) {
-            aggregatedResult.thinkingSteps = (aggregatedResult.thinkingSteps ?? '') + choice.delta.reasoning
-          }
-          yield { type: 'thinking_delta', data: { delta: choice.delta.reasoning } }
-        }
-        if (choice.delta?.content) {
-          accumulatedContent += choice.delta.content
-          if (aggregatedResult) aggregatedResult.content = accumulatedContent
-          yield { type: 'content_delta', data: { delta: choice.delta.content } }
-        }
-        if (choice.delta?.tool_calls) {
-          for (const tcChunk of choice.delta.tool_calls) {
-            const index = tcChunk.index
-            if (typeof index !== 'number') continue
-            if (!accumulatedToolCalls[index])
-              accumulatedToolCalls[index] = { index, function: { name: '', arguments: '' } }
-            const currentTool = accumulatedToolCalls[index]
-            if (tcChunk.id) currentTool.id = tcChunk.id
-            if (tcChunk.type) currentTool.type = tcChunk.type as 'function'
-            if (tcChunk.function?.name) currentTool.function!.name = tcChunk.function.name
-            if (tcChunk.function?.arguments) currentTool.function!.arguments += tcChunk.function.arguments
-            if (currentTool.id && currentTool.function?.name && !(currentTool as any).yieldedStart) {
-              ;(currentTool as any).yieldedStart = true
-              yield {
-                type: 'tool_call_start',
-                data: {
-                  index,
-                  toolCall: { id: currentTool.id, type: 'function', function: { name: currentTool.function.name } }
-                }
-              }
-            }
-            if (tcChunk.function?.arguments) {
-              yield {
-                type: 'tool_call_delta',
-                data: {
-                  index,
-                  id: currentTool.id ?? `unk_groq_${index}`,
-                  functionArgumentChunk: tcChunk.function.arguments
-                }
-              }
-            }
-          }
-        }
-        if (choice.finish_reason) {
-          const reason = choice.finish_reason
-          finalFinishReason =
-            reason === 'tool_calls'
-              ? 'tool_calls'
-              : reason === 'stop'
-              ? 'stop'
-              : reason === 'length'
-              ? 'length'
-              : reason
-
-          if (aggregatedResult) aggregatedResult.finishReason = finalFinishReason
-
-          for (const tc of Object.values(accumulatedToolCalls)) {
-            if (!(tc as any).yieldedDone && tc.id && tc.index !== undefined) {
-              yield { type: 'tool_call_done', data: { index: tc.index, id: tc.id } }
-              ;(tc as any).yieldedDone = true
-              if (
-                aggregatedResult &&
-                tc.type === 'function' &&
-                tc.function?.name &&
-                tc.function?.arguments !== undefined
-              ) {
-                aggregatedResult.toolCalls = aggregatedResult.toolCalls ?? []
-                aggregatedResult.toolCalls.push({
-                  id: tc.id,
-                  type: tc.type,
-                  function: { name: tc.function.name, arguments: tc.function.arguments }
-                })
-              }
-            }
-          }
-        }
-        // FIX: Capture usage even if it arrives in the same chunk as finish_reason or delta
-        const usageFromChunk = safeGet<Groq.CompletionUsage>(chunk, 'x_groq', 'usage')
-        if (usageFromChunk) {
-          finalUsage = mapTokenUsage(usageFromChunk) // Use common utility
-          if (aggregatedResult) aggregatedResult.usage = finalUsage
-        }
-      } // End for await loop
-
-      // --- FIX: Ensure final lifecycle events are always yielded ---
-      finalFinishReason = finalFinishReason ?? 'stop' // Default to stop if null
-      if (aggregatedResult) aggregatedResult.finishReason = finalFinishReason
-
-      yield { type: 'message_stop', data: { finishReason: finalFinishReason } }
-
-      // Yield final usage, even if undefined
-      // @ts-ignore
-      yield { type: 'final_usage', data: { usage: finalUsage } }
-
-      if (aggregatedResult) {
-        let finalParsed = null
-        if (
-          aggregatedResult.content &&
-          (aggregatedResult.content.trim().startsWith('{') || aggregatedResult.content.trim().startsWith('['))
-        ) {
-          try {
-            finalParsed = JSON.parse(aggregatedResult.content)
-          } catch {}
-        }
-        aggregatedResult.parsedContent = finalParsed
-        if (aggregatedResult.content === '') aggregatedResult.content = null
-        if (aggregatedResult.toolCalls?.length === 0) aggregatedResult.toolCalls = undefined
-        yield { type: 'final_result', data: { result: aggregatedResult } }
-      } else {
-        // Still yield a final result even if aggregation failed (e.g., only usage chunk received)
-        console.warn('Groq stream finished but no aggregated result was built. Yielding empty final result.')
+        if (!chunk || typeof chunk !== 'object') continue
+        observer?.observeRequestId(chunk.x_groq?.id)
         yield {
-          type: 'final_result',
-          data: {
-            result: {
-              content: null,
-              toolCalls: undefined,
-              finishReason: finalFinishReason,
-              usage: finalUsage,
-              model: model,
-              thinkingSteps: null,
-              citations: undefined,
-              parsedContent: null,
-              rawResponse: undefined
-            }
-          }
+          ...chunk,
+          choices: (chunk.choices ?? []).map(choice => ({ ...choice, logprobs: null })),
+          usage: chunk.x_groq?.usage ? {
+            prompt_tokens: chunk.x_groq.usage.prompt_tokens,
+            completion_tokens: chunk.x_groq.usage.completion_tokens,
+            total_tokens: chunk.x_groq.usage.total_tokens
+          } : undefined
         }
       }
-      // --- End FIX ---
-    } catch (error) {
-      const mappedError = this.wrapProviderError(error, this.provider)
-      yield { type: 'error', data: { error: mappedError } }
+      } catch (error) { throw wrapError(error, provider) }
+    }
+    for await (const chunk of mapOpenAIStream(normalizeStream(), this.provider, originalParams?.model ?? '', observer ? originalParams?.tools : undefined,
+      { captureOpenAICompatibleReplay: false }, observer)) {
+      if (chunk.type === 'json_done') continue
+      yield chunk
     }
   }
 
