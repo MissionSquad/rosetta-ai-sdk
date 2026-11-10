@@ -235,7 +235,8 @@ export abstract class BaseCustomMapper implements IProviderMapper {
         `Arguments failed validation for tool '${call.name}'.`,
         validationResult.error.issues,
         call.name,
-        call.id
+        call.id,
+        call.arguments
       )
     }
     // Validation passed
@@ -275,7 +276,7 @@ export abstract class BaseCustomMapper implements IProviderMapper {
    * @param toolName - The name of the tool being called (for error context).
    * @param toolCallId - The ID of the tool call (for error context).
    * @returns The parsed arguments object.
-   * @throws {MappingError} If parsing fails for 'jsonString' format.
+   * @throws {ToolArgumentValidationError} If parsing fails for 'jsonString' format.
    */
   protected parseToolArguments(rawArguments: any, toolName: string, toolCallId?: string): any {
     const format = this.config.toolConfig?.toolCallInputFormat ?? 'jsonString'
@@ -300,25 +301,15 @@ export abstract class BaseCustomMapper implements IProviderMapper {
         try {
           // Attempt to stringify non-string input before parsing, might indicate an issue upstream
           rawArguments = JSON.stringify(rawArguments)
-        } catch (stringifyError) {
-          throw new MappingError(
-            `Failed to stringify unexpected argument type for tool '${toolName}' (ID: ${toolCallId}) before JSON parsing. Received type: ${typeof rawArguments}`,
-            this.provider as string,
-            'parseToolArguments',
-            stringifyError
-          )
+        } catch {
+          throw ToolArgumentValidationError.invalidJson(toolName, toolCallId, rawArguments)
         }
       }
       try {
         // Handle empty string case - return empty object
         return rawArguments.trim() === '' ? {} : JSON.parse(rawArguments)
-      } catch (parseError) {
-        throw new MappingError(
-          `Failed to parse JSON string arguments for tool '${toolName}' (ID: ${toolCallId})`,
-          this.provider as string,
-          'parseToolArguments validation',
-          parseError
-        )
+      } catch {
+        throw ToolArgumentValidationError.invalidJson(toolName, toolCallId, rawArguments)
       }
     }
   }
@@ -336,8 +327,8 @@ export abstract class BaseCustomMapper implements IProviderMapper {
    * @param argsPath - Path to the tool arguments within each tool call object.
    * @param originalTools - The original RosettaTool definitions for validation.
    * @returns An array of RosettaToolCallRequest objects or undefined.
-   * @throws {ToolArgumentValidationError} If validation fails.
-   * @throws {MappingError} If parsing fails or paths are invalid.
+   * @throws {ToolArgumentValidationError} If arguments fail parsing or validation.
+   * @throws {MappingError} If provider response paths are invalid.
    */
   protected mapAndValidateToolCallsHelper(
     providerResponse: any,
@@ -360,7 +351,7 @@ export abstract class BaseCustomMapper implements IProviderMapper {
       const rawArgs = this.safeGetResponsePath(rawCall, argsPath)
 
       if (!id || !name) {
-        console.warn(`[${this.provider}] Skipping tool call due to missing id or name:`, rawCall)
+        console.warn(`[${this.provider}] Skipping tool call due to missing id or name.`)
         continue
       }
 

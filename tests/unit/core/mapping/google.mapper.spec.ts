@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import {
   GenerateContentParameters,
   GenerateContentResponse,
@@ -23,7 +24,7 @@ import {
   TranscribeParams,
   TranslateParams
 } from '../../../../src/types'
-import { MappingError, ProviderAPIError, UnsupportedFeatureError } from '../../../../src/errors'
+import { MappingError, ProviderAPIError, ToolArgumentValidationError, UnsupportedFeatureError } from '../../../../src/errors'
 
 // Mock the embed mapper functions
 jest.mock('../../../../src/core/mapping/google.embed.mapper', () => ({
@@ -704,6 +705,36 @@ describe('Google Mapper', () => {
         expect((result.config as any)?.customParam).toBe('kept')
         expect((result.config as any)?.thinkingConfig).toEqual({ includeThoughts: true })
       })
+    })
+  })
+
+  it.each([false, true])('validates Google client tool arguments (stream=%s)', async streaming => {
+    const response = {
+      candidates: [createMockCandidate([{
+        functionCall: { id: 'google-call', name: 'lookup', args: { session_id: 'wrong-case' } }
+      }], FinishReason.STOP)]
+    }
+    const tools: GenerateParams['tools'] = [{
+      type: 'function',
+      function: { name: 'lookup', parameters: { type: 'object' }, zodSchema: z.object({ sessionId: z.string() }) }
+    }]
+    let error: unknown
+    if (streaming) {
+      const chunks = await collectStreamChunks(mapper.mapProviderStream(
+        mockGoogleStreamGenerator([response]), { model: 'gemini', messages: [], tools }
+      ))
+      error = chunks.find(chunk => chunk.type === 'error')?.data.error
+      expect(chunks.some(chunk => chunk.type === 'tool_call_done' || chunk.type === 'final_result')).toBe(false)
+    } else {
+      try {
+        mapper.mapFromProviderResponse(response, 'gemini', tools)
+      } catch (caught) {
+        error = caught
+      }
+    }
+    expect(error).toBeInstanceOf(ToolArgumentValidationError)
+    expect(error).toMatchObject({
+      toolName: 'lookup', toolCallId: 'google-call', receivedInput: { session_id: 'wrong-case' }
     })
   })
 

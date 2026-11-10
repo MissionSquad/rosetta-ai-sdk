@@ -151,6 +151,30 @@ export function mapContentForOpenAIRole(
   }
 }
 
+export function validateChatToolArguments(
+  name: string,
+  id: string,
+  rawArguments: string,
+  toolDefinition: RosettaTool,
+  truncated = false
+): void {
+  let parsedArgs: unknown
+  try {
+    parsedArgs = JSON.parse(rawArguments)
+  } catch {
+    throw ToolArgumentValidationError.invalidJson(
+      name, id, rawArguments, truncated ? 'Tool argument JSON was truncated by the output token limit.' : undefined
+    )
+  }
+
+  const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
+  if (!validationResult.success) {
+    throw new ToolArgumentValidationError(
+      `Arguments failed validation for tool '${name}'.`, validationResult.error.issues, name, id, parsedArgs
+    )
+  }
+}
+
 function mapAndValidateToolCallsFromOpenAI(
   toolCalls: OpenAIToolCall[] | undefined,
   originalTools?: RosettaTool<any>[]
@@ -160,7 +184,7 @@ function mapAndValidateToolCallsFromOpenAI(
   const mappedCalls: RosettaToolCallRequest[] = []
   for (const tc of toolCalls) {
     if (tc.type !== 'function' || !tc.function?.name || !tc.id) {
-      console.warn(`Skipping invalid tool call structure from OpenAI: ${JSON.stringify(tc)}`)
+      console.warn('Skipping invalid tool call structure from OpenAI.')
       continue
     }
 
@@ -170,28 +194,7 @@ function mapAndValidateToolCallsFromOpenAI(
     if (!toolDefinition) {
       console.warn(`Received tool call for unknown tool '${tc.function.name}'. Skipping validation.`)
     } else {
-      // Validate arguments using Zod schema
-      let parsedArgs: any
-      try {
-        parsedArgs = JSON.parse(rawArguments)
-      } catch (parseError) {
-        throw new MappingError(
-          `Failed to parse arguments for tool '${tc.function.name}' (ID: ${tc.id})`,
-          Provider.OpenAI,
-          'mapAndValidateToolCallsFromOpenAI validation',
-          parseError
-        )
-      }
-
-      const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
-      if (!validationResult.success) {
-        throw new ToolArgumentValidationError(
-          `Arguments failed validation for tool '${tc.function.name}'.`,
-          validationResult.error.issues,
-          tc.function.name,
-          tc.id
-        )
-      }
+      validateChatToolArguments(tc.function.name, tc.id, rawArguments, toolDefinition)
     }
 
     // Arguments are valid (or validation skipped), add the raw tool call request
@@ -488,35 +491,7 @@ export async function* mapOpenAIStream(
 
             try {
               if (toolDefinition) {
-                let parsedArgs: any
-                try {
-                  parsedArgs = JSON.parse(rawArguments)
-                } catch (parseError) {
-                  // When finish_reason is 'length', the LLM ran out of output tokens and
-                  // truncated the JSON mid-stream. Provide a specific, actionable message.
-                  const truncated = reason === 'length'
-                  const hint = truncated
-                    ? ` The LLM output was truncated (finish_reason=length) — the tool call arguments exceeded the model's remaining output token budget. Consider increasing max_tokens or reducing argument size (e.g. shorter systemPrompt).`
-                    : ''
-                  const argsPreview = rawArguments.length > 200
-                    ? rawArguments.slice(0, 200) + `... (${rawArguments.length} chars total)`
-                    : rawArguments
-                  throw new MappingError(
-                    `Failed to parse arguments for tool '${tc.function!.name}' (ID: ${tc.id}).${hint} Raw args preview: ${argsPreview}`,
-                    provider,
-                    'mapOpenAIStream validation',
-                    parseError
-                  )
-                }
-                const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
-                if (!validationResult.success) {
-                  throw new ToolArgumentValidationError(
-                    `Streamed arguments failed validation for tool '${tc.function!.name}'.`,
-                    validationResult.error.issues,
-                    tc.function!.name,
-                    tc.id
-                  )
-                }
+                validateChatToolArguments(tc.function.name, tc.id, rawArguments, toolDefinition, reason === 'length')
               } else {
                 console.warn(`Skipping validation for unknown streamed tool '${tc.function!.name}'.`)
               }

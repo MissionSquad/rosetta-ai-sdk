@@ -1706,7 +1706,7 @@ describe('Anthropic Mapper', () => {
       ])
     })
 
-    it('[Hard] should yield a validation error when start-only input is invalid', async () => {
+    it.each([undefined, '{"arg":'])('returns a typed error for invalid streamed tool arguments', async rawInput => {
       const toolCallId = 'toolu_stream_invalid_start'
       const toolName = 'stream_tool'
       const toolParams: GenerateParams = {
@@ -1736,20 +1736,27 @@ describe('Anthropic Mapper', () => {
             caller: { type: 'direct' }
           }
         },
+        ...(rawInput ? [{
+          type: 'content_block_delta' as const,
+          index: 0,
+          delta: { type: 'input_json_delta' as const, partial_json: rawInput }
+        }] : []),
         { type: 'content_block_stop', index: 0 }
       ]
 
       const stream = mapper.mapProviderStream(mockAnthropicStreamGenerator(events), toolParams)
       const results = await collectStreamChunks(stream)
 
-      expect(results).toHaveLength(3)
+      expect(results).toHaveLength(rawInput ? 4 : 3)
       expect(results[1]).toEqual({
         type: 'tool_call_start',
         data: { index: 0, toolCall: { id: toolCallId, type: 'function', function: { name: toolName } } }
       })
-      expect(results[2].type).toBe('error')
-      const errorChunk = results[2] as { type: 'error'; data: { error: Error } }
-      expect(errorChunk.data.error).toBeInstanceOf(ToolArgumentValidationError)
+      const errorChunk = results.find(chunk => chunk.type === 'error')
+      expect(errorChunk?.data.error).toBeInstanceOf(ToolArgumentValidationError)
+      expect(errorChunk?.data.error).toMatchObject({
+        toolName, toolCallId, receivedInput: rawInput ?? {}
+      })
     })
 
     it('[Hard] should handle thinking steps streaming', async () => {

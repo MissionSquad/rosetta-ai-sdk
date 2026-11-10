@@ -316,8 +316,7 @@ function summaryText(item: ResponseReasoningItem): string {
 
 function validateToolCall(
   toolCall: { id: string; name: string; arguments: string },
-  originalTools: RosettaTool<any>[] | undefined,
-  finishContext: string
+  originalTools: RosettaTool<any>[] | undefined
 ): void {
   const toolDefinition = originalTools?.find(t => t.function.name === toolCall.name)
   if (!toolDefinition) {
@@ -327,13 +326,8 @@ function validateToolCall(
   let parsedArgs: unknown
   try {
     parsedArgs = JSON.parse(toolCall.arguments || '{}')
-  } catch (parseError) {
-    throw new MappingError(
-      `Failed to parse arguments for tool '${toolCall.name}' (ID: ${toolCall.id}).`,
-      Provider.OpenAI,
-      finishContext,
-      parseError
-    )
+  } catch {
+    throw ToolArgumentValidationError.invalidJson(toolCall.name, toolCall.id, toolCall.arguments)
   }
   const validationResult = toolDefinition.function.zodSchema.safeParse(parsedArgs)
   if (!validationResult.success) {
@@ -341,7 +335,8 @@ function validateToolCall(
       `Arguments failed validation for tool '${toolCall.name}'.`,
       validationResult.error.issues,
       toolCall.name,
-      toolCall.id
+      toolCall.id,
+      parsedArgs
     )
   }
 }
@@ -401,8 +396,7 @@ export function mapOpenAIResponsesChatResponse(
     const fnCall = item as ResponseFunctionToolCall
     validateToolCall(
       { id: fnCall.call_id, name: fnCall.name, arguments: fnCall.arguments },
-      originalTools,
-      'mapOpenAIResponsesChatResponse validation'
+      originalTools
     )
     toolCalls.push({
       id: fnCall.call_id,
@@ -597,8 +591,7 @@ export async function* mapOpenAIResponsesChatStream(
               try {
                 validateToolCall(
                   { id: state.callId, name: state.name, arguments: state.argumentsAccumulator },
-                  originalTools,
-                  'mapOpenAIResponsesChatStream validation'
+                  originalTools
                 )
               } catch (error) {
                 if (!observer) throw error

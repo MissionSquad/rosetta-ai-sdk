@@ -679,7 +679,10 @@ describe('OpenAI Responses mapper', () => {
       ])
     })
 
-    it('emits a typed error for schema-invalid streamed function arguments', async () => {
+    it.each([
+      ['{"location":123}', { location: 123 }],
+      ['{"location":', '{"location":']
+    ])('emits a typed error for invalid streamed function arguments', async (rawInput, rejectedInput) => {
       const tools: ResponsesTool[] = [
         {
           type: 'function',
@@ -696,7 +699,7 @@ describe('OpenAI Responses mapper', () => {
         yield { type: 'response.tool_call.start', tool_call: { id: 'call_weather', name: 'get_weather' } }
         yield {
           type: 'response.tool_call.done',
-          tool_call: { id: 'call_weather', name: 'get_weather', arguments: '{"location":123}' }
+          tool_call: { id: 'call_weather', name: 'get_weather', arguments: rawInput }
         }
       })()
       const chunks: ResponsesStreamChunk[] = []
@@ -710,6 +713,9 @@ describe('OpenAI Responses mapper', () => {
       expect(chunks[1].type).toBe('error')
       if (chunks[1].type !== 'error') throw new Error('Expected a streamed validation error')
       expect(chunks[1].data.error).toBeInstanceOf(ToolArgumentValidationError)
+      expect(chunks[1].data.error).toMatchObject({
+        toolName: 'get_weather', toolCallId: 'call_weather', receivedInput: rejectedInput
+      })
     })
   })
 })

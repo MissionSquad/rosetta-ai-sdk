@@ -32,7 +32,7 @@ import {
   TranslateParams,
   TranscriptionResult
 } from '../../types'
-import { MappingError, ProviderAPIError, RosettaAIError, UnsupportedFeatureError } from '../../errors'
+import { MappingError, ProviderAPIError, RosettaAIError, ToolArgumentValidationError, UnsupportedFeatureError } from '../../errors'
 import { safeGet } from '../utils'
 import { IProviderMapper } from './base.mapper'
 import { mapReportedModel, mapTokenUsage, mapBaseParams } from './common.utils'
@@ -616,16 +616,31 @@ export class GoogleMapper implements IProviderMapper {
 
   // --- Result Mapping ---
 
-  private mapToolCallsFromGoogle(functionCallParts: Part[] | undefined): RosettaToolCallRequest[] | undefined {
+  private mapToolCallsFromGoogle(
+    functionCallParts: Part[] | undefined,
+    originalTools?: GenerateParams['tools']
+  ): RosettaToolCallRequest[] | undefined {
     if (!functionCallParts || functionCallParts.length === 0) return undefined
     return functionCallParts
       .filter(part => part.functionCall?.name)
       .map((part, index) => {
         const call = part.functionCall!
+        const name = call.name!
+        const id = call.id || `google_func_${name}_${index}_${Date.now()}`
+        const args = call.args ?? {}
+        const toolDefinition = originalTools?.find(tool => tool.function.name === name)
+        if (toolDefinition) {
+          const validationResult = toolDefinition.function.zodSchema.safeParse(args)
+          if (!validationResult.success) {
+            throw new ToolArgumentValidationError(
+              `Arguments failed validation for tool '${name}'.`, validationResult.error.issues, name, id, args
+            )
+          }
+        }
         const toolCall: RosettaToolCallRequest = {
-          id: call.id || `google_func_${call.name}_${index}_${Date.now()}`,
+          id,
           type: 'function',
-          function: { name: call.name!, arguments: JSON.stringify(call.args ?? {}) }
+          function: { name, arguments: JSON.stringify(args) }
         }
         // Preserve thought signature for echo-back in subsequent requests (required by Gemini 3+)
         if (part.thoughtSignature) {
@@ -645,7 +660,7 @@ export class GoogleMapper implements IProviderMapper {
     }))
   }
 
-  mapFromProviderResponse(response: GenerateContentResponse | undefined, model: string, _originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
+  mapFromProviderResponse(response: GenerateContentResponse | undefined, model: string, originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
     const reportedModel = mapReportedModel(response?.modelVersion)
     observer?.observeRequestId(response?.responseId)
     const usage = mapTokenUsage(response?.usageMetadata, 'google', response?.sdkHttpResponse?.headers?.['x-gemini-service-tier'])
@@ -725,7 +740,7 @@ export class GoogleMapper implements IProviderMapper {
 
       const functionCallParts = candidate.content.parts.filter((p): p is Part => p && 'functionCall' in p)
       if (functionCallParts.length > 0) {
-        const mappedCalls = this.mapToolCallsFromGoogle(functionCallParts)
+        const mappedCalls = this.mapToolCallsFromGoogle(functionCallParts, originalTools)
         if (mappedCalls && mappedCalls.length > 0) {
           toolCalls = mappedCalls
           if (!['SAFETY', 'RECITATION', 'MAX_TOKENS'].includes(candidateFinishReason ?? '')) {
@@ -770,13 +785,11 @@ export class GoogleMapper implements IProviderMapper {
 
   async *mapProviderStream(
     stream: AsyncIterable<GenerateContentResponse>,
-    _originalParams: GenerateParams,
+    originalParams: GenerateParams,
     observer?: ProviderUsageObserver
   ): AsyncIterable<StreamChunk> {
-    // Note: originalParams is not directly used in this implementation,
-    // but included for interface consistency. Tool validation happens in mapFromProviderResponse.
     let deferredError: unknown
-    const configuredCount = _originalParams?.extraParams?.candidateCount
+    const configuredCount = originalParams?.extraParams?.candidateCount
     const expectedCandidates = typeof configuredCount === 'number' && Number.isSafeInteger(configuredCount) && configuredCount > 0
       ? configuredCount : 1
     const finishedCandidates = new Set<number>()
@@ -899,7 +912,7 @@ export class GoogleMapper implements IProviderMapper {
             )
 
             if (functionCallParts && functionCallParts.length > 0) {
-              const newCalls = this.mapToolCallsFromGoogle(functionCallParts)
+              const newCalls = this.mapToolCallsFromGoogle(functionCallParts, originalParams?.tools)
               if (newCalls) {
                 for (const tc of newCalls) {
                   // Check if this specific tool call ID has already been fully processed and added
@@ -948,14 +961,7 @@ export class GoogleMapper implements IProviderMapper {
               }
             }
           } catch (partProcessingError) {
-            console.error(
-              'Error processing Google stream chunk parts:',
-              partProcessingError,
-              'Chunk:',
-              JSON.stringify(chunk)
-            )
-            // Decide whether to yield an error and stop, or just log and continue
-            // For now, let's yield an error chunk and let the main catch handle termination
+            if (partProcessingError instanceof ToolArgumentValidationError) throw partProcessingError
             throw new MappingError(
               'Failed to process Google stream chunk content',
               this.provider,
@@ -989,7 +995,9 @@ export class GoogleMapper implements IProviderMapper {
           }
         } catch (streamProcessingError) {
           // Catch errors during the loop itself (including the part processing error re-thrown above)
-          console.error('Error during Google stream processing loop:', streamProcessingError)
+          if (!(streamProcessingError instanceof ToolArgumentValidationError)) {
+            console.error('Error during Google stream processing loop:', streamProcessingError)
+          }
           if (!observer) {
             yield { type: 'error', data: { error: this.wrapProviderError(streamProcessingError, this.provider) } }
             return

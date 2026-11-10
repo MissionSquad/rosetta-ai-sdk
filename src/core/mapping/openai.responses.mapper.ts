@@ -36,7 +36,6 @@ import {
   ResponseInputItem,
   Tool
 } from 'openai/resources/responses/responses'
-import { z } from 'zod'
 import { mapOpenAIComputerAction } from './openai.computer-use'
 import { JSONSchema7 } from 'json-schema'
 
@@ -252,20 +251,15 @@ export function mapOpenAIComputerCallToDecision(
   return parsed.data
 }
 
-function validateFunctionToolCall(toolCall: ResponsesToolCall, originalTools: ResponsesTool[] | undefined): void {
+function validateFunctionToolCall(toolCall: Pick<ResponsesToolCall, 'call_id' | 'function'>, originalTools: ResponsesTool[] | undefined): void {
   const matchingTool = originalTools?.find(tool => tool.type === 'function' && tool.name === toolCall.function.name)
   if (!matchingTool || matchingTool.type !== 'function' || !matchingTool.zodSchema) return
 
   let parsedArgs: unknown
   try {
     parsedArgs = JSON.parse(toolCall.function.arguments)
-  } catch (error) {
-    throw new MappingError(
-      `Failed to parse tool arguments JSON for '${toolCall.function.name}'`,
-      Provider.OpenAI,
-      'function_call',
-      error
-    )
+  } catch {
+    throw ToolArgumentValidationError.invalidJson(toolCall.function.name, toolCall.call_id, toolCall.function.arguments)
   }
 
   const validation = matchingTool.zodSchema.safeParse(parsedArgs)
@@ -274,7 +268,7 @@ function validateFunctionToolCall(toolCall: ResponsesToolCall, originalTools: Re
       `Tool '${toolCall.function.name}' arguments validation failed`,
       validation.error.issues,
       toolCall.function.name,
-      toolCall.id,
+      toolCall.call_id,
       parsedArgs
     )
   }
@@ -452,30 +446,10 @@ export async function* mapOpenAIResponsesStream(
         for (const reasoningChunk of flushReasoningSummary()) yield reasoningChunk
         const toolCall = event.tool_call || currentToolCall
         if (toolCall) {
-          // Validate tool arguments if original tools were provided
-          if (originalTools && originalTools.length > 0) {
-            const matchingTool = originalTools.find(t => t.type === 'function' && t.name === toolCall.name)
-            if (matchingTool && matchingTool.type === 'function' && matchingTool.zodSchema) {
-              try {
-                const parsedArgs = JSON.parse(toolCall.arguments)
-                matchingTool.zodSchema.parse(parsedArgs)
-              } catch (error) {
-                if (error instanceof z.ZodError) {
-                  const validationError = new ToolArgumentValidationError(
-                    `Tool '${toolCall.name}' arguments validation failed`,
-                    error.issues,
-                    toolCall.name,
-                    toolCall.id
-                  )
-                  yield {
-                    type: 'error',
-                    data: { error: validationError }
-                  }
-                  return
-                }
-              }
-            }
-          }
+          validateFunctionToolCall({
+            call_id: toolCall.call_id ?? toolCall.id,
+            function: { name: toolCall.name, arguments: toolCall.arguments }
+          }, originalTools)
 
           yield {
             type: 'response.tool_call.done',

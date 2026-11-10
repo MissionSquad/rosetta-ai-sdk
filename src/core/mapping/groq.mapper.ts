@@ -1,5 +1,5 @@
 import type { ChatCompletionChunk as OpenAIChatCompletionChunk } from 'openai/resources/chat/completions'
-import { mapOpenAIStream } from './openai.common'
+import { mapOpenAIStream, validateChatToolArguments } from './openai.common'
 import type { ProviderUsageObserver } from '../../types/usage.types'
 import Groq, { type Uploadable as GroqUploadable } from 'groq-sdk'
 import {
@@ -299,21 +299,25 @@ export class GroqMapper implements IProviderMapper {
   // --- Result Mapping (Chat/Completion) ---
 
   private mapToolCallsFromGroq(
-    toolCalls: ReadonlyArray<Groq.Chat.Completions.ChatCompletionMessageToolCall> | undefined | null
+    toolCalls: ReadonlyArray<Groq.Chat.Completions.ChatCompletionMessageToolCall> | undefined | null,
+    originalTools?: GenerateParams['tools']
   ): RosettaToolCallRequest[] | undefined {
     if (!toolCalls || toolCalls.length === 0) return undefined
     return toolCalls
       .filter(tc => tc.type === 'function' && tc.function?.name && tc.id)
       .map(tc => {
+        const definition = originalTools?.find(tool => tool.function.name === tc.function!.name)
+        const argumentsText = tc.function!.arguments ?? '{}'
+        if (definition) validateChatToolArguments(tc.function!.name!, tc.id!, argumentsText, definition)
         return {
           id: tc.id!,
           type: tc.type,
-          function: { name: tc.function!.name!, arguments: tc.function!.arguments ?? '{}' }
+          function: { name: tc.function!.name!, arguments: argumentsText }
         }
       })
   }
 
-  mapFromProviderResponse(response: ChatCompletion, modelUsed: string, _originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
+  mapFromProviderResponse(response: ChatCompletion, modelUsed: string, originalTools?: GenerateParams['tools'], observer?: ProviderUsageObserver): GenerateResult {
     observer?.observeRequestId(response.id)
     observer?.observeUsage(mapTokenUsage(response.usage, 'groq'), true)
     const reportedModel = mapReportedModel(response.model)
@@ -346,7 +350,7 @@ export class GroqMapper implements IProviderMapper {
       choice.message,
       'tool_calls'
     )
-    const mappedToolCalls = this.mapToolCallsFromGroq(groqToolCalls)
+    const mappedToolCalls = this.mapToolCallsFromGroq(groqToolCalls, originalTools)
     const fr = choice.finish_reason
     const standardizedFR = fr === 'tool_calls' ? 'tool_calls' : fr === 'stop' ? 'stop' : fr === 'length' ? 'length' : fr
     return {

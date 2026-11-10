@@ -154,13 +154,8 @@ export class AnthropicMapper implements IProviderMapper {
     if (toolData.jsonAccumulator !== '') {
       try {
         return JSON.parse(toolData.jsonAccumulator) as unknown
-      } catch (parseError) {
-        throw new MappingError(
-          `Failed to parse arguments for tool '${toolData.name}' (ID: ${toolData.id})`,
-          this.provider,
-          'mapProviderStream validation',
-          parseError
-        )
+      } catch {
+        throw ToolArgumentValidationError.invalidJson(toolData.name, toolData.id, toolData.jsonAccumulator)
       }
     }
 

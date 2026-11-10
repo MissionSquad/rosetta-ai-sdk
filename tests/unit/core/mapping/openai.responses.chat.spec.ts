@@ -309,13 +309,21 @@ describe('mapOpenAIResponsesChatResponse', () => {
     ])
   })
 
-  it('throws ToolArgumentValidationError for invalid tool arguments', () => {
+  it.each([
+    ['{"city":42}', { city: 42 }],
+    ['{"city":', '{"city":']
+  ])('preserves the rejected Responses chat tool arguments', (rawInput, rejectedInput) => {
     const response = makeResponse([
-      { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'get_weather', arguments: '{"city":42}' }
+      { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'get_weather', arguments: rawInput }
     ])
-    expect(() => mapOpenAIResponsesChatResponse(response, 'gpt-5.6-terra', [WEATHER_TOOL])).toThrow(
-      ToolArgumentValidationError
-    )
+    let error: unknown
+    try {
+      mapOpenAIResponsesChatResponse(response, 'gpt-5.6-terra', [WEATHER_TOOL])
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(ToolArgumentValidationError)
+    expect(error).toMatchObject({ toolName: 'get_weather', toolCallId: 'call_1', receivedInput: rejectedInput })
   })
 
   it('maps refusals to content_filter and incomplete max tokens to length', () => {
