@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import Groq from 'groq-sdk'
 import { Uploadable } from 'groq-sdk/core'
 import { GroqMapper } from '../../../../src/core/mapping/groq.mapper'
@@ -13,7 +14,7 @@ import {
   TranslateParams,
   GenerateResult // Import result type
 } from '../../../../src/types'
-import { MappingError, UnsupportedFeatureError, ProviderAPIError } from '../../../../src/errors'
+import { MappingError, UnsupportedFeatureError, ProviderAPIError, ToolArgumentValidationError } from '../../../../src/errors'
 import { ChatCompletionChunk } from 'groq-sdk/resources/chat/completions'
 
 // Mock the sub-mappers
@@ -550,6 +551,33 @@ describe('Groq Mapper', () => {
       expect(result.thinkingSteps).toBe('Private reasoning.')
       expect(result.content).toBe('Visible answer.')
       expect(result.content).not.toContain('Private reasoning.')
+    })
+
+    it.each([
+      ['{"session_id":"wrong-case"}', { session_id: 'wrong-case' }],
+      ['{"sessionId":', '{"sessionId":']
+    ])('validates Groq client tool arguments in a non-streaming response', (rawInput, rejectedInput) => {
+      const response: Groq.Chat.Completions.ChatCompletion = {
+        id: 'groq-response', object: 'chat.completion', created: 1, model: modelUsed,
+        choices: [{
+          index: 0, finish_reason: 'tool_calls', logprobs: null,
+          message: { role: 'assistant', content: null, tool_calls: [{
+            id: 'groq-call', type: 'function', function: { name: 'lookup', arguments: rawInput }
+          }] }
+        }]
+      }
+      const tools: GenerateParams['tools'] = [{
+        type: 'function',
+        function: { name: 'lookup', parameters: { type: 'object' }, zodSchema: z.object({ sessionId: z.string() }) }
+      }]
+      let error: unknown
+      try {
+        mapper.mapFromProviderResponse(response, modelUsed, tools)
+      } catch (caught) {
+        error = caught
+      }
+      expect(error).toBeInstanceOf(ToolArgumentValidationError)
+      expect(error).toMatchObject({ toolName: 'lookup', toolCallId: 'groq-call', receivedInput: rejectedInput })
     })
 
     it('[Easy] should map response with tool calls', () => {

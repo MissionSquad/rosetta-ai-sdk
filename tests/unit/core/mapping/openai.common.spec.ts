@@ -1,4 +1,6 @@
 import OpenAI from 'openai'
+import { z } from 'zod'
+import { inspect } from 'node:util'
 import { Stream } from 'openai/streaming'
 import {
   mapRoleToOpenAI,
@@ -8,7 +10,7 @@ import {
   wrapOpenAIError
 } from '../../../../src/core/mapping/openai.common'
 import { RosettaMessage, Provider, RosettaImageData, StreamChunk, GenerateResult } from '../../../../src/types'
-import { MappingError, ProviderAPIError } from '../../../../src/errors'
+import { MappingError, ProviderAPIError, ToolArgumentValidationError } from '../../../../src/errors'
 import {
   normalizeGenerateResultThinking,
   normalizeThinkingStream
@@ -260,6 +262,36 @@ describe('OpenAI Common Mapping Utilities', () => {
       expect(result.toolCalls).toEqual([{ id: 't1', type: 'function', function: { name: 'f1', arguments: '{}' } }])
     })
 
+    it.each([
+      [' { "session_id": "wrong-case" } ', { session_id: 'wrong-case' }],
+      ['{"sessionId":"PRIVATE_PROBE', '{"sessionId":"PRIVATE_PROBE']
+    ])(
+      'preserves rejected OpenAI tool arguments without exposing them through error inspection',
+      (argumentsText, rejectedInput) => {
+        const response: OpenAI.Chat.Completions.ChatCompletion = {
+          id: 'chatcmpl-invalid', object: 'chat.completion', created: 2, model: modelUsed,
+          choices: [{
+            index: 0, finish_reason: 'tool_calls', logprobs: null,
+            message: createMockMessage(null, [
+              { id: 'call-1', type: 'function', function: { name: 'open_session', arguments: argumentsText } }
+            ])
+          }]
+        }
+        let error: unknown
+        try {
+          mapFromOpenAIResponse(response, Provider.OpenAI, modelUsed, [{
+            type: 'function',
+            function: { name: 'open_session', parameters: { type: 'object' }, zodSchema: z.object({ sessionId: z.string() }) }
+          }], options)
+        } catch (caught) {
+          error = caught
+        }
+        expect(error).toBeInstanceOf(ToolArgumentValidationError)
+        expect(error).toMatchObject({ toolName: 'open_session', toolCallId: 'call-1', receivedInput: rejectedInput })
+        expect(inspect(error)).not.toContain(argumentsText)
+      }
+    )
+
     it('[Medium] should map response with content filter', () => {
       const response: OpenAI.Chat.Completions.ChatCompletion = {
         id: 'chatcmpl-3',
@@ -449,6 +481,34 @@ describe('OpenAI Common Mapping Utilities', () => {
         type: 'function',
         function: { name: toolName, arguments: '{"a":1}' }
       })
+    })
+
+    it('reports truncated tool JSON as a typed error without a raw preview', async () => {
+      const rawInput = '{"sessionId":"PRIVATE_STREAM_PROBE'
+      const mockChunks: OpenAI.Chat.Completions.ChatCompletionChunk[] = [
+        { ...baseChunkProps, model: modelId, choices: [{
+          index: 0, delta: { tool_calls: [{
+            index: 0, id: 'call-truncated', type: 'function', function: { name: 'open_session', arguments: rawInput }
+          }] }
+        }] },
+        { ...baseChunkProps, model: modelId, choices: [{ index: 0, delta: {}, finish_reason: 'length' }] }
+      ]
+      const results = await collectStreamChunks(mapOpenAIStream(
+        mockOpenAIStreamGenerator(mockChunks) as unknown as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>,
+        Provider.OpenAI, modelId, [{
+          type: 'function', function: {
+            name: 'open_session', parameters: { type: 'object' }, zodSchema: z.object({ sessionId: z.string() })
+          }
+        }], options
+      ))
+      const error = results.find(chunk => chunk.type === 'error')?.data.error
+      expect(error).toBeInstanceOf(ToolArgumentValidationError)
+      expect(error).toMatchObject({
+        toolName: 'open_session', toolCallId: 'call-truncated', receivedInput: rawInput,
+        issues: [expect.objectContaining({ message: expect.stringContaining('truncated') })]
+      })
+      expect(inspect(error)).not.toContain('PRIVATE_STREAM_PROBE')
+      expect(results.some(chunk => chunk.type === 'tool_call_done')).toBe(false)
     })
 
     it('[Hard] should map stream with JSON mode', async () => {

@@ -182,7 +182,7 @@ export class InvalidToolDefinitionError extends RosettaAIError {
 }
 
 /**
- * Error indicating that the arguments provided by the LLM for a tool call
+ * Error indicating that model-generated tool arguments could not be parsed or
  * failed validation against the tool's `zodSchema`.
  */
 export class ToolArgumentValidationError extends RosettaAIError {
@@ -192,22 +192,38 @@ export class ToolArgumentValidationError extends RosettaAIError {
   public readonly toolName?: string
   /** The ID of the specific tool call that failed validation. */
   public readonly toolCallId?: string
-  /**
-   * The raw arguments the model produced for the tool call that failed schema
-   * validation (the parsed value passed to `zodSchema.safeParse`). Exposed so
-   * consumers driving the tool-execution loop can build an `is_error`
-   * tool_result and let the model retry, rather than treating the failure as
-   * terminal. Present when the SDK has the model's arguments available.
-   */
+  /** Parsed arguments for schema failures, or the original text when JSON parsing fails. */
   public readonly receivedInput?: unknown
+  /** Whether receivedInput is a parsed value or the original JSON text. */
+  public readonly inputFormat: 'parsed' | 'json'
 
-  constructor(message: string, issues: z.ZodIssue[], toolName?: string, toolCallId?: string, receivedInput?: unknown) {
+  constructor(
+    message: string,
+    issues: z.ZodIssue[],
+    toolName?: string,
+    toolCallId?: string,
+    receivedInput?: unknown,
+    inputFormat: 'parsed' | 'json' = 'parsed'
+  ) {
     super(`Tool Argument Validation Error${toolName ? ` for '${toolName}'` : ''}: ${message}`)
     this.name = 'ToolArgumentValidationError'
-    this.issues = issues
     this.toolName = toolName
     this.toolCallId = toolCallId
-    this.receivedInput = receivedInput
+    // Validation issues can contain values supplied by the model. Keep both fields out of logs.
+    Object.defineProperties(this, {
+      issues: { value: issues, enumerable: false },
+      receivedInput: { value: receivedInput, enumerable: false },
+      inputFormat: { value: inputFormat, enumerable: false }
+    })
+  }
+
+  static invalidJson(
+    toolName: string,
+    toolCallId: string | undefined,
+    receivedInput: unknown,
+    message = 'Tool arguments must contain valid JSON.'
+  ): ToolArgumentValidationError {
+    return new ToolArgumentValidationError(message, [{ code: 'custom', path: [], message }], toolName, toolCallId, receivedInput, 'json')
   }
 }
 
