@@ -1,3 +1,5 @@
+import { ToolArgumentValidationError } from '../../../src/errors'
+import { inspect } from 'node:util'
 import {
   RosettaAIError,
   ConfigurationError,
@@ -105,5 +107,26 @@ describe('RosettaAI Errors', () => {
       )
       expect(error.stack).toContain('Caused by: TypeError stack trace')
     })
+  })
+})
+
+describe('ToolArgumentValidationError privacy', () => {
+  it('keeps rejected input and issues directly readable without including them in logs', () => {
+    const issue = { code: 'custom' as const, path: ['value'], message: 'private-refinement-value' }
+    const error = new ToolArgumentValidationError('Arguments failed validation.', [issue], 'lookup', 'call-1', 'private-input')
+    expect(error.issues).toEqual([issue])
+    expect(error.receivedInput).toBe('private-input')
+    expect(error.inputFormat).toBe('parsed')
+    expect(Object.keys(error)).not.toContain('inputFormat')
+    for (const rendered of [inspect(error), JSON.stringify(error)]) {
+      expect(rendered).not.toContain('private-refinement-value')
+      expect(rendered).not.toContain('private-input')
+    }
+  })
+
+  it('marks malformed JSON separately from a parsed string argument', () => {
+    const error = ToolArgumentValidationError.invalidJson('lookup', 'call-1', '{"value":')
+    expect(error.receivedInput).toBe('{"value":')
+    expect(error.inputFormat).toBe('json')
   })
 })
