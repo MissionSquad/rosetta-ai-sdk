@@ -15,10 +15,12 @@ import {
   HarmBlockThreshold,
   EmbedContentParameters,
   EmbedContentResponse,
-  ThinkingConfig
+  ThinkingConfig,
+  ThinkingLevel
 } from '@google/genai'
 import {
   GenerateParams,
+  ReasoningEffort,
   GenerateResult,
   StreamChunk,
   RosettaMessage,
@@ -38,6 +40,21 @@ import { IProviderMapper } from './base.mapper'
 import { mapReportedModel, mapTokenUsage, mapBaseParams } from './common.utils'
 import { resolveThinkingRequest } from './thinking-request'
 import * as GoogleEmbedMapper from './google.embed.mapper'
+
+/**
+ * Gemini's thinking control for each provider-neutral reasoning effort. Gemini takes a `thinkingLevel`;
+ * no level turns thinking off, so `none` maps to `thinkingBudget: 0`, which Google documents as
+ * disabled, and `xhigh` maps to the highest level Gemini has. The model validates the value: a level
+ * it does not support (MINIMAL on some models) is its error to report.
+ */
+const GOOGLE_THINKING_BY_EFFORT: Readonly<Record<ReasoningEffort, Pick<ThinkingConfig, 'thinkingLevel' | 'thinkingBudget'>>> = {
+  none: { thinkingBudget: 0 },
+  minimal: { thinkingLevel: ThinkingLevel.MINIMAL },
+  low: { thinkingLevel: ThinkingLevel.LOW },
+  medium: { thinkingLevel: ThinkingLevel.MEDIUM },
+  high: { thinkingLevel: ThinkingLevel.HIGH },
+  xhigh: { thinkingLevel: ThinkingLevel.HIGH }
+}
 
 function mapPromptBlockFinishReason(reason: string): string {
   if (reason === BlockedReason.SAFETY) return 'content_filter'
@@ -562,9 +579,13 @@ export class GoogleMapper implements IProviderMapper {
       'thinkingConfig'
     ])
     // A caller-provided native thinkingConfig (via extraParams) is preserved; a neutral thinking
-    // request merges includeThoughts into it so thought parts are disclosed in the response.
+    // request merges includeThoughts into it so thought parts are disclosed in the response, and a
+    // reasoningEffort sets how much the model thinks. As a mapped field, the effort replaces any native
+    // thinkingLevel or thinkingBudget: Gemini rejects a request that sets both.
+    const effortThinking =
+      params.reasoningEffort !== undefined ? GOOGLE_THINKING_BY_EFFORT[params.reasoningEffort] : undefined
     let thinkingConfig: ThinkingConfig | undefined
-    if (thinkingRequested) {
+    if (thinkingRequested || effortThinking) {
       const nativeThinkingConfig = sanitizedExtraParams?.thinkingConfig
       // Merge only plain records — spreading an array (or other exotic object) would produce an
       // invalid thinkingConfig shape with numeric keys and a 400 from the Google API.
@@ -572,7 +593,16 @@ export class GoogleMapper implements IProviderMapper {
         typeof nativeThinkingConfig === 'object' && nativeThinkingConfig !== null && !Array.isArray(nativeThinkingConfig)
           ? nativeThinkingConfig
           : {}
-      thinkingConfig = { ...mergeableNativeConfig, includeThoughts: true }
+      const nativeConfig: ThinkingConfig = { ...mergeableNativeConfig }
+      if (effortThinking) {
+        delete nativeConfig.thinkingLevel
+        delete nativeConfig.thinkingBudget
+      }
+      thinkingConfig = {
+        ...nativeConfig,
+        ...effortThinking,
+        ...(thinkingRequested ? { includeThoughts: true } : {})
+      }
     }
 
     // Build GenerateContentConfig
