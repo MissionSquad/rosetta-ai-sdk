@@ -50,7 +50,11 @@ export interface GenerateParams {
   temperature?: number
   /** Nucleus sampling parameter: considers only tokens comprising the top `topP` probability mass. */
   topP?: number
-  /** GPT-5 reasoning effort control for supported OpenAI Chat Completions models. */
+  /**
+   * How much the model reasons before answering. OpenAI: GPT-5 reasoning effort on supported models.
+   * Google: Gemini's `thinkingConfig` (`minimal`–`high` as `thinkingLevel`, `xhigh` as HIGH, `none` as
+   * `thinkingBudget: 0`).
+   */
   reasoningEffort?: ReasoningEffort
   /** GPT-5 verbosity control for supported OpenAI Chat Completions models. */
   verbosity?: Verbosity

@@ -11,7 +11,8 @@ import {
   Tool,
   Candidate,
   Content,
-  EmbedContentParameters
+  EmbedContentParameters,
+  ThinkingLevel
 } from '@google/genai'
 import { GoogleMapper } from '../../../../src/core/mapping/google.mapper'
 import * as GoogleEmbedMapper from '../../../../src/core/mapping/google.embed.mapper'
@@ -704,6 +705,55 @@ describe('Google Mapper', () => {
         expect((result.config as any)?.reasoning_effort).toBeUndefined()
         expect((result.config as any)?.customParam).toBe('kept')
         expect((result.config as any)?.thinkingConfig).toEqual({ includeThoughts: true })
+      })
+    })
+
+    describe('reasoningEffort', () => {
+      const withEffort = (reasoningEffort: GenerateParams['reasoningEffort'], extra: Partial<GenerateParams> = {}) =>
+        (mapper.mapToProviderParams({
+          ...baseParams,
+          messages: [{ role: 'user', content: 'Hello' }],
+          reasoningEffort,
+          ...extra
+        }) as GenerateContentParameters).config?.thinkingConfig
+
+      it.each([
+        ['minimal', ThinkingLevel.MINIMAL],
+        ['low', ThinkingLevel.LOW],
+        ['medium', ThinkingLevel.MEDIUM],
+        ['high', ThinkingLevel.HIGH],
+        ['xhigh', ThinkingLevel.HIGH]
+      ] as const)('should map %s to thinkingLevel %s', (effort, level) => {
+        expect(withEffort(effort)).toEqual({ thinkingLevel: level })
+      })
+
+      it('should map none to a zero thinking budget, since no level turns thinking off', () => {
+        expect(withEffort('none')).toEqual({ thinkingBudget: 0 })
+      })
+
+      it('should set no thinkingConfig when no effort, thinking or native config is given', () => {
+        expect(withEffort(undefined)).toBeUndefined()
+      })
+
+      it('should combine the effort with a neutral thinking request', () => {
+        expect(withEffort('low', { thinking: true })).toEqual({
+          thinkingLevel: ThinkingLevel.LOW,
+          includeThoughts: true
+        })
+      })
+
+      it('should replace a native thinkingLevel or thinkingBudget but keep other native keys', () => {
+        const native = { thinkingConfig: { thinkingBudget: 2048, thinkingLevel: 'HIGH', includeThoughts: false } }
+        expect(withEffort('low', { extraParams: native })).toEqual({
+          thinkingLevel: ThinkingLevel.LOW,
+          includeThoughts: false
+        })
+      })
+
+      it('should ignore a malformed (array) native thinkingConfig', () => {
+        expect(withEffort('medium', { extraParams: { thinkingConfig: [{ thinkingBudget: 2048 }] } })).toEqual({
+          thinkingLevel: ThinkingLevel.MEDIUM
+        })
       })
     })
   })
