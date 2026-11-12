@@ -63,6 +63,9 @@ const mockAudioFile: Uploadable = {
   name: 'mock.mp3'
 } as any // Cast to bypass full FileLike implementation details
 
+// Groq usage without prompt_tokens_details still yields a billing object so the call is priceable.
+const GROQ_ZERO_CACHE_BILLING = { cacheWriteInputTokens: 0, cacheWrite30mInputTokens: 0 }
+
 describe('Groq Mapper', () => {
   let mapper: GroqMapper
   let warnSpy: jest.SpyInstance // Declare spy instance
@@ -520,7 +523,7 @@ describe('Groq Mapper', () => {
       expect(result.content).toBe('Groq response.')
       expect(result.toolCalls).toBeUndefined()
       expect(result.finishReason).toBe('stop')
-      expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 })
+      expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: GROQ_ZERO_CACHE_BILLING })
       expect(result.model).toBe('llama-3.1-8b-instant-test-id')
       expect(result.reportedModel).toBe('llama-3.1-8b-instant-test-id')
       expect(result.rawContent).toBe(response.choices[0]!.message.content)
@@ -847,7 +850,7 @@ describe('Groq Mapper', () => {
       expect(results[3]).toEqual({ type: 'message_stop', data: { finishReason: 'stop' } })
       expect(results[4]).toEqual({
         type: 'final_usage',
-        data: { usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } }
+        data: { usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, billing: GROQ_ZERO_CACHE_BILLING } }
       })
       expect(results[5].type).toBe('final_result')
       expect((results[5] as any).data.result).toEqual(
@@ -855,7 +858,7 @@ describe('Groq Mapper', () => {
           content: 'Hello world',
           finishReason: 'stop',
           model: modelId,
-          usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 }
+          usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7, billing: GROQ_ZERO_CACHE_BILLING }
         })
       )
     })
@@ -958,7 +961,7 @@ describe('Groq Mapper', () => {
       expect(results[5]).toEqual({ type: 'message_stop', data: { finishReason: 'tool_calls' } })
       expect(results[6]).toEqual({
         type: 'final_usage',
-        data: { usage: { promptTokens: 10, completionTokens: 8, totalTokens: 18 } }
+        data: { usage: { promptTokens: 10, completionTokens: 8, totalTokens: 18, billing: GROQ_ZERO_CACHE_BILLING } }
       })
       expect(results[7].type).toBe('final_result')
       const finalResult = (results[7] as any).data.result as GenerateResult
@@ -967,7 +970,7 @@ describe('Groq Mapper', () => {
       expect(finalResult.toolCalls).toEqual([
         { id: toolCallId, type: 'function', function: { name: toolName, arguments: '{"location": "SF"}' } }
       ])
-      expect(finalResult.usage).toEqual({ promptTokens: 10, completionTokens: 8, totalTokens: 18 })
+      expect(finalResult.usage).toEqual({ promptTokens: 10, completionTokens: 8, totalTokens: 18, billing: GROQ_ZERO_CACHE_BILLING })
     })
 
     it('[Hard] should handle stream with text and tool call', async () => {
@@ -1040,7 +1043,7 @@ describe('Groq Mapper', () => {
       expect(finalResult.toolCalls![0]).toEqual(
         expect.objectContaining({ function: { name: toolName, arguments: '{"to": "Bob"}' } })
       )
-      expect(finalResult.usage).toEqual({ promptTokens: 12, completionTokens: 10, totalTokens: 22 })
+      expect(finalResult.usage).toEqual({ promptTokens: 12, completionTokens: 10, totalTokens: 22, billing: GROQ_ZERO_CACHE_BILLING })
     })
 
     it('[Hard] should handle stream ending with length limit', async () => {

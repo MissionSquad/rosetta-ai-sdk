@@ -94,6 +94,31 @@ without an input/output breakdown. Anthropic cached input and Google tool/though
 tokens are included in their input/output totals; OpenAI cached/reasoning details
 are subsets and are not added again.
 
+#### Usage contract for priceable calls
+
+Callers price a call from `usage`, so every chat mapper must report it the same way:
+
+- `promptTokens` and `completionTokens` are inclusive. Cached input is part of
+  `promptTokens`; reasoning output is part of `completionTokens`.
+- `totalTokens` equals `promptTokens + completionTokens`. A report that does not
+  reconcile is passed to `finish` with `usage.incomplete: true` and
+  `usageComplete: false`, and must not be billed.
+- `usage.billing` carries the breakdown needed for cache pricing:
+  `cachedInputTokens`, `cacheWriteInputTokens`, and the per-lifetime write split.
+
+Provider differences handled by the SDK:
+
+| Provider / API | What the provider reports | What the SDK returns |
+| --- | --- | --- |
+| OpenAI, Groq, Mistral Chat Completions | `completion_tokens` includes reasoning tokens | Counts unchanged |
+| xAI Chat Completions | Reasoning tokens only in `completion_tokens_details.reasoning_tokens`, but included in `total_tokens` | Reasoning tokens added to `completionTokens` when `total = prompt + completion + reasoning` |
+| OpenAI and xAI Responses | `output_tokens` includes reasoning tokens | Counts unchanged |
+| OpenAI Responses cache writes | `cache_write_tokens` with no per-lifetime breakdown | All writes reported as `cacheWrite30mInputTokens` (the only supported cache lifetime) |
+| Groq | `prompt_tokens_details.cached_tokens` | Reported as `billing.cachedInputTokens` |
+
+When adding a provider, record a real usage payload as a fixture in
+`tests/unit/core/mapping/native.usage.spec.ts` and assert the normalized result.
+
 Completion is awaited before returning a generated result or exposing stream
 success/error termination. Admission errors preserve their identity (an `error`
 chunk for streams); completion callback failures reject generation/iteration.

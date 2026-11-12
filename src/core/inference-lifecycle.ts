@@ -56,6 +56,9 @@ export class InferenceCall implements ProviderUsageObserver {
       ? usage.promptTokens + usage.completionTokens : undefined
     if (split !== undefined && !Number.isSafeInteger(split)) { this.finalUsage = false; return }
     if (usage.totalTokens !== undefined && split !== undefined && usage.totalTokens !== split) {
+      // Keep the counts the provider reported so the mismatch is visible to the caller, but
+      // never as final usage: an unreconciled report must not be billed.
+      this.usage = { ...usage, incomplete: true }
       this.finalUsage = false
       return
     }

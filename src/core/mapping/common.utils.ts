@@ -84,6 +84,29 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return undefined
 }
 
+/**
+ * Chat Completions providers disagree on whether `completion_tokens` includes reasoning tokens.
+ * OpenAI, Groq and Mistral include them, so `total_tokens === prompt_tokens + completion_tokens`.
+ * xAI reports them only in `completion_tokens_details.reasoning_tokens` and adds them to
+ * `total_tokens`, so `total_tokens === prompt_tokens + completion_tokens + reasoning_tokens`.
+ * Reasoning tokens are billed as output, so they belong in the inclusive completion count.
+ * They are added only when that exact identity holds, which cannot double-count a provider
+ * whose completion count already includes them.
+ */
+function includeSeparateReasoningTokens(
+  usage: Record<string, unknown>,
+  promptTokens: number | undefined,
+  completionTokens: number | undefined,
+  totalTokens: number | undefined
+): number | undefined {
+  if (promptTokens === undefined || completionTokens === undefined || totalTokens === undefined) return completionTokens
+  if (totalTokens === promptTokens + completionTokens) return completionTokens
+  const reasoningTokens = asRecord(usage.completion_tokens_details)?.reasoning_tokens
+  if (typeof reasoningTokens !== 'number' || !Number.isSafeInteger(reasoningTokens) || reasoningTokens <= 0) return completionTokens
+  const inclusive = completionTokens + reasoningTokens
+  return Number.isSafeInteger(inclusive) && totalTokens === promptTokens + inclusive ? inclusive : completionTokens
+}
+
 /** Normalize inclusive provider counts without fabricating missing components. */
 function mapExplicitTokenUsage(value: unknown, format: UsageFormat, serviceTier: unknown): TokenUsage | undefined {
   const usage = asRecord(value)
@@ -123,12 +146,14 @@ function mapExplicitTokenUsage(value: unknown, format: UsageFormat, serviceTier:
     promptTokens = count(responses ? 'input_tokens' : 'prompt_tokens')
     completionTokens = count(responses ? 'output_tokens' : 'completion_tokens')
     totalTokens = count('total_tokens')
+    if (!responses) completionTokens = includeSeparateReasoningTokens(usage, promptTokens, completionTokens, totalTokens)
   }
   const calculated = sum(promptTokens, completionTokens)
   if (totalTokens !== undefined && calculated !== undefined && totalTokens !== calculated) invalid = true
   totalTokens ??= calculated
   const cachedContentTokenCount = format === 'google' ? count('cachedContentTokenCount') : undefined
-  const billing = format === 'groq' ? undefined : mapBillingUsage(usage, format, serviceTier, promptTokens, completionTokens)
+  // Groq reports the Chat Completions usage shape, including prompt_tokens_details.cached_tokens.
+  const billing = mapBillingUsage(usage, format === 'groq' ? 'openai' : format, serviceTier, promptTokens, completionTokens)
   return {
     promptTokens, completionTokens, totalTokens,
     ...(billing ? { billing } : {}),
@@ -209,8 +234,15 @@ function mapBillingUsage(
     billing.serviceTier = label(serviceTier)
     if (responses) {
       const cacheWrite = detailObject(input?.cache_write_tokens_details)
-      billing.cacheWrite30mInputTokens = count(cacheWrite?.ttl_30m_tokens)
-      billing.cacheWrite12hInputTokens = count(cacheWrite?.ttl_12h_tokens)
+      if (cacheWrite) {
+        billing.cacheWrite30mInputTokens = count(cacheWrite.ttl_30m_tokens)
+        billing.cacheWrite12hInputTokens = count(cacheWrite.ttl_12h_tokens)
+      } else {
+        // The Responses API reports `cache_write_tokens` without a per-lifetime breakdown, and
+        // `prompt_cache_options.ttl` only supports '30m'. Without a breakdown every written token
+        // used that lifetime; leaving the split unset made each cache-writing call unpriceable.
+        billing.cacheWrite30mInputTokens = billing.cacheWriteInputTokens
+      }
       if (billing.cachedInputTokens === undefined) billing.incomplete = true
     } else {
       const output = detailObject(usage.completion_tokens_details)

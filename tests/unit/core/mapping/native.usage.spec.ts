@@ -44,6 +44,64 @@ describe('native provider inclusive usage', () => {
     expect(mapTokenUsage({ input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 } }, 'openai-responses'))
       .toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: { cachedInputTokens: 0 } })
   })
+  test('prices Responses cache writes at the 30 minute lifetime when no breakdown is reported', () => {
+    // Shape stored for OpenAI gpt-5.6 Responses calls: a write count and no cache_write_tokens_details.
+    expect(mapTokenUsage({
+      input_tokens: 1646, output_tokens: 360, total_tokens: 2006,
+      input_tokens_details: { cached_tokens: 1127, cache_write_tokens: 516 }, output_tokens_details: { reasoning_tokens: 0 }
+    }, 'openai-responses', 'default')).toEqual({
+      promptTokens: 1646, completionTokens: 360, totalTokens: 2006,
+      billing: { cachedInputTokens: 1127, cacheWriteInputTokens: 516, cacheWrite30mInputTokens: 516, serviceTier: 'default' }
+    })
+    expect(mapTokenUsage({
+      input_tokens: 10, output_tokens: 5, total_tokens: 15,
+      input_tokens_details: { cached_tokens: 5, cache_write_tokens: 3, cache_write_tokens_details: { ttl_30m_tokens: 1, ttl_12h_tokens: 2 } }
+    }, 'openai-responses')).toEqual({
+      promptTokens: 10, completionTokens: 5, totalTokens: 15,
+      billing: { cachedInputTokens: 5, cacheWriteInputTokens: 3, cacheWrite30mInputTokens: 1, cacheWrite12hInputTokens: 2 }
+    })
+  })
+  test('counts xAI reasoning tokens as output when the provider reports them outside completion_tokens', () => {
+    // Recorded from api.x.ai /v1/chat/completions (grok-4.6): total = prompt + completion + reasoning.
+    const xaiChat = {
+      prompt_tokens: 655, completion_tokens: 1, total_tokens: 872,
+      prompt_tokens_details: { text_tokens: 655, audio_tokens: 0, image_tokens: 0, cached_tokens: 512 },
+      completion_tokens_details: { reasoning_tokens: 216, audio_tokens: 0, accepted_prediction_tokens: 0, rejected_prediction_tokens: 0 },
+      num_sources_used: 0, cost_in_usd_ticks: 18440000
+    }
+    expect(mapTokenUsage(xaiChat, 'openai', 'default')).toEqual({
+      promptTokens: 655, completionTokens: 217, totalTokens: 872,
+      billing: {
+        cachedInputTokens: 512, cacheWriteInputTokens: 0, cacheWrite30mInputTokens: 0, serviceTier: 'default',
+        inputAudioTokens: 0, outputAudioTokens: 0,
+        inputTokenDetails: [{ modality: 'TEXT', tokenCount: 655 }, { modality: 'IMAGE', tokenCount: 0 }]
+      }
+    })
+    // Recorded from api.x.ai /v1/responses: output_tokens already includes reasoning tokens.
+    expect(mapTokenUsage({
+      input_tokens: 655, input_tokens_details: { cached_tokens: 640 }, output_tokens: 220,
+      output_tokens_details: { reasoning_tokens: 219 }, total_tokens: 875
+    }, 'openai-responses')).toMatchObject({ promptTokens: 655, completionTokens: 220, totalTokens: 875 })
+  })
+  test('does not add reasoning tokens that completion_tokens already includes or that do not reconcile', () => {
+    expect(mapTokenUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, completion_tokens_details: { reasoning_tokens: 3 } }, 'openai'))
+      .toMatchObject({ promptTokens: 10, completionTokens: 5, totalTokens: 15 })
+    const unreconciled = mapTokenUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 99, completion_tokens_details: { reasoning_tokens: 3 } }, 'openai')
+    expect(unreconciled).toMatchObject({ promptTokens: 10, completionTokens: 5, totalTokens: 99, incomplete: true })
+    expect(mapTokenUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 18, completion_tokens_details: { reasoning_tokens: 1.5 } }, 'openai'))
+      .toMatchObject({ completionTokens: 5, incomplete: true })
+  })
+  test('reports Groq cached input tokens so Groq calls can be priced', () => {
+    expect(mapTokenUsage({
+      prompt_tokens: 1832, completion_tokens: 1463, total_tokens: 3295,
+      prompt_tokens_details: { cached_tokens: 1024 }, completion_tokens_details: { reasoning_tokens: 40 }
+    }, 'groq')).toEqual({
+      promptTokens: 1832, completionTokens: 1463, totalTokens: 3295,
+      billing: { cachedInputTokens: 1024, cacheWriteInputTokens: 0, cacheWrite30mInputTokens: 0 }
+    })
+    expect(mapTokenUsage({ prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }, 'groq'))
+      .toEqual({ promptTokens: 5, completionTokens: 2, totalTokens: 7, billing: { cacheWriteInputTokens: 0, cacheWrite30mInputTokens: 0 } })
+  })
   test('marks missing required Responses cache reads as incomplete', () => {
     expect(mapTokenUsage({ input_tokens: 10, output_tokens: 5, total_tokens: 15 }, 'openai-responses'))
       .toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, billing: { incomplete: true } })
