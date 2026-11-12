@@ -42,8 +42,7 @@ describe('per-call inference usage collector', () => {
     ['noninteger count', { totalTokens: 1.5 }],
     ['nonfinite count', { totalTokens: Infinity }],
     ['NaN count', { totalTokens: NaN }],
-    ['negative cached count', { totalTokens: 12, cachedContentTokenCount: -1 }],
-    ['mismatched split and total', { promptTokens: 5, completionTokens: 7, totalTokens: 13 }]
+    ['negative cached count', { totalTokens: 12, cachedContentTokenCount: -1 }]
   ]
   test.each(invalid)('%s is incomplete and does not invent a charge', async (_name, snapshot) => {
     const { call, finish } = await fixture()
@@ -61,6 +60,18 @@ describe('per-call inference usage collector', () => {
     expect(finish.mock.calls[0]?.[0]).toMatchObject({ usageComplete: false, usage: { promptTokens: 5 } })
     expect(finish.mock.calls[0]?.[0].usage).not.toHaveProperty('completionTokens')
     expect(finish.mock.calls[0]?.[0].usage).not.toHaveProperty('totalTokens')
+  })
+
+  test('a mismatched split and total is reported as incomplete, never as final usage', async () => {
+    const { call, finish } = await fixture()
+    call.observeUsage({ promptTokens: 5 }, false)
+    call.observeUsage({ promptTokens: 5, completionTokens: 7, totalTokens: 13 }, true)
+    call.transportComplete()
+    await call.finish('completed')
+    expect(finish.mock.calls[0]?.[0]).toMatchObject({
+      dispatched: true, usageComplete: false,
+      usage: { promptTokens: 5, completionTokens: 7, totalTokens: 13, incomplete: true }
+    })
   })
 
   test('transport completion does not promote an early sample to provider-final usage', async () => {
