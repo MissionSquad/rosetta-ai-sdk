@@ -2,7 +2,7 @@ import { ProviderKey, RosettaMessage, RosettaTool, RosettaAudioData, GeneratePar
 import { ProviderOptions } from './config.types'
 import { z } from 'zod'
 
-export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type Verbosity = 'low' | 'medium' | 'high'
 
 export type RosettaResponseFormat =

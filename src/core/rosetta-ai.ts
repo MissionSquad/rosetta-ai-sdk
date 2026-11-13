@@ -51,6 +51,7 @@ import { mapTokenUsage, parseStructuredOutput } from './mapping/common.utils'
 
 import { prepareAudioUpload } from './utils'
 import { listModelsForProvider } from './listing/model.lister'
+import { mergeAnthropicBetas } from './mapping/anthropic.capabilities'
 import * as GroqAudioMapper from './mapping/groq.audio.mapper'
 import * as OpenAIResponsesMapper from './mapping/openai.responses.mapper'
 import {
@@ -552,9 +553,9 @@ export class RosettaAI {
           const is1MContext = params.model?.endsWith(':1m') ?? false
           const betasFromSuffix = is1MContext ? ['context-1m-2025-08-07'] : undefined
           const betasFromOptions = params.providerOptions?.anthropicBetas
-          const betas = betasFromOptions ?? betasFromSuffix
+          const betas = mergeAnthropicBetas(betasFromOptions ?? betasFromSuffix, model)
           
-          if (betas && betas.length > 0) {
+          if (betas.length > 0) {
             // Use beta API when betas are specified
             providerResponse = await (client as Anthropic).beta.messages.create({
               ...mappedParams,
@@ -887,9 +888,9 @@ export class RosettaAI {
           const is1MContext = params.model?.endsWith(':1m') ?? false
           const betasFromSuffix = is1MContext ? ['context-1m-2025-08-07'] : undefined
           const betasFromOptions = params.providerOptions?.anthropicBetas
-          const betas = betasFromOptions ?? betasFromSuffix
+          const betas = mergeAnthropicBetas(betasFromOptions ?? betasFromSuffix, model)
 
-          if (betas && betas.length > 0) {
+          if (betas.length > 0) {
             // Use beta API when betas are specified
             providerStream = await (client as Anthropic).beta.messages.create(
               {

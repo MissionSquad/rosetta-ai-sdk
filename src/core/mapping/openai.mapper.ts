@@ -40,7 +40,7 @@ import * as OpenAIEmbedMapper from './openai.embed.mapper'
 import * as OpenAIAudioMapper from './openai.audio.mapper'
 import { getGpt5Support } from './gpt5.support'
 import {
-  isGPT5Model,
+  isOpenAIResponsesChatModel,
   isThinkingModel,
   mapContentForOpenAIRole,
   mapFromOpenAIResponse,
@@ -196,7 +196,7 @@ export class OpenAIMapper implements IProviderMapper {
 
     // Decide token field according to rules:
     const isThinking = isThinkingModel(params.model!)
-    const isGPT5 = isGPT5Model(params.model!)
+    const isGPT5 = isOpenAIResponsesChatModel(params.model!)
     const hasEffectiveLimit = baseMappedParams.maxTokens !== undefined
     const hasFunctionTools = Array.isArray(tools) && tools.length > 0
 
@@ -227,6 +227,19 @@ export class OpenAIMapper implements IProviderMapper {
       }
 
       if (support) {
+        // Models that reject effort 'none' have no Chat Completions combination that accepts
+        // function tools (the API answers "use /v1/responses or set reasoning_effort to 'none'").
+        if (
+          hasFunctionTools &&
+          support.supportsFunctionToolsWithReasoning === false &&
+          !support.allowedReasoningEfforts.includes('none')
+        ) {
+          throw new UnsupportedFeatureError(
+            this.provider,
+            `function tools on Chat Completions for model '${params.model!}' (use the Responses API)`
+          )
+        }
+
         const requestedEffort = baseMappedParams.reasoningEffort
         let effectiveEffort: GenerateParams['reasoningEffort'] | undefined
 
@@ -248,7 +261,9 @@ export class OpenAIMapper implements IProviderMapper {
           support.supportsFunctionToolsWithReasoning === false
 
         if (effectiveEffort !== undefined && !shouldOmitReasoningForFunctionTools) {
-          basePayload.reasoning_effort = effectiveEffort
+          // Chat Completions tops out at 'xhigh' on every model ('max' is Responses-only, verified
+          // live on gpt-5.6 and gpt-6.x), so the highest neutral effort maps to the highest it has.
+          basePayload.reasoning_effort = effectiveEffort === 'max' ? 'xhigh' : effectiveEffort
         } else if (hasFunctionTools && support.functionToolsRequireExplicitNone) {
           // gpt-5.6 rejects tools even with reasoning_effort omitted; 'none' is the only
           // accepted combination on Chat Completions.

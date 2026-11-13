@@ -50,6 +50,12 @@ import { IProviderMapper } from './base.mapper'
 import { mapReportedModel, mapTokenUsage, mapBaseParams, mapBaseToolChoice } from './common.utils'
 import { normalizeSchemaForStrict, supportsStrictToolUse } from './anthropic.strict'
 import { resolveThinkingRequest } from './thinking-request'
+import {
+  anthropicRejectsForcedToolChoice,
+  anthropicRejectsSamplingParams,
+  anthropicRequiresAdaptiveThinking,
+  anthropicRunsThinkingHistoryCheck
+} from './anthropic.capabilities'
 
 // Type alias for the stream type from Anthropic SDK
 type AnthropicMessageStream = AsyncIterable<RawMessageStreamEvent>
@@ -72,34 +78,29 @@ type ToolUseAccumulator = {
   caller?: RosettaToolCaller
 }
 
+/**
+ * Adaptive thinking config plus the preserved-thinking binding control. SDK 0.100.1 does not
+ * type `block_binding` yet (beta `thinking-binding-controls-2026-08-01`), so it is declared here
+ * as a structural extension of the SDK's adaptive config.
+ */
+type AnthropicAdaptiveThinkingWithBinding = Anthropic.Messages.ThinkingConfigAdaptive & {
+  block_binding: { prefix_mismatch_behavior: 'error' | 'drop_block' }
+}
+
+/** Logs thinking blocks the API dropped or flagged under the preserved-thinking history check. */
+function warnOnAnthropicInputTransformations(response: object, model: string): void {
+  if (!('input_transformations' in response) || !Array.isArray(response.input_transformations)) return
+  const entries = response.input_transformations
+    .filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
+    .map(entry => `${String(entry.type)}:${String(entry.reason)}@${String(entry.path)}`)
+  if (entries.length > 0) {
+    console.warn(`Anthropic reported thinking-block input transformations for ${model}: ${entries.join(', ')}`)
+  }
+}
+
 export class AnthropicMapper implements IProviderMapper {
   readonly supportsInferenceLifecycle = true
   readonly provider = Provider.Anthropic
-  // These models reject sampling parameters (temperature, top_p) with a 400.
-  private static readonly modelsWithoutSamplingParams = new Set([
-    'claude-opus-4-7',
-    'claude-opus-4-8',
-    'claude-opus-5',
-    'claude-sonnet-5',
-    'claude-fable-5',
-    'claude-mythos-5'
-  ])
-
-  // These models reject thinking budgets ({type: 'enabled', budget_tokens})
-  // with a 400; thinking is requested via {type: 'adaptive'} instead.
-  private static readonly modelsWithAdaptiveThinking = new Set([
-    'claude-opus-4-7',
-    'claude-opus-4-8',
-    'claude-opus-5',
-    'claude-sonnet-5',
-    'claude-fable-5',
-    'claude-mythos-5'
-  ])
-
-  private shouldStripSamplingParams(model: string): boolean {
-    return AnthropicMapper.modelsWithoutSamplingParams.has(model)
-  }
-
   private extractToolCaller(caller?: {
     type: RosettaToolCaller['type']
     tool_id?: string
@@ -610,6 +611,8 @@ export class AnthropicMapper implements IProviderMapper {
           ]
         : undefined
 
+    const normalizedModel = params.model!.replace(':1m', '')
+
     const baseToolChoice = mapBaseToolChoice(params.toolChoice)
     let anthropicToolChoice: Anthropic.Messages.ToolChoice | undefined = undefined
     if (baseToolChoice) {
@@ -627,7 +630,18 @@ export class AnthropicMapper implements IProviderMapper {
       }
     }
 
-    const normalizedModel = params.model!.replace(':1m', '')
+    // These models answer forced tool use (`any` / `tool`) with a 400; fall back to `auto` so a
+    // provider-neutral `required` or named-function choice degrades instead of failing the request.
+    if (
+      anthropicToolChoice &&
+      (anthropicToolChoice.type === 'any' || anthropicToolChoice.type === 'tool') &&
+      anthropicRejectsForcedToolChoice(normalizedModel)
+    ) {
+      console.warn(
+        `Anthropic model ${normalizedModel} does not support forced tool choice; using tool_choice 'auto' instead.`
+      )
+      anthropicToolChoice = { type: 'auto' }
+    }
 
     const { thinkingRequested, extraParams: sanitizedExtraParams } = resolveThinkingRequest(params, ['thinking'])
 
@@ -636,9 +650,24 @@ export class AnthropicMapper implements IProviderMapper {
       // display: 'summarized' opts back into visible thinking text — on Opus 4.7+ and the
       // Claude 5 family the API defaults to 'omitted', which streams thinking blocks whose
       // text is empty, so disclosed reasoning would never reach the caller.
-      thinkingParam = AnthropicMapper.modelsWithAdaptiveThinking.has(normalizedModel)
+      thinkingParam = anthropicRequiresAdaptiveThinking(normalizedModel)
         ? { type: 'adaptive', display: 'summarized' }
         : { type: 'enabled', budget_tokens: 1024 }
+    }
+
+    // Preserved thinking: these models bind each thinking block to the system prompt, tool set
+    // and messages that preceded it, and reject a replayed block (400) once any of those changed
+    // (tool list rediscovered mid-turn, tools dropped for a final answer, an earlier message
+    // rewritten). `drop_block` makes the API drop the stale block and continue instead. Thinking
+    // is always on for these models, so an explicit adaptive config does not enable anything;
+    // omitting `display` keeps the API default when thinking was not requested.
+    if (anthropicRunsThinkingHistoryCheck(normalizedModel)) {
+      const boundThinking: AnthropicAdaptiveThinkingWithBinding = {
+        type: 'adaptive',
+        ...(thinkingRequested ? { display: 'summarized' as const } : {}),
+        block_binding: { prefix_mismatch_behavior: 'drop_block' }
+      }
+      thinkingParam = boundThinking
     }
 
     let systemParam: string | AnthropicTextBlockParam[] | undefined
@@ -682,7 +711,7 @@ export class AnthropicMapper implements IProviderMapper {
       ...(anthropicContainerId ? { container: anthropicContainerId } : {})
     }
 
-    if (this.shouldStripSamplingParams(normalizedModel)) {
+    if (anthropicRejectsSamplingParams(normalizedModel)) {
       delete basePayload.temperature
       delete basePayload.top_p
     }
@@ -759,6 +788,7 @@ export class AnthropicMapper implements IProviderMapper {
   ): GenerateResult {
     observer?.observeRequestId(response.id)
     observer?.observeUsage(mapTokenUsage(response.usage, 'anthropic'), true)
+    warnOnAnthropicInputTransformations(response, model)
     let combinedTextContent: string | null = null
     const thinkingParts: string[] = []
     const codeExecutionResults: CodeExecutionResultInfo[] = []
@@ -878,6 +908,7 @@ export class AnthropicMapper implements IProviderMapper {
             const reportedModel = mapReportedModel(event.message.model)
             const refusal = event.message.stop_details?.explanation
             model = safeGet<string>(event.message, 'model') ?? ''
+            warnOnAnthropicInputTransformations(event.message, model)
             yield { type: 'message_start', data: { provider: this.provider, model: model } }
             aggregatedResult = {
               content: '',

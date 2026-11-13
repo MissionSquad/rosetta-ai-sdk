@@ -63,8 +63,23 @@ export function isThinkingModel(modelName: string): boolean {
   return false
 }
 
+/**
+ * True for the OpenAI reasoning chat families that Rosetta routes through the Responses API and
+ * models in gpt5.support.ts: gpt-5.x through gpt-9.x. Chat Completions rejects function tools
+ * combined with reasoning on these families (verified live on gpt-5.6 and gpt-6.x), so the
+ * family check must not be tied to one major version. A single-digit major is required so
+ * Azure-style ids such as `gpt-35-turbo` do not match.
+ *
+ * @param modelName The provider-native model id.
+ * @returns True when the model belongs to a Responses-routed reasoning family.
+ */
+export function isOpenAIResponsesChatModel(modelName: string): boolean {
+  return /gpt-[5-9](?!\d)/.test(modelName)
+}
+
+/** @deprecated Use {@link isOpenAIResponsesChatModel}; the gate now covers gpt-6 and later. */
 export function isGPT5Model(modelName: string): boolean {
-  return modelName.includes('gpt-5')
+  return isOpenAIResponsesChatModel(modelName)
 }
 
 export function mapContentForOpenAIRole(
