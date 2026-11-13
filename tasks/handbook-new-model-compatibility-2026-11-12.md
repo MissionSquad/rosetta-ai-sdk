@@ -1,6 +1,6 @@
 # Handbook: new Claude and GPT-6 model compatibility
 
-Date: 2026-11-12. Owner: Jayson. Status: Phase R implemented and verified locally (uncommitted, not released). Phases C, A, W not started.
+Date: 2026-11-12. Owner: Jayson. Status: rosetta 1.24.0 and core 1.46.0 are published; API 1.92.0 is merged to `main`; the web PR (missionsquad-web#218) is open against `test`. Section 6 platform checks are not done.
 
 ## 1. Goal
 
@@ -268,54 +268,54 @@ Branch from `main`. The working tree currently has unrelated uncommitted changes
   `stream`. Print pass/fail per model per step. Follow `examples/tool-use.ts` for the tool
   definition shape.
 
-- [ ] **R11. Release.** Commit `examples/probe-new-models.ts` and this handbook. Bump
+- [x] **R11. Release.** Commit `examples/probe-new-models.ts` and this handbook. Bump
   `package.json` to `1.24.0`. `yarn build`, `yarn lint`, `yarn test` must all pass. Publishing
   goes through `.github/workflows/publish-npm.yaml`; Jayson triggers it.
 
 ### Phase C: missionsquad-core (after rosetta 1.24.0 is published)
 
-- [ ] **C1. Add-model test.** `src/index.ts:1480-1488`: remove the `temperature: 0.1` line.
+- [x] **C1. Add-model test.** `src/index.ts:1480-1488`: remove the `temperature: 0.1` line.
   Replace `maxTokens: 10` with
   `providerKey === Provider.OpenAI || providerKey === Provider.Anthropic ? 2000 : 10`.
   Reason: Fable 5.2 returns only thinking at 10 tokens, and `gpt-5` / `gpt-5-mini` return empty
   text at 16; 2000 is the value verified to return text on both. Other providers keep 10 so local
   and custom endpoints see no change. Verify `Provider` is already imported in this file.
-- [ ] **C2. Capability gate.** `src/utils/singleResponseCapabilities.ts:56`: replace
+- [x] **C2. Capability gate.** `src/utils/singleResponseCapabilities.ts:56`: replace
   `model.includes('gpt-5')` with `isOpenAIResponsesChatModel(model)` imported from
   `@missionsquad/rosetta-ai`.
-- [ ] **C3. Fable/Mythos 5.2 structured output.** Same file, line 51: the `nativeSchema` regex
+- [x] **C3. Fable/Mythos 5.2 structured output.** Same file, line 51: the `nativeSchema` regex
   accepts `(?:fable|mythos)-5(?:-1)?`. Before widening it to `(?:-[12])?`, add an
   `output_config.format` json_schema probe to `examples/probe-new-models.ts` and confirm
   `claude-fable-5-2` accepts it. Widen only if it does.
-- [ ] **C4. No change needed (confirm only):** `toolFailureFinalizationParams`, the per-iteration
+- [x] **C4. No change needed (confirm only):** `toolFailureFinalizationParams`, the per-iteration
   `prepareRosettaTools`, the RAG/scrape rewrite, `src/utils/ptc.ts`, and the `?? 0.1` default (D3).
   R6/R7 make the first three succeed on checking models.
-- [ ] **C5. Release.** `package.json`: `@missionsquad/rosetta-ai` to `1.24.0`, version to
+- [x] **C5. Release.** `package.json`: `@missionsquad/rosetta-ai` to `1.24.0`, version to
   `1.46.0`. `yarn build` and `yarn lint` must pass (core has no unit test script). Publish via
   `.github/workflows/publish.yaml`; Jayson triggers it.
 
 ### Phase A: missionsquad-api (after core 1.46.0 is published)
 
-- [ ] **A1. Pins.** `package.json`: `@missionsquad/missionsquad-core` `1.45.4` -> `1.46.0`,
+- [x] **A1. Pins.** `package.json`: `@missionsquad/missionsquad-core` `1.45.4` -> `1.46.0`,
   `@missionsquad/rosetta-ai` `1.22.0` -> `1.24.0`. The API is two rosetta versions behind; read
   the 1.23.0 commit (`8fe46d1`) for anything the API consumes.
-- [ ] **A2. Effort enum.** Add `'max'` in `src/types/evals.ts:13` and
+- [x] **A2. Effort enum.** Add `'max'` in `src/types/evals.ts:13` and
   `src/utils/evalDefinition.ts:18`.
-- [ ] **A3. Pricing.** `src/config/modelPricingCatalog.ts`, next to the `claude-fable-5-1` row
+- [x] **A3. Pricing.** `src/config/modelPricingCatalog.ts`, next to the `claude-fable-5-1` row
   (line 193): add `['claude-fable-5-2', 'Claude Fable 5.2', [8, 0.2, 40]]` and
   `['claude-mythos-5-2', 'Claude Mythos 5.2', [8, 0.2, 40]]`. GPT-6 and the other new Claude
   models are already present.
-- [ ] **A4.** `yarn build` and `yarn test` pass. The working tree has unrelated uncommitted
+- [x] **A4.** `yarn build` and `yarn test` pass. The working tree has unrelated uncommitted
   changes (`package.json`, `tasks/*`); do not sweep them into the commit.
 
 ### Phase W: missionsquad-web (branch `claude/claude-chatgpt-model-support-23778b`)
 
-- [ ] **W1. Sampling mirror.** `src/utils/models.ts`: delete `MODELS_WITHOUT_SAMPLING_PARAMS` and
+- [x] **W1. Sampling mirror.** `src/utils/models.ts`: delete `MODELS_WITHOUT_SAMPLING_PARAMS` and
   make `supportsSamplingParams` apply the R5 `anthropicRejectsSamplingParams` rule (reuse the
   family/version parsing already in `defaultsToPTC`; extract it into one helper). Update the
   KEEP IN SYNC comment to point at `anthropic.capabilities.ts`. Extend `src/utils/models.spec.ts`
   with the table 3.1 rows.
-- [ ] **W2. Effort `max`.** Add `'max'` in `src/types/models.ts:3`, `src/types/evals.ts:12`,
+- [x] **W2. Effort `max`.** Add `'max'` in `src/types/models.ts:3`, `src/types/evals.ts:12`,
   `src/utils/evalEditor.ts:16`, the three value checks in
   `src/components/evals/EvalParameterEditor.vue` (lines 50, 67, 87) and the items list in
   `src/components/sub/ModelOptions.vue:142`.
@@ -373,3 +373,8 @@ All of the following, after every phase is deployed to a local stack (API on 808
 | 2026-11-12 | R9: mapper-level cases live in one new file, `tests/unit/core/mapping/new-model-compatibility.spec.ts`, instead of being spread across the existing specs |
 | 2026-11-12 | `yarn lint` fails on `main` too (ESLint crawls `examples/node_modules`, and the old parser cannot parse several existing files). Changed files have the same error count as `main`; new files lint clean |
 | 2026-11-12 | The matrix example runs with `examples/node_modules/.bin/ts-node`; the repo root has no `ts-node`, so the `example:*` package scripts only work with a global install |
+| 2026-11-12 | Released: rosetta-ai-sdk#82 merged (1.24.0 published), missionsquad-core#205 merged (1.46.0 published), missionsquad-api#251 merged (1.92.0). missionsquad-web#218 open against `test` |
+| 2026-11-12 | C3: `claude-fable-5-2` accepts `output_config.format` json_schema (probed live), so core's native-schema regex was widened |
+| 2026-11-12 | Correction: core does have unit tests (`yarn test:all`, 750 tests). The add-model test was updated for the new request shape after it failed in CI |
+| 2026-11-12 | API: the branch was first cut from a stale local `main` and conflicted on `package.json` / `yarn.lock`; resolved by merging `origin/main` (1.91.0). The API version was bumped to 1.92.0 |
+| 2026-11-12 | W3 is still open: web `yarn test` passes; `yarn lint` has 3 errors in files this work does not touch; `yarn build` and a browser check have not been run |
