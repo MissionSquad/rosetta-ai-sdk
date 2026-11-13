@@ -204,6 +204,26 @@ async function probeAnthropicModel(client: Anthropic, model: string): Promise<Pr
     })
   )
 
+  record(
+    'structured output (output_config.format json_schema)',
+    await callAnthropic(client, {
+      model,
+      max_tokens: 1024,
+      output_config: {
+        format: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            properties: { answer: { type: 'string' } },
+            required: ['answer'],
+            additionalProperties: false
+          }
+        }
+      },
+      messages: [{ role: 'user', content: 'Reply with the word OK in the answer field.' }]
+    })
+  )
+
   // --- Multi-turn tool use: produce a tool_use turn, then replay it in different shapes. ---
   const firstUser = { role: 'user', content: TOOL_USER_PROMPT }
   const system = 'You are a concise assistant.'
