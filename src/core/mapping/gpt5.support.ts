@@ -17,7 +17,8 @@ export interface Gpt5Support {
   functionToolsRequireExplicitNone?: boolean
 }
 
-// Chat Completions-supported GPT-5 models verified for this implementation.
+// Chat Completions-supported GPT-5 and GPT-6 models verified for this implementation.
+// GPT-6 and gpt-5.6 rows were verified live on 2026-11-12 with examples/probe-new-models.ts.
 const GPT5_CHAT_COMPLETIONS_SUPPORT: Record<string, Gpt5Support> = {
   'gpt-5': {
     chatCompletionsSupported: true,
@@ -70,12 +71,59 @@ const GPT5_CHAT_COMPLETIONS_SUPPORT: Record<string, Gpt5Support> = {
   // Covers gpt-5.6-terra / gpt-5.6-sol (and future gpt-5.6-* variants) via prefix matching.
   'gpt-5.6': {
     chatCompletionsSupported: true,
-    allowedReasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+    allowedReasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
     defaultReasoningEffort: 'none',
     supportsVerbosity: true,
-    supportsSampling: 'never',
+    supportsSampling: 'only_with_reasoning_none',
     supportsFunctionToolsWithReasoning: false,
     functionToolsRequireExplicitNone: true
+  },
+  // GPT-6: every model defaults to medium effort and rejects 'minimal'. Sol, Luna and 6.1 Terra
+  // accept 'none' (and sampling parameters only alongside it).
+  'gpt-6-sol': {
+    chatCompletionsSupported: true,
+    allowedReasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'medium',
+    supportsVerbosity: true,
+    supportsSampling: 'only_with_reasoning_none',
+    supportsFunctionToolsWithReasoning: false,
+    functionToolsRequireExplicitNone: true
+  },
+  'gpt-6-luna': {
+    chatCompletionsSupported: true,
+    allowedReasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'medium',
+    supportsVerbosity: true,
+    supportsSampling: 'only_with_reasoning_none',
+    supportsFunctionToolsWithReasoning: false,
+    functionToolsRequireExplicitNone: true
+  },
+  'gpt-6.1-terra': {
+    chatCompletionsSupported: true,
+    allowedReasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'medium',
+    supportsVerbosity: true,
+    supportsSampling: 'only_with_reasoning_none',
+    supportsFunctionToolsWithReasoning: false,
+    functionToolsRequireExplicitNone: true
+  },
+  // Astra and 6.1 Sol reject effort 'none', so they never accept sampling parameters and cannot
+  // attach function tools on Chat Completions at all (the Responses API is the only route).
+  'gpt-6-astra': {
+    chatCompletionsSupported: true,
+    allowedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'medium',
+    supportsVerbosity: true,
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: false
+  },
+  'gpt-6.1-sol': {
+    chatCompletionsSupported: true,
+    allowedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'medium',
+    supportsVerbosity: true,
+    supportsSampling: 'never',
+    supportsFunctionToolsWithReasoning: false
   },
   'gpt-5-chat-latest': {
     chatCompletionsSupported: true,
@@ -182,7 +230,7 @@ export const GPT5_SUPPORT_TABLE: Record<string, Gpt5Support> = {
 
 const GPT5_SUPPORT_KEYS = Object.keys(GPT5_SUPPORT_TABLE).sort((a, b) => b.length - a.length)
 
-/** Returns a copy of Rosetta's known capabilities for an OpenAI GPT-5 model. */
+/** Returns a copy of Rosetta's known capabilities for an OpenAI GPT-5 or GPT-6 model. */
 export function getGpt5Support(model: string): Gpt5Support | undefined {
   const key = Object.prototype.hasOwnProperty.call(GPT5_SUPPORT_TABLE, model)
     ? model

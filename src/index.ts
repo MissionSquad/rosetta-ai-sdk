@@ -12,4 +12,5 @@ export * from './computer-use/create-computer-action-tool'
 export { ElevenLabsMapper } from './core/mapping/elevenlabs.mapper'
 import { Gpt5Support as OpenAIGpt5Support } from './core/mapping/gpt5.support'
 export { getGpt5Support } from './core/mapping/gpt5.support'
+export { isOpenAIResponsesChatModel } from './core/mapping/openai.common'
 export type Gpt5Support = OpenAIGpt5Support

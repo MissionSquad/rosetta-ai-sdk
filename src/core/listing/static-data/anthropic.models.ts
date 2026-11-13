@@ -10,6 +10,122 @@ const rawAnthropicData = {
     // LATEST MODELS
     // =========================================================================
 
+    // --- Claude Fable 5.2 ---
+    {
+      id: 'claude-fable-5-2',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'The most capable widely released Claude model',
+        strengths: 'Most demanding reasoning and long-horizon agentic work (Claude 5.2 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Slower',
+        cost_input_mtok: 8.0,
+        cost_output_mtok: 40.0,
+        extended_max_completion_tokens: null
+      }
+    },
+
+    // --- Claude Fable 5.1 ---
+    {
+      id: 'claude-fable-5-1',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'Long-running agentic coding and multistep research',
+        strengths: 'Hardest long-running agentic and research tasks (Claude 5.1 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Slower',
+        cost_input_mtok: 10.0,
+        cost_output_mtok: 50.0,
+        extended_max_completion_tokens: null
+      }
+    },
+
+    // --- Claude Opus 5.5 ---
+    {
+      id: 'claude-opus-5-5',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'The current Opus for complex agentic coding and enterprise work',
+        strengths: 'Deep reasoning and agentic coding at a lower price than Opus 5 (Claude 5.5 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Moderate',
+        cost_input_mtok: 4.0,
+        cost_output_mtok: 20.0,
+        extended_max_completion_tokens: null
+      }
+    },
+
+    // --- Claude Sonnet 5.5 ---
+    {
+      id: 'claude-sonnet-5-5',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'The current Sonnet: speed and capability for everyday work',
+        strengths: 'Everyday coding, agent, and enterprise work with fast response times (Claude 5.5 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Fast',
+        cost_input_mtok: 2.0,
+        cost_output_mtok: 10.0,
+        extended_max_completion_tokens: null
+      }
+    },
+
+    // --- Claude Haiku 5.5 ---
+    // Prices apply to prompts of up to 100K tokens; longer prompts are $0.50 / $2.50 per MTok.
+    {
+      id: 'claude-haiku-5-5',
+      object: 'model',
+      owned_by: 'anthropic',
+      created: null,
+      active: true,
+      context_window: 1000000,
+      public_apps: null,
+      max_completion_tokens: 128000,
+      properties: {
+        description: 'The current Haiku for high-volume, latency-sensitive work',
+        strengths: 'Classification, routing, extraction, and sub-agent tasks (Claude 5.5 series)',
+        multilingual: true,
+        vision: true,
+        extended_thinking: true,
+        comparative_latency: 'Fastest',
+        cost_input_mtok: 0.1,
+        cost_output_mtok: 0.5,
+        extended_max_completion_tokens: null
+      }
+    },
+
     // --- Claude Fable 5 ---
     {
       id: 'claude-fable-5',

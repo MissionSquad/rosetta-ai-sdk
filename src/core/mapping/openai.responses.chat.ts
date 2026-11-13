@@ -28,7 +28,7 @@ import {
 import { MappingError, ProviderAPIError, ToolArgumentValidationError } from '../../errors'
 import { mapBaseParams, mapBaseToolChoice, mapReportedModel, mapTokenUsage } from './common.utils'
 import { getGpt5Support } from './gpt5.support'
-import { isGPT5Model, wrapOpenAIError } from './openai.common'
+import { isOpenAIResponsesChatModel, wrapOpenAIError } from './openai.common'
 import { resolveThinkingRequest } from './thinking-request'
 
 /**
@@ -60,7 +60,7 @@ interface OpenAIResponsesToolCallMetadata {
 /** Decides whether an OpenAI request should use the Responses API instead of Chat Completions. */
 export function shouldUseOpenAIResponsesApi(params: GenerateParams): boolean {
   if (params.providerOptions?.openaiPreferChatCompletions === true) return false
-  return isGPT5Model(params.model ?? '')
+  return isOpenAIResponsesChatModel(params.model ?? '')
 }
 
 function contentToText(content: RosettaMessage['content']): string {
@@ -204,6 +204,16 @@ function mapToolChoiceToResponses(
 const RESPONSES_MIN_OUTPUT_TOKENS = 16
 
 /**
+ * Bridges Rosetta's effort union to the SDK's. openai@6.27.0 types `reasoning.effort` without
+ * 'max', but the Responses API accepts it on gpt-5.6 and gpt-6.x (verified live 2026-11-12 with
+ * examples/probe-new-models.ts). The assertion is confined to this function and can be removed
+ * once the SDK's union includes 'max'; every other value is already a member of both unions.
+ */
+function toOpenAIReasoningEffort(effort: NonNullable<GenerateParams['reasoningEffort']>): Reasoning['effort'] {
+  return effort as Reasoning['effort']
+}
+
+/**
  * Resolves the effective `reasoning` request parameter.
  *
  * A neutral thinking request needs reasoning to actually run (effort above 'none') and asks
@@ -238,7 +248,7 @@ function resolveResponsesReasoning(
   if (effort === undefined && !thinkingRequested) return undefined
 
   return {
-    ...(effort !== undefined ? { effort } : {}),
+    ...(effort !== undefined ? { effort: toOpenAIReasoningEffort(effort) } : {}),
     ...(thinkingRequested ? { summary: 'auto' as const } : {})
   }
 }

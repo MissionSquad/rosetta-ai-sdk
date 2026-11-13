@@ -44,7 +44,7 @@ import * as GoogleEmbedMapper from './google.embed.mapper'
 /**
  * Gemini's thinking control for each provider-neutral reasoning effort. Gemini takes a `thinkingLevel`;
  * no level turns thinking off, so `none` maps to `thinkingBudget: 0`, which Google documents as
- * disabled, and `xhigh` maps to the highest level Gemini has. The model validates the value: a level
+ * disabled, and `xhigh` / `max` map to the highest level Gemini has. The model validates the value: a level
  * it does not support (MINIMAL on some models) is its error to report.
  */
 const GOOGLE_THINKING_BY_EFFORT: Readonly<Record<ReasoningEffort, Pick<ThinkingConfig, 'thinkingLevel' | 'thinkingBudget'>>> = {
@@ -53,7 +53,8 @@ const GOOGLE_THINKING_BY_EFFORT: Readonly<Record<ReasoningEffort, Pick<ThinkingC
   low: { thinkingLevel: ThinkingLevel.LOW },
   medium: { thinkingLevel: ThinkingLevel.MEDIUM },
   high: { thinkingLevel: ThinkingLevel.HIGH },
-  xhigh: { thinkingLevel: ThinkingLevel.HIGH }
+  xhigh: { thinkingLevel: ThinkingLevel.HIGH },
+  max: { thinkingLevel: ThinkingLevel.HIGH }
 }
 
 function mapPromptBlockFinishReason(reason: string): string {
